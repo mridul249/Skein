@@ -1,0 +1,58 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - gosec
+    - bodyclose
+    - contextcheck
+    - nilerr
+    - unused
+
+  settings:
+    errcheck:
+      # check-blank stays off: writes to an http.ResponseWriter after the
+      # status is committed have no recovery path, and `_, _ =` is the
+      # honest way to say so. check-type-assertions stays off because the
+      # comma-ok form is already the safe form.
+      check-type-assertions: false
+      check-blank: false
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+    gosec:
+      excludes:
+        # G115 (integer conversion overflow) fires on every int64<->int
+        # conversion. Sizes are validated against explicit bounds before
+        # conversion at each site that matters.
+        - G115
+    govet:
+      enable:
+        - shadow
+
+  exclusions:
+    generated: lax
+    rules:
+      # Generated sqlc output is not ours to lint.
+      - path: internal/db/gen/
+        linters: [errcheck, gosec, staticcheck, unused, govet]
+      # Tests may use weak randomness and read fixture paths.
+      - path: _test\.go$
+        linters: [gosec, bodyclose, contextcheck]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax
