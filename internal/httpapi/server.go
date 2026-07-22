@@ -1,6 +1,6 @@
 // Package httpapi wires the router, the middleware chain, and the handlers.
-// Handlers here are thin: decode, call a service, encode. Business logic lives
-// in the domain packages and knows nothing about HTTP.
+// Handlers are thin: decode, call a service, encode. Business logic lives in
+// the domain packages and knows nothing about HTTP.
 package httpapi
 
 import (
@@ -11,22 +11,37 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/mridul60214/skein/internal/auth"
 	"github.com/mridul60214/skein/internal/config"
+	"github.com/mridul60214/skein/internal/httpapi/handlers"
+	"github.com/mridul60214/skein/internal/httpapi/httpx"
 	"github.com/mridul60214/skein/internal/httpapi/middleware"
+	"github.com/mridul60214/skein/internal/web"
+)
+
+// jsonBodyLimit caps every JSON request body. Rules.md §2.13.
+const jsonBodyLimit = 1 << 20 // 1 MiB
+
+// Rate budgets, per minute per key. Rules.md §2.13.
+const (
+	authRatePerMin   = 5
+	apiRatePerMin    = 300
+	publicRatePerMin = 30
 )
 
 // Health reports process and dependency liveness.
 type Health interface {
-	// Ping returns nil when the database is reachable and migrated.
+	// Ping returns nil when the database is reachable.
 	Ping(ctx context.Context) error
 }
 
-// Deps is everything the HTTP layer needs. Wiring happens in main.go;
-// nothing here reaches for a package-level singleton.
+// Deps is everything the HTTP layer needs. Wiring happens in main.go; nothing
+// here reaches for a package-level singleton.
 type Deps struct {
 	Config *config.Config
 	Logger *slog.Logger
 	Health Health
+	Auth   *auth.Service
 }
 
 // Server owns the router and the middleware chain.
@@ -36,9 +51,9 @@ type Server struct {
 	trusted []netip.Prefix
 }
 
-// New builds the server. It returns an error when configuration that the
-// router depends on cannot be parsed, so a bad trusted-proxy list fails at
-// boot rather than on the first request.
+// New builds the server. It returns an error when configuration the router
+// depends on cannot be parsed, so a bad trusted-proxy list fails at boot
+// rather than on the first request.
 func New(d Deps) (*Server, error) {
 	trusted, err := d.Config.TrustedProxyPrefixes()
 	if err != nil {
@@ -67,15 +82,22 @@ func (s *Server) routes() {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
 
+	r.Route("/api", func(api chi.Router) {
+		api.Use(middleware.MaxJSONBody(jsonBodyLimit))
+		s.mountAuth(api)
+	})
+
+	s.mountUI(r)
+
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		WriteJSON(w, r, http.StatusNotFound, ErrorBody{
+		httpx.WriteJSON(w, r, http.StatusNotFound, httpx.ErrorBody{
 			Error:     "not_found",
 			Message:   "Not found.",
 			RequestID: middleware.RequestIDFrom(r.Context()),
 		})
 	})
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		WriteJSON(w, r, http.StatusMethodNotAllowed, ErrorBody{
+		httpx.WriteJSON(w, r, http.StatusMethodNotAllowed, httpx.ErrorBody{
 			Error:     "method_not_allowed",
 			Message:   "That method is not allowed here.",
 			RequestID: middleware.RequestIDFrom(r.Context()),
@@ -83,26 +105,74 @@ func (s *Server) routes() {
 	})
 }
 
+func (s *Server) mountAuth(api chi.Router) {
+	if s.deps.Auth == nil {
+		return
+	}
+	// Secure cookies require https. Development over plain http would have
+	// the browser drop the refresh cookie without saying why.
+	secureCookies := s.deps.Config.IsProduction() ||
+		len(s.deps.Config.PublicURL) >= 5 && s.deps.Config.PublicURL[:5] == "https"
+
+	h := handlers.NewAuth(s.deps.Auth, secureCookies)
+	authLimiter := middleware.NewLimiter(authRatePerMin)
+
+	api.Route("/auth", func(a chi.Router) {
+		// Credential endpoints share one budget per client so an
+		// attacker cannot spread guesses across register and login.
+		a.Group(func(pub chi.Router) {
+			pub.Use(middleware.RateLimit(authLimiter))
+			pub.Post("/register", h.Register)
+			pub.Post("/login", h.Login)
+			pub.Post("/refresh", h.Refresh)
+		})
+
+		a.Post("/logout", h.Logout)
+
+		a.Group(func(priv chi.Router) {
+			priv.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
+			priv.Use(middleware.RateLimit(middleware.NewLimiter(apiRatePerMin)))
+			priv.Get("/me", h.Me)
+		})
+	})
+}
+
+// mountUI serves the embedded frontend. A binary built without the frontend
+// bundle still serves the API; the UI routes are simply absent and the reason
+// is logged once at boot rather than per request.
+func (s *Server) mountUI(r chi.Router) {
+	ui, err := web.Handler()
+	if err != nil {
+		s.deps.Logger.Warn("frontend bundle not embedded; serving API only",
+			slog.String("reason", err.Error()))
+		return
+	}
+	r.Group(func(g chi.Router) {
+		g.Use(middleware.AppCSP)
+		g.Handle("/*", ui)
+	})
+}
+
 // handleHealthz answers process liveness only. It touches no dependency, so a
 // database outage does not cause an orchestrator to restart a healthy process.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	WriteJSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
+	httpx.WriteJSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleReadyz answers readiness: the database is reachable and migrated.
+// handleReadyz answers readiness: the database is reachable.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Health == nil {
-		WriteJSON(w, r, http.StatusOK, map[string]string{"status": "ready"})
+		httpx.WriteJSON(w, r, http.StatusOK, map[string]string{"status": "ready"})
 		return
 	}
 	if err := s.deps.Health.Ping(r.Context()); err != nil {
 		middleware.LoggerFrom(r.Context()).WarnContext(r.Context(), "not ready",
 			slog.String("error", err.Error()))
-		WriteJSON(w, r, http.StatusServiceUnavailable, map[string]string{
+		httpx.WriteJSON(w, r, http.StatusServiceUnavailable, map[string]string{
 			"status": "unavailable",
 			"reason": "database",
 		})
 		return
 	}
-	WriteJSON(w, r, http.StatusOK, map[string]string{"status": "ready"})
+	httpx.WriteJSON(w, r, http.StatusOK, map[string]string{"status": "ready"})
 }

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mridul60214/skein/internal/auth"
 	"github.com/mridul60214/skein/internal/config"
 	"github.com/mridul60214/skein/internal/db"
 	"github.com/mridul60214/skein/internal/httpapi"
@@ -63,10 +64,18 @@ func run() error {
 	}
 	defer pool.Close()
 
+	authSvc := auth.NewService(
+		auth.NewPGStore(pool),
+		auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTokenTTL),
+		cfg.RefreshTokenTTL,
+		lg.With(slog.String("component", "auth")),
+	)
+
 	srv, err := httpapi.New(httpapi.Deps{
 		Config: cfg,
 		Logger: lg,
 		Health: pool,
+		Auth:   authSvc,
 	})
 	if err != nil {
 		return fmt.Errorf("build server: %w", err)
