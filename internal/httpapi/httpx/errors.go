@@ -1,4 +1,6 @@
-package httpapi
+// Package httpx renders API responses. It sits below the router so handlers
+// can write typed errors without importing the package that mounts them.
+package httpx
 
 import (
 	"encoding/json"
@@ -9,6 +11,9 @@ import (
 	"github.com/mridul60214/skein/internal/httpapi/middleware"
 	"github.com/mridul60214/skein/internal/skerr"
 )
+
+// Package httpx renders API responses. It sits below the router so that
+// handlers can write errors without importing the package that mounts them.
 
 // ErrorBody is the only error shape the API ever returns.
 type ErrorBody struct {
