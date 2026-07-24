@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/mridul60214/skein/internal/accounts"
 	"github.com/mridul60214/skein/internal/auth"
 	"github.com/mridul60214/skein/internal/config"
 	"github.com/mridul60214/skein/internal/httpapi/handlers"
@@ -38,10 +39,11 @@ type Health interface {
 // Deps is everything the HTTP layer needs. Wiring happens in main.go; nothing
 // here reaches for a package-level singleton.
 type Deps struct {
-	Config *config.Config
-	Logger *slog.Logger
-	Health Health
-	Auth   *auth.Service
+	Config   *config.Config
+	Logger   *slog.Logger
+	Health   Health
+	Auth     *auth.Service
+	Accounts *accounts.Service
 }
 
 // Server owns the router and the middleware chain.
@@ -82,9 +84,16 @@ func (s *Server) routes() {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
 
+	// The OAuth callback is mounted outside the JSON-body group and outside
+	// the Auth middleware: it is a browser redirect from Google, so it can
+	// carry neither a bearer token nor a JSON body. Its identity comes from
+	// the single-use state row instead.
+	s.mountOAuthCallback(r)
+
 	r.Route("/api", func(api chi.Router) {
 		api.Use(middleware.MaxJSONBody(jsonBodyLimit))
 		s.mountAuth(api)
+		s.mountAccounts(api)
 	})
 
 	s.mountUI(r)
@@ -134,6 +143,37 @@ func (s *Server) mountAuth(api chi.Router) {
 			priv.Use(middleware.RateLimit(middleware.NewLimiter(apiRatePerMin)))
 			priv.Get("/me", h.Me)
 		})
+	})
+}
+
+func (s *Server) mountAccounts(api chi.Router) {
+	if s.deps.Accounts == nil || s.deps.Auth == nil {
+		return
+	}
+	h := handlers.NewAccounts(s.deps.Accounts, s.deps.Config.PublicURL)
+
+	api.Group(func(g chi.Router) {
+		g.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
+		g.Use(middleware.RateLimit(middleware.NewLimiter(apiRatePerMin)))
+
+		g.Get("/accounts", h.List)
+		g.Get("/quota", h.Quota)
+		g.Post("/accounts/google/connect", h.BeginGoogleConnect)
+		g.Post("/accounts/{id}/sync", h.Sync)
+		g.Delete("/accounts/{id}", h.Disconnect)
+	})
+}
+
+// mountOAuthCallback mounts the provider redirect target. It carries its own
+// rate limit because it is reachable without authentication.
+func (s *Server) mountOAuthCallback(r chi.Router) {
+	if s.deps.Accounts == nil {
+		return
+	}
+	h := handlers.NewAccounts(s.deps.Accounts, s.deps.Config.PublicURL)
+	r.Group(func(g chi.Router) {
+		g.Use(middleware.RateLimit(middleware.NewLimiter(publicRatePerMin)))
+		g.Get("/api/accounts/google/callback", h.GoogleCallback)
 	})
 }
 

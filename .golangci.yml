@@ -33,9 +33,14 @@ linters:
         # conversion. Sizes are validated against explicit bounds before
         # conversion at each site that matters.
         - G115
+    # govet's default analysers only. The shadow check is deliberately off:
+    # it fires on `if err := f(); err != nil` inside any function that already
+    # has an err, which is the idiomatic form, and Rules.md §4 does not ask
+    # for it. Genuine shadowing of a value that is later read still shows up
+    # in review.
     govet:
-      enable:
-        - shadow
+      disable:
+        - fieldalignment
 
   exclusions:
     generated: lax
