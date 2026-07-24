@@ -11,9 +11,20 @@ import (
 )
 
 type Querier interface {
+	// ConsumeOAuthState is single use by construction: the row is deleted as it is
+	// read, so a replayed callback finds nothing. The expiry predicate is in SQL so
+	// a stale state cannot be accepted by a clock-skewed application check.
+	//
+	ConsumeOAuthState(ctx context.Context, stateHash []byte) (OauthState, error)
+	CreateConnectedAccount(ctx context.Context, arg CreateConnectedAccountParams) (ConnectedAccount, error)
+	CreateOAuthState(ctx context.Context, arg CreateOAuthStateParams) error
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteConnectedAccount(ctx context.Context, arg DeleteConnectedAccountParams) (int64, error)
+	DeleteExpiredOAuthStates(ctx context.Context) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	GetConnectedAccount(ctx context.Context, arg GetConnectedAccountParams) (ConnectedAccount, error)
+	GetConnectedAccountByProviderID(ctx context.Context, arg GetConnectedAccountByProviderIDParams) (ConnectedAccount, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
 	// GetSessionByRefreshHash looks a session up by the hash of the presented
 	// token. It deliberately returns revoked, used and expired rows too: the
@@ -23,17 +34,35 @@ type Querier interface {
 	GetSessionByRefreshHash(ctx context.Context, refreshHash []byte) (Session, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	// ListActiveAccountsForSync feeds the background quota ticker, which is not
+	// acting on behalf of a request and so has no user to scope by.
+	//
+	ListActiveAccountsForSync(ctx context.Context) ([]ConnectedAccount, error)
+	ListConnectedAccounts(ctx context.Context, userID uuid.UUID) ([]ConnectedAccount, error)
+	// ListStorageAccounts returns capacity joined to the owning account. It is one
+	// query rather than a list plus a lookup per row, per Rules.md §2.12.
+	//
+	ListStorageAccounts(ctx context.Context, userID uuid.UUID) ([]ListStorageAccountsRow, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	// MarkSessionUsed claims a refresh token. The used_at IS NULL predicate makes
 	// the claim atomic: two concurrent refreshes with the same token produce one
 	// winner and one zero-row result, and the loser is treated as reuse.
 	//
 	MarkSessionUsed(ctx context.Context, id uuid.UUID) (Session, error)
+	NextAccountOrdinal(ctx context.Context, userID uuid.UUID) (int32, error)
 	RecordSecurityEvent(ctx context.Context, arg RecordSecurityEventParams) error
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, error)
 	RevokeSession(ctx context.Context, id uuid.UUID) (int64, error)
 	RevokeSessionFamily(ctx context.Context, familyID uuid.UUID) (int64, error)
+	SetAccountStatus(ctx context.Context, arg SetAccountStatusParams) error
+	SetStorageAccountError(ctx context.Context, arg SetStorageAccountErrorParams) error
+	// UpdateAccountTokens refreshes the stored credentials for an account that is
+	// already linked. The user_id predicate is not decoration: it is what stops a
+	// callback from writing tokens into somebody else's row.
+	//
+	UpdateAccountTokens(ctx context.Context, arg UpdateAccountTokensParams) (ConnectedAccount, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
+	UpsertStorageAccount(ctx context.Context, arg UpsertStorageAccountParams) error
 }
 
 var _ Querier = (*Queries)(nil)

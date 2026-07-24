@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ConnectedAccount struct {
+	ID                uuid.UUID
+	UserID            uuid.UUID
+	Kind              string
+	ProviderAccountID string
+	Email             string
+	DisplayName       string
+	AccessTokenEnc    []byte
+	RefreshTokenEnc   []byte
+	TokenExpiresAt    pgtype.Timestamptz
+	Status            string
+	LastError         string
+	Ordinal           int32
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+}
+
+type OauthState struct {
+	StateHash  []byte
+	UserID     uuid.UUID
+	Kind       string
+	RedirectTo string
+	CreatedAt  pgtype.Timestamptz
+	ExpiresAt  pgtype.Timestamptz
+}
+
 type SecurityEvent struct {
 	ID        int64
 	UserID    *uuid.UUID
@@ -33,6 +59,15 @@ type Session struct {
 	ExpiresAt   pgtype.Timestamptz
 	UsedAt      pgtype.Timestamptz
 	RevokedAt   pgtype.Timestamptz
+}
+
+type StorageAccount struct {
+	ConnectedAccountID uuid.UUID
+	TotalBytes         int64
+	UsedBytes          int64
+	ReservedBytes      int64
+	LastSyncedAt       pgtype.Timestamptz
+	LastError          string
 }
 
 type User struct {
