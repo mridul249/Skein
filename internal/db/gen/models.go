@@ -28,6 +28,45 @@ type ConnectedAccount struct {
 	UpdatedAt         pgtype.Timestamptz
 }
 
+type File struct {
+	ID            uuid.UUID
+	UserID        uuid.UUID
+	FolderID      *uuid.UUID
+	Name          string
+	SizeBytes     int64
+	DeclaredMime  string
+	ContentSha256 []byte
+	IsStriped     bool
+	IsEncrypted   bool
+	Status        string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	DeletedAt     pgtype.Timestamptz
+}
+
+type FileShard struct {
+	ID                 uuid.UUID
+	FileID             uuid.UUID
+	Idx                int32
+	ConnectedAccountID *uuid.UUID
+	ProviderObjectID   string
+	SizeBytes          int64
+	PlainSizeBytes     int64
+	PlainOffset        int64
+	Sha256             []byte
+	CreatedAt          pgtype.Timestamptz
+}
+
+type Folder struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	ParentID  *uuid.UUID
+	Name      string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+	DeletedAt pgtype.Timestamptz
+}
+
 type OauthState struct {
 	StateHash  []byte
 	UserID     uuid.UUID
