@@ -20,6 +20,7 @@ import (
 	"github.com/mridul60214/skein/internal/config"
 	skcrypto "github.com/mridul60214/skein/internal/crypto"
 	"github.com/mridul60214/skein/internal/db"
+	"github.com/mridul60214/skein/internal/files"
 	"github.com/mridul60214/skein/internal/httpapi"
 	"github.com/mridul60214/skein/internal/logging"
 	"github.com/mridul60214/skein/internal/worker"
@@ -102,12 +103,30 @@ func run() error {
 		lg.With(slog.String("component", "accounts")),
 	)
 
+	// No local fallback backend in a normal deployment: every shard belongs
+	// to a connected drive, and silently writing to the server's own disk
+	// when none is connected would be a surprise, not a convenience.
+	resolver := accounts.NewResolver(accountsSvc, nil)
+
+	filesSvc := files.NewService(
+		files.NewPGStore(pool),
+		files.NewSingleShardPlanner(resolver.PickAccount),
+		resolver,
+		keyring,
+		files.Config{
+			Encrypt:        cfg.EncryptionEnabled,
+			MaxUploadBytes: cfg.MaxUploadBytes,
+		},
+		lg.With(slog.String("component", "files")),
+	)
+
 	srv, err := httpapi.New(httpapi.Deps{
 		Config:   cfg,
 		Logger:   lg,
 		Health:   pool,
 		Auth:     authSvc,
 		Accounts: accountsSvc,
+		Files:    filesSvc,
 	})
 	if err != nil {
 		return fmt.Errorf("build server: %w", err)

@@ -14,6 +14,7 @@ import (
 	"github.com/mridul60214/skein/internal/accounts"
 	"github.com/mridul60214/skein/internal/auth"
 	"github.com/mridul60214/skein/internal/config"
+	"github.com/mridul60214/skein/internal/files"
 	"github.com/mridul60214/skein/internal/httpapi/handlers"
 	"github.com/mridul60214/skein/internal/httpapi/httpx"
 	"github.com/mridul60214/skein/internal/httpapi/middleware"
@@ -44,6 +45,7 @@ type Deps struct {
 	Health   Health
 	Auth     *auth.Service
 	Accounts *accounts.Service
+	Files    *files.Service
 }
 
 // Server owns the router and the middleware chain.
@@ -51,6 +53,10 @@ type Server struct {
 	deps    Deps
 	router  chi.Router
 	trusted []netip.Prefix
+
+	// uploadSlots is shared by every route that starts an upload, so the
+	// per-user concurrency budget is one budget rather than one per mount.
+	uploadSlots *middleware.ConcurrencyLimiter
 }
 
 // New builds the server. It returns an error when configuration the router
@@ -61,7 +67,12 @@ func New(d Deps) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{deps: d, router: chi.NewRouter(), trusted: trusted}
+	s := &Server{
+		deps:        d,
+		router:      chi.NewRouter(),
+		trusted:     trusted,
+		uploadSlots: middleware.NewConcurrencyLimiter(d.Config.MaxUploadsPerUser),
+	}
 	s.routes()
 	return s, nil
 }
@@ -90,10 +101,17 @@ func (s *Server) routes() {
 	// the single-use state row instead.
 	s.mountOAuthCallback(r)
 
+	// Streaming routes are mounted first and outside the JSON group. The
+	// 1 MiB MaxBytesReader that every JSON endpoint wants would truncate a
+	// file upload at the first megabyte, so the two cannot share a group;
+	// the streaming routes enforce the configured upload ceiling instead.
+	s.mountStreaming(r)
+
 	r.Route("/api", func(api chi.Router) {
 		api.Use(middleware.MaxJSONBody(jsonBodyLimit))
 		s.mountAuth(api)
 		s.mountAccounts(api)
+		s.mountFiles(api)
 	})
 
 	s.mountUI(r)
@@ -162,6 +180,57 @@ func (s *Server) mountAccounts(api chi.Router) {
 		g.Post("/accounts/{id}/sync", h.Sync)
 		g.Delete("/accounts/{id}", h.Disconnect)
 	})
+}
+
+func (s *Server) mountFiles(api chi.Router) {
+	if s.deps.Files == nil || s.deps.Auth == nil {
+		return
+	}
+	h := s.filesHandler()
+
+	api.Group(func(g chi.Router) {
+		g.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
+		g.Use(middleware.RateLimit(middleware.NewLimiter(apiRatePerMin)))
+
+		g.Get("/files", h.List)
+		g.Get("/files/{id}", h.Get)
+		g.Patch("/files/{id}", h.Update)
+		g.Delete("/files/{id}", h.Delete)
+		g.Post("/files/{id}/restore", h.Restore)
+		g.Get("/trash", h.Trash)
+
+		g.Get("/folders", h.ListFolders)
+		g.Post("/folders", h.CreateFolder)
+		g.Patch("/folders/{id}", h.UpdateFolder)
+		g.Delete("/folders/{id}", h.DeleteFolder)
+	})
+
+}
+
+// mountStreaming mounts the two routes that carry file bytes. They live
+// outside the JSON group so no body cap applies; the upload ceiling and the
+// per-user concurrency limit are enforced inside the handler.
+func (s *Server) mountStreaming(r chi.Router) {
+	if s.deps.Files == nil || s.deps.Auth == nil {
+		return
+	}
+	h := s.filesHandler()
+
+	r.Group(func(g chi.Router) {
+		g.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
+		g.Get("/api/files/{id}/content", h.Content)
+		g.Head("/api/files/{id}/content", h.Content)
+		g.Post("/api/uploads", h.Upload)
+	})
+}
+
+func (s *Server) filesHandler() *handlers.Files {
+	return handlers.NewFiles(
+		s.deps.Files,
+		s.uploadSlots,
+		s.deps.Config.MaxUploadBytes,
+		s.deps.Config.PreviewOrigin,
+	)
 }
 
 // mountOAuthCallback mounts the provider redirect target. It carries its own
