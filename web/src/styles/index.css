@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Fonts are declared but not bundled here. Design.md §3 wants three
+ * self-hosted woff2 faces in web/src/fonts/; until those files are added the
+ * stack falls through to the system sans, which is a correct-looking
+ * placeholder rather than a CDN request.
+ */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: theme('colors.crust');
+    color: theme('colors.text');
+  }
+
+  /* Design.md §8: visible keyboard focus on every interactive element.
+     Not negotiable, not announced. */
+  :focus-visible {
+    outline: 2px solid theme('colors.mauve');
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  /* Numbers are most of this interface. Tabular figures mean the size
+     column lines up without per-cell hacks. */
+  .tabular {
+    font-family: theme('fontFamily.mono');
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background-color: theme('colors.mauve');
+    color: theme('colors.crust');
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: theme('colors.crust');
+  }
+  ::-webkit-scrollbar-thumb {
+    background: theme('colors.surface0');
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: theme('colors.surface1');
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded border border-surface0 bg-base;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded border px-3 py-2
+           text-label font-medium transition-colors duration-hover
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn border-mauve bg-mauve text-crust hover:border-lavender hover:bg-lavender;
+  }
+
+  .btn-ghost {
+    @apply btn border-surface0 bg-transparent text-text hover:bg-surface0;
+  }
+
+  .btn-danger {
+    @apply btn border-surface0 bg-transparent text-red hover:border-red hover:bg-red hover:text-crust;
+  }
+
+  .input {
+    @apply w-full rounded border border-surface2 bg-mantle px-3 py-2 text-body
+           text-text placeholder:text-overlay0 transition-colors duration-hover
+           focus:border-mauve focus:outline-none;
+  }
+
+  .label {
+    @apply mb-1.5 block text-label font-medium text-subtext0;
+  }
+}
+
+/* Design.md §6: the pulse and the bar animation are the one orchestrated
+   moment. Both are off when the viewer has asked for less motion. */
+@keyframes shard-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.shard-active {
+  animation: shard-pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
