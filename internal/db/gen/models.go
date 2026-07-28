@@ -76,6 +76,15 @@ type OauthState struct {
 	ExpiresAt  pgtype.Timestamptz
 }
 
+type QuotaReservation struct {
+	ID               uuid.UUID
+	StorageAccountID uuid.UUID
+	Bytes            int64
+	UploadID         uuid.UUID
+	CreatedAt        pgtype.Timestamptz
+	ExpiresAt        pgtype.Timestamptz
+}
+
 type SecurityEvent struct {
 	ID        int64
 	UserID    *uuid.UUID
@@ -107,6 +116,19 @@ type StorageAccount struct {
 	ReservedBytes      int64
 	LastSyncedAt       pgtype.Timestamptz
 	LastError          string
+}
+
+type Upload struct {
+	ID            uuid.UUID
+	UserID        uuid.UUID
+	FileID        *uuid.UUID
+	Status        string
+	SizeBytes     int64
+	BytesReceived int64
+	Plan          []byte
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	ExpiresAt     pgtype.Timestamptz
 }
 
 type User struct {
