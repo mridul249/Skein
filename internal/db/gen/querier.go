@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	AbandonExpiredUploads(ctx context.Context) ([]AbandonExpiredUploadsRow, error)
 	// ConsumeOAuthState is single use by construction: the row is deleted as it is
 	// read, so a replayed callback finds nothing. The expiry predicate is in SQL so
 	// a stale state cannot be accepted by a clock-skewed application check.
@@ -23,11 +24,17 @@ type Querier interface {
 	CreateFolder(ctx context.Context, arg CreateFolderParams) (Folder, error)
 	CreateOAuthState(ctx context.Context, arg CreateOAuthStateParams) error
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	CreateUpload(ctx context.Context, arg CreateUploadParams) (Upload, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteConnectedAccount(ctx context.Context, arg DeleteConnectedAccountParams) (int64, error)
 	DeleteExpiredOAuthStates(ctx context.Context) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteFileShards(ctx context.Context, fileID uuid.UUID) (int64, error)
+	DeleteReservationsForUpload(ctx context.Context, uploadID uuid.UUID) ([]DeleteReservationsForUploadRow, error)
+	// ExpiredReservations feeds the janitor. Rows are returned and deleted in one
+	// statement so two janitor runs cannot release the same reservation twice.
+	//
+	ExpiredReservations(ctx context.Context) ([]ExpiredReservationsRow, error)
 	// FolderDescendants is used to reject a move that would put a folder inside
 	// its own subtree, which would detach the whole branch from the root.
 	//
@@ -43,9 +50,15 @@ type Querier interface {
 	// mean very different things.
 	//
 	GetSessionByRefreshHash(ctx context.Context, refreshHash []byte) (Session, error)
+	GetUpload(ctx context.Context, arg GetUploadParams) (Upload, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	HardDeleteFile(ctx context.Context, arg HardDeleteFileParams) (int64, error)
+	// ListAccountCapacityForPlanning returns candidates in most-free-first order,
+	// which is what the greedy planner walks. It is one query rather than a lookup
+	// per account.
+	//
+	ListAccountCapacityForPlanning(ctx context.Context, userID uuid.UUID) ([]ListAccountCapacityForPlanningRow, error)
 	// ListActiveAccountsForSync feeds the background quota ticker, which is not
 	// acting on behalf of a request and so has no user to scope by.
 	//
@@ -77,14 +90,31 @@ type Querier interface {
 	//
 	MarkSessionUsed(ctx context.Context, id uuid.UUID) (Session, error)
 	NextAccountOrdinal(ctx context.Context, userID uuid.UUID) (int32, error)
+	RecordReservation(ctx context.Context, arg RecordReservationParams) error
 	RecordSecurityEvent(ctx context.Context, arg RecordSecurityEventParams) error
+	// ReleaseReservation gives bytes back. GREATEST(0, ...) is not decoration:
+	// without it a double release would drive reserved_bytes negative and quietly
+	// inflate free space for every subsequent upload.
+	//
+	ReleaseReservation(ctx context.Context, arg ReleaseReservationParams) error
 	RenameFolder(ctx context.Context, arg RenameFolderParams) (Folder, error)
+	// ReserveBytes is the whole reservation scheme. Architecture.md §5.
+	//
+	// One statement, one decision. The WHERE clause is the check and the UPDATE is
+	// the commit, so there is no window between them for a second uploader to make
+	// the same decision. Zero rows returned means somebody else got there first
+	// and the caller should try the next candidate — it is not an error.
+	//
+	// Never replace this with a SELECT followed by an UPDATE.
+	//
+	ReserveBytes(ctx context.Context, arg ReserveBytesParams) (ReserveBytesRow, error)
 	RestoreFile(ctx context.Context, arg RestoreFileParams) (int64, error)
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) (int64, error)
 	RevokeSession(ctx context.Context, id uuid.UUID) (int64, error)
 	RevokeSessionFamily(ctx context.Context, familyID uuid.UUID) (int64, error)
 	SetAccountStatus(ctx context.Context, arg SetAccountStatusParams) error
 	SetStorageAccountError(ctx context.Context, arg SetStorageAccountErrorParams) error
+	SetUploadStatus(ctx context.Context, arg SetUploadStatusParams) error
 	SoftDeleteFile(ctx context.Context, arg SoftDeleteFileParams) (int64, error)
 	SoftDeleteFilesInFolderTree(ctx context.Context, arg SoftDeleteFilesInFolderTreeParams) (int64, error)
 	// SoftDeleteFolder moves a folder to trash. Its children go with it, in the
