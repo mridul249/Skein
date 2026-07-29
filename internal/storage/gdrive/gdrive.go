@@ -46,14 +46,28 @@ type Backend struct {
 	// httpClient carries the OAuth token. It has no Timeout because the
 	// transfer calls are bounded by context; metadata calls set their own.
 	httpClient *http.Client
-	folderName string
+
+	// folderID is the app folder every shard is written into. Empty means
+	// shards land at Drive root, which is only the case for an account
+	// connected before the folder existed and not yet migrated.
+	//
+	// The backend does not establish this itself: doing so would need the
+	// database, and a provider backend that knows Skein's schema is no
+	// longer provider-agnostic. internal/accounts owns the lifecycle and
+	// passes the result in.
+	folderID string
 }
 
 // New builds a Drive backend over an already-authenticated client. Token
 // refresh is the caller's problem, which is what oauth2.Config.Client does.
-func New(client *http.Client) *Backend {
-	return &Backend{httpClient: client, folderName: "Skein"}
+//
+// folderID is the app folder shards are parented into; empty writes to root.
+func New(client *http.Client, folderID string) *Backend {
+	return &Backend{httpClient: client, folderID: folderID}
 }
+
+// FolderID reports where this backend writes shards.
+func (b *Backend) FolderID() string { return b.folderID }
 
 // Kind identifies this implementation.
 func (b *Backend) Kind() storage.Kind { return storage.KindGoogleDrive }
@@ -145,6 +159,12 @@ func (b *Backend) startResumableSession(ctx context.Context, spec storage.Object
 		// The content is ciphertext. Declaring anything other than
 		// octet-stream would be describing bytes we cannot describe.
 		"mimeType": "application/octet-stream",
+	}
+	// Shards belong in the app folder, not at Drive root where they look
+	// like junk and get tidied away. This is the resumable-session path,
+	// which is separate from any other create call and easy to miss.
+	if b.folderID != "" {
+		meta["parents"] = []string{b.folderID}
 	}
 	body, err := json.Marshal(meta)
 	if err != nil {
