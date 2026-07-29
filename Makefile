@@ -92,9 +92,21 @@ tools:
 	go install github.com/pressly/goose/v3/cmd/goose@latest
 	go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
+## backup: dump the database (the master key alone cannot restore your files)
+backup:
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+	mkdir -p backups; \
+	out="backups/skein-$$(date +%Y%m%d-%H%M%S).sql.gz"; \
+	pg_dump --no-owner --no-privileges "$$SKEIN_DATABASE_URL" | gzip > "$$out"; \
+	echo "wrote $$out ($$(du -h "$$out" | cut -f1))"; \
+	echo; \
+	echo "This dump is only half a backup. It records which shard belongs to"; \
+	echo "which file; SKEIN_MASTER_KEY decrypts their contents. Restoring needs"; \
+	echo "both. Keep the key somewhere this dump is not."
+
 ## clean: remove build output
 clean:
 	rm -rf bin $(WEB_DIST)/* web/node_modules
 
 .PHONY: help run build build-go test test-short bench lint sqlc migrate \
-        migrate-down migrate-status web web-dev dev-db dev-db-down tools clean
+        migrate-down migrate-status web web-dev dev-db dev-db-down tools backup clean
