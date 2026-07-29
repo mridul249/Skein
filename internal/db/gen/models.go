@@ -26,6 +26,7 @@ type ConnectedAccount struct {
 	Ordinal           int32
 	CreatedAt         pgtype.Timestamptz
 	UpdatedAt         pgtype.Timestamptz
+	AppFolderID       *string
 }
 
 type File struct {

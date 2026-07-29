@@ -41,7 +41,7 @@ INSERT INTO connected_accounts (
     id, user_id, kind, provider_account_id, email, display_name,
     access_token_enc, refresh_token_enc, token_expires_at, ordinal
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at
+RETURNING id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at, app_folder_id
 `
 
 type CreateConnectedAccountParams struct {
@@ -86,6 +86,7 @@ func (q *Queries) CreateConnectedAccount(ctx context.Context, arg CreateConnecte
 		&i.Ordinal,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AppFolderID,
 	)
 	return i, err
 }
@@ -143,8 +144,19 @@ func (q *Queries) DeleteExpiredOAuthStates(ctx context.Context) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const getAppFolderID = `-- name: GetAppFolderID :one
+SELECT app_folder_id FROM connected_accounts WHERE id = $1
+`
+
+func (q *Queries) GetAppFolderID(ctx context.Context, id uuid.UUID) (*string, error) {
+	row := q.db.QueryRow(ctx, getAppFolderID, id)
+	var app_folder_id *string
+	err := row.Scan(&app_folder_id)
+	return app_folder_id, err
+}
+
 const getConnectedAccount = `-- name: GetConnectedAccount :one
-SELECT id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at FROM connected_accounts WHERE id = $1 AND user_id = $2
+SELECT id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at, app_folder_id FROM connected_accounts WHERE id = $1 AND user_id = $2
 `
 
 type GetConnectedAccountParams struct {
@@ -170,12 +182,13 @@ func (q *Queries) GetConnectedAccount(ctx context.Context, arg GetConnectedAccou
 		&i.Ordinal,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AppFolderID,
 	)
 	return i, err
 }
 
 const getConnectedAccountByProviderID = `-- name: GetConnectedAccountByProviderID :one
-SELECT id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at FROM connected_accounts
+SELECT id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at, app_folder_id FROM connected_accounts
  WHERE user_id = $1 AND kind = $2 AND provider_account_id = $3
 `
 
@@ -203,12 +216,13 @@ func (q *Queries) GetConnectedAccountByProviderID(ctx context.Context, arg GetCo
 		&i.Ordinal,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AppFolderID,
 	)
 	return i, err
 }
 
 const listActiveAccountsForSync = `-- name: ListActiveAccountsForSync :many
-SELECT id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at FROM connected_accounts
+SELECT id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at, app_folder_id FROM connected_accounts
  WHERE status = 'active'
  ORDER BY created_at
 `
@@ -239,6 +253,7 @@ func (q *Queries) ListActiveAccountsForSync(ctx context.Context) ([]ConnectedAcc
 			&i.Ordinal,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AppFolderID,
 		); err != nil {
 			return nil, err
 		}
@@ -251,7 +266,7 @@ func (q *Queries) ListActiveAccountsForSync(ctx context.Context) ([]ConnectedAcc
 }
 
 const listConnectedAccounts = `-- name: ListConnectedAccounts :many
-SELECT id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at FROM connected_accounts
+SELECT id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at, app_folder_id FROM connected_accounts
  WHERE user_id = $1
  ORDER BY ordinal, created_at
 `
@@ -280,6 +295,7 @@ func (q *Queries) ListConnectedAccounts(ctx context.Context, userID uuid.UUID) (
 			&i.Ordinal,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AppFolderID,
 		); err != nil {
 			return nil, err
 		}
@@ -387,6 +403,32 @@ func (q *Queries) SetAccountStatus(ctx context.Context, arg SetAccountStatusPara
 	return err
 }
 
+const setAppFolderID = `-- name: SetAppFolderID :one
+UPDATE connected_accounts
+   SET app_folder_id = $2,
+       updated_at    = now()
+ WHERE id = $1
+   AND app_folder_id IS NULL
+RETURNING app_folder_id
+`
+
+type SetAppFolderIDParams struct {
+	ID          uuid.UUID
+	AppFolderID *string
+}
+
+// SetAppFolderID records where this account's shards live at the provider.
+//
+// The app_folder_id IS NULL predicate makes the write single-shot: if another
+// process established a folder first, this one returns no row and the caller
+// re-reads rather than overwriting a good id with a duplicate folder.
+func (q *Queries) SetAppFolderID(ctx context.Context, arg SetAppFolderIDParams) (*string, error) {
+	row := q.db.QueryRow(ctx, setAppFolderID, arg.ID, arg.AppFolderID)
+	var app_folder_id *string
+	err := row.Scan(&app_folder_id)
+	return app_folder_id, err
+}
+
 const setStorageAccountError = `-- name: SetStorageAccountError :exec
 INSERT INTO storage_accounts (connected_account_id, last_error)
 VALUES ($1, $2)
@@ -416,7 +458,7 @@ UPDATE connected_accounts
        updated_at        = now()
  WHERE id = $1
    AND user_id = $2
-RETURNING id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at
+RETURNING id, user_id, kind, provider_account_id, email, display_name, access_token_enc, refresh_token_enc, token_expires_at, status, last_error, ordinal, created_at, updated_at, app_folder_id
 `
 
 type UpdateAccountTokensParams struct {
@@ -458,6 +500,7 @@ func (q *Queries) UpdateAccountTokens(ctx context.Context, arg UpdateAccountToke
 		&i.Ordinal,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AppFolderID,
 	)
 	return i, err
 }

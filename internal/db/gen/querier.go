@@ -39,6 +39,7 @@ type Querier interface {
 	// its own subtree, which would detach the whole branch from the root.
 	//
 	FolderDescendants(ctx context.Context, arg FolderDescendantsParams) ([]uuid.UUID, error)
+	GetAppFolderID(ctx context.Context, id uuid.UUID) (*string, error)
 	GetConnectedAccount(ctx context.Context, arg GetConnectedAccountParams) (ConnectedAccount, error)
 	GetConnectedAccountByProviderID(ctx context.Context, arg GetConnectedAccountByProviderIDParams) (ConnectedAccount, error)
 	GetFile(ctx context.Context, arg GetFileParams) (File, error)
@@ -113,6 +114,13 @@ type Querier interface {
 	RevokeSession(ctx context.Context, id uuid.UUID) (int64, error)
 	RevokeSessionFamily(ctx context.Context, familyID uuid.UUID) (int64, error)
 	SetAccountStatus(ctx context.Context, arg SetAccountStatusParams) error
+	// SetAppFolderID records where this account's shards live at the provider.
+	//
+	// The app_folder_id IS NULL predicate makes the write single-shot: if another
+	// process established a folder first, this one returns no row and the caller
+	// re-reads rather than overwriting a good id with a duplicate folder.
+	//
+	SetAppFolderID(ctx context.Context, arg SetAppFolderIDParams) (*string, error)
 	SetStorageAccountError(ctx context.Context, arg SetStorageAccountErrorParams) error
 	SetUploadStatus(ctx context.Context, arg SetUploadStatusParams) error
 	SoftDeleteFile(ctx context.Context, arg SoftDeleteFileParams) (int64, error)
