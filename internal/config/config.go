@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
+
+	skcrypto "github.com/mridul60214/skein/internal/crypto"
 )
 
 // MasterKeyLen is the required length, in bytes, of the decoded master key.
@@ -65,6 +67,10 @@ type Config struct {
 	// ShardSizeBytes is the target size of a single shard. The tail shard of
 	// a striped file is short.
 	ShardSizeBytes int64 `env:"SKEIN_SHARD_SIZE_BYTES" envDefault:"268435456"`
+
+	// RoutingPolicy chooses which drive a shard lands on:
+	// most-available, priority or round-robin.
+	RoutingPolicy string `env:"SKEIN_ROUTING_POLICY" envDefault:"most-available"`
 
 	// EncryptionEnabled exists so the encrypted-at-rest guarantee can be
 	// disabled in a local development loop. It defaults to on and the
@@ -164,6 +170,26 @@ func (c *Config) validate() error {
 	}
 	if c.ShardSizeBytes < 1<<20 {
 		errs = append(errs, errors.New("SKEIN_SHARD_SIZE_BYTES must be at least 1 MiB"))
+	}
+	// A shard is encrypted as a whole number of AEAD frames. The format
+	// tolerates a short final frame, so an odd shard size would still work —
+	// but every non-tail shard would then carry one runt frame, which wastes
+	// a tag per shard and makes the ciphertext layout non-uniform for
+	// anybody reasoning about offsets later. Requiring the multiple keeps
+	// full shards identical in size and costs nothing.
+	if c.ShardSizeBytes%skcrypto.FrameSize != 0 {
+		errs = append(errs, fmt.Errorf(
+			"SKEIN_SHARD_SIZE_BYTES must be a multiple of the %d-byte AEAD frame size; "+
+				"%d leaves a remainder of %d",
+			skcrypto.FrameSize, c.ShardSizeBytes, c.ShardSizeBytes%skcrypto.FrameSize))
+	}
+
+	switch c.RoutingPolicy {
+	case "most-available", "priority", "round-robin":
+	default:
+		errs = append(errs, fmt.Errorf(
+			"SKEIN_ROUTING_POLICY must be most-available, priority or round-robin, got %q",
+			c.RoutingPolicy))
 	}
 	if c.ShutdownTimeout <= 0 {
 		errs = append(errs, errors.New("SKEIN_SHUTDOWN_TIMEOUT must be positive"))

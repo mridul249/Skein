@@ -126,10 +126,14 @@ func run() error {
 
 	planner := router.NewPlanner(
 		reserver,
-		router.PolicyMostAvailable,
+		router.Policy(cfg.RoutingPolicy),
 		cfg.ShardSizeBytes,
 		storedSize,
 	)
+	lg.Info("shard routing configured",
+		slog.String("policy", cfg.RoutingPolicy),
+		slog.Int64("shard_size_bytes", cfg.ShardSizeBytes),
+		slog.Int64("frames_per_shard", cfg.ShardSizeBytes/skcrypto.FrameSize))
 
 	filesSvc := files.NewService(
 		files.NewPGStore(pool),
