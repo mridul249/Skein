@@ -23,6 +23,7 @@ import (
 	"github.com/mridul60214/skein/internal/files"
 	"github.com/mridul60214/skein/internal/httpapi"
 	"github.com/mridul60214/skein/internal/logging"
+	"github.com/mridul60214/skein/internal/router"
 	"github.com/mridul60214/skein/internal/worker"
 )
 
@@ -108,9 +109,31 @@ func run() error {
 	// when none is connected would be a surprise, not a convenience.
 	resolver := accounts.NewResolver(accountsSvc, nil)
 
+	// Capacity is claimed through the atomic conditional UPDATE in
+	// Architecture.md §5, never through a Go map. The reserver also owns the
+	// janitor that reclaims what a crashed upload left behind.
+	reserver := router.NewReserver(
+		router.NewPGStore(pool),
+		lg.With(slog.String("component", "router")),
+	)
+
+	// storedSize has to account for ciphertext expansion, or a reservation
+	// covers the plaintext and the drive runs out at the final frame.
+	storedSize := func(plain int64) int64 { return plain }
+	if cfg.EncryptionEnabled {
+		storedSize = skcrypto.StreamOverhead
+	}
+
+	planner := router.NewPlanner(
+		reserver,
+		router.PolicyMostAvailable,
+		cfg.ShardSizeBytes,
+		storedSize,
+	)
+
 	filesSvc := files.NewService(
 		files.NewPGStore(pool),
-		files.NewSingleShardPlanner(resolver.PickAccount),
+		files.NewStripingPlanner(planner, reserver),
 		resolver,
 		keyring,
 		files.Config{
@@ -150,6 +173,16 @@ func run() error {
 				_, perr := accountsSvc.PurgeExpiredOAuthStates(ctx)
 				return perr
 			},
+		},
+		// The reclaim janitor. Without it, a killed process strands its
+		// reservation forever and the pool shrinks every time something
+		// goes wrong.
+		worker.Job{
+			Name:       "reclaim-reservations",
+			Every:      cfg.ReclaimEvery,
+			RunAtStart: true,
+			Timeout:    time.Minute,
+			Run:        reserver.ReclaimExpired,
 		},
 		worker.Job{
 			Name:    "purge-sessions",
