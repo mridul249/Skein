@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 
@@ -54,8 +55,15 @@ type Planner struct {
 	policy   Policy
 	// shardSize is the target plaintext bytes per shard. The tail is short.
 	shardSize int64
-	// roundRobinCursor advances per plan under PolicyRoundRobin.
-	roundRobinCursor int
+	// roundRobinCursor advances once per placement under PolicyRoundRobin,
+	// so consecutive shards of one upload land on different drives.
+	//
+	// Atomic because a Planner is shared by every concurrent upload, and a
+	// plain int here is a data race that -race catches immediately. The
+	// value is a spread heuristic rather than a correctness invariant, so
+	// interleaved increments between concurrent plans are fine; what is not
+	// fine is the unsynchronised read/write itself.
+	roundRobinCursor atomic.Uint64
 	// overhead maps a plaintext shard size to its stored size, so the
 	// reservation covers what is actually written rather than what the user
 	// supplied. Encryption expands; a reservation that ignores that runs a
@@ -204,11 +212,14 @@ func (p *Planner) order(in []Candidate) []Candidate {
 
 	case PolicyRoundRobin:
 		sort.SliceStable(out, func(i, j int) bool { return out[i].Ordinal < out[j].Ordinal })
+		// Add(1)-1 takes this placement's slot and reserves the next one
+		// in a single operation, so two concurrent plans cannot both read
+		// the same cursor value.
+		n := p.roundRobinCursor.Add(1) - 1
 		if len(out) > 1 {
-			shift := p.roundRobinCursor % len(out)
+			shift := int(n % uint64(len(out)))
 			out = append(out[shift:], out[:shift]...)
 		}
-		p.roundRobinCursor++
 
 	default: // PolicyMostAvailable
 		sort.SliceStable(out, func(i, j int) bool {
