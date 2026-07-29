@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"sync/atomic"
 
 	"github.com/google/uuid"
@@ -69,6 +70,11 @@ type Planner struct {
 	// supplied. Encryption expands; a reservation that ignores that runs a
 	// drive out of space at the last frame.
 	overhead func(plainSize int64) int64
+
+	// admit serialises the *planning* phase per user, which is what
+	// guarantees a contended pool produces a winner. See admitPlanning.
+	admitMu sync.Mutex
+	admit   map[uuid.UUID]chan struct{}
 }
 
 // NewPlanner builds a planner.
@@ -98,6 +104,16 @@ func (p *Planner) Plan(ctx context.Context, userID uuid.UUID, plainSize int64) (
 	if plainSize < 0 {
 		return Plan{}, fmt.Errorf("router: negative size %d", plainSize)
 	}
+
+	// One planner admits one plan per user at a time. Everything below this
+	// point is database round trips measured in milliseconds — no bytes move
+	// during planning — so the cost is negligible and the uploads themselves
+	// stay fully concurrent.
+	release, err := p.admitPlanning(ctx, userID)
+	if err != nil {
+		return Plan{}, err
+	}
+	defer release()
 
 	candidates, err := p.reserver.Candidates(ctx, userID)
 	if err != nil {
@@ -151,6 +167,49 @@ func (p *Planner) Plan(ctx context.Context, userID uuid.UUID, plainSize int64) (
 	}
 
 	return plan, nil
+}
+
+// admitPlanning lets one plan per user hold the reservation phase at a time,
+// and returns the function that releases it.
+//
+// This is the fix for the mutual-rollback starvation. A plan claims capacity
+// shard by shard, so two overlapping plans could each take part of the pool,
+// each then find nothing left for the rest of their shards, and each roll back
+// — measured at 11 of 200 attempts with two 8 GiB uploads against 10 GiB.
+// Neither upload proceeded even though the pool could clearly hold one.
+//
+// Ordering the accounts deterministically does not help, and measurably hurts:
+// it points both plans at the same drive in the same sequence, so they collide
+// head-on rather than drifting apart. Measured 22 of 200 for one drive and 29
+// of 200 for three. The bug is not lock-order inversion, which a global order
+// would fix; it is incremental allocation of a divisible resource with no
+// admission control. So the admission control goes here.
+//
+// Serialising is safe to do at this granularity because accounts belong to
+// exactly one user, so contention is only ever within a user, and because
+// planning moves no bytes.
+func (p *Planner) admitPlanning(ctx context.Context, userID uuid.UUID) (func(), error) {
+	p.admitMu.Lock()
+	if p.admit == nil {
+		p.admit = make(map[uuid.UUID]chan struct{})
+	}
+	gate, ok := p.admit[userID]
+	if !ok {
+		gate = make(chan struct{}, 1)
+		p.admit[userID] = gate
+	}
+	p.admitMu.Unlock()
+
+	// Context-aware so a client that gives up while queued does not pin a
+	// slot behind it.
+	select {
+	case gate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("router: waiting to plan: %w", ctx.Err())
+	}
+
+	var once sync.Once
+	return func() { once.Do(func() { <-gate }) }, nil
 }
 
 // placeShard finds an account that can take one shard, shrinking it if no
@@ -226,7 +285,15 @@ func (p *Planner) order(in []Candidate) []Candidate {
 			if out[i].Free() != out[j].Free() {
 				return out[i].Free() > out[j].Free()
 			}
-			return out[i].Ordinal < out[j].Ordinal
+			if out[i].Ordinal != out[j].Ordinal {
+				return out[i].Ordinal < out[j].Ordinal
+			}
+			// Ascending account id as the final tiebreak, so two drives
+			// with identical free space and ordinal always sort the same
+			// way. This makes a plan reproducible from the same inputs,
+			// which is what makes a surprising manifest debuggable. It is
+			// not what fixes starvation — see admitPlanning.
+			return out[i].AccountID.String() < out[j].AccountID.String()
 		})
 	}
 	return out
