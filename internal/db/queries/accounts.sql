@@ -46,6 +46,23 @@ SELECT * FROM connected_accounts
 -- name: NextAccountOrdinal :one
 SELECT COALESCE(MAX(ordinal), 0) + 1 FROM connected_accounts WHERE user_id = $1;
 
+-- SetAppFolderID records where this account's shards live at the provider.
+--
+-- The app_folder_id IS NULL predicate makes the write single-shot: if another
+-- process established a folder first, this one returns no row and the caller
+-- re-reads rather than overwriting a good id with a duplicate folder.
+--
+-- name: SetAppFolderID :one
+UPDATE connected_accounts
+   SET app_folder_id = $2,
+       updated_at    = now()
+ WHERE id = $1
+   AND app_folder_id IS NULL
+RETURNING app_folder_id;
+
+-- name: GetAppFolderID :one
+SELECT app_folder_id FROM connected_accounts WHERE id = $1;
+
 -- name: SetAccountStatus :exec
 UPDATE connected_accounts
    SET status     = $2,
