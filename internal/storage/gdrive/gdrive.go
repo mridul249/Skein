@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mridul60214/skein/internal/storage"
@@ -99,7 +101,7 @@ func (b *Backend) Put(ctx context.Context, r io.Reader, spec storage.ObjectSpec)
 	// endpoint rejects.
 	req.ContentLength = spec.Size
 
-	//nolint:bodyclose // drainAndClose below closes it on every path.
+	//nolint:bodyclose // closeBody below closes it on every path.
 	resp, err := b.httpClient.Do(req)
 	if err != nil {
 		// A cancelled context here means the client hung up. Drive
@@ -107,17 +109,14 @@ func (b *Backend) Put(ctx context.Context, r io.Reader, spec storage.ObjectSpec)
 		// to clean up because nothing was committed.
 		return storage.ObjectRef{}, fmt.Errorf("upload body: %w", err)
 	}
-	defer drainAndClose(resp.Body)
+	// Closed explicitly below so the byte count can be read afterwards; the
+	// defer is the safety net for the early returns in between, and OnceFunc
+	// makes the two safe to combine.
+	closeBody := sync.OnceFunc(func() { drainAndClose(resp.Body) })
+	defer closeBody()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return storage.ObjectRef{}, b.apiError(resp, "upload body")
-	}
-
-	// Rules.md §2.7: what the client declared is checked against what
-	// actually arrived, before anything is recorded as complete.
-	if counter.n != spec.Size {
-		return storage.ObjectRef{}, fmt.Errorf("%w: declared %d, sent %d",
-			storage.ErrSizeMismatch, spec.Size, counter.n)
 	}
 
 	var created struct {
@@ -129,6 +128,21 @@ func (b *Backend) Put(ctx context.Context, r io.Reader, spec storage.ObjectSpec)
 	}
 	if created.ID == "" {
 		return storage.ObjectRef{}, errors.New("gdrive: upload response carried no file id")
+	}
+
+	// The count is read only here, after the response has been consumed and
+	// the body closed. Until then net/http's writeLoop may still be pulling
+	// from the request body, so an earlier read can return a mid-upload
+	// total — which would make the check below compare the declared size
+	// against a number that is merely on its way to being right.
+	closeBody()
+	sent := counter.total()
+
+	// Rules.md §2.7: what the client declared is checked against what
+	// actually arrived, before anything is recorded as complete.
+	if sent != spec.Size {
+		return storage.ObjectRef{}, fmt.Errorf("%w: declared %d, sent %d",
+			storage.ErrSizeMismatch, spec.Size, sent)
 	}
 
 	// Drive reports the stored size. If it disagrees with what was sent the
@@ -361,16 +375,30 @@ func drainAndClose(body io.ReadCloser) {
 }
 
 // countingReader counts bytes without holding them.
+//
+// The count is atomic because the two ends of it run on different goroutines:
+// net/http's writeLoop consumes the request body while the goroutine that
+// called Do waits for the response. A bare int64 here is a data race, and the
+// value it produces is a torn or stale count feeding the byte-count check that
+// Rules.md §2.7 depends on.
 type countingReader struct {
 	r io.Reader
-	n int64
+	n atomic.Int64
 }
 
 func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
-	c.n += int64(n)
+	if n > 0 {
+		c.n.Add(int64(n))
+	}
 	return n, err
 }
+
+// total reports how many bytes have passed through so far.
+//
+// It is only meaningful as a final count once the transport has finished with
+// the body — see the ordering in Put.
+func (c *countingReader) total() int64 { return c.n.Load() }
 
 // Compile-time check.
 var _ storage.Backend = (*Backend)(nil)
