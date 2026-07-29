@@ -170,6 +170,36 @@ func (m *MemoryStore) SetAccountStatus(_ context.Context, id uuid.UUID, status, 
 	return nil
 }
 
+// GetAppFolderID returns the stored app folder id, or "" if none.
+func (m *MemoryStore) GetAppFolderID(_ context.Context, id uuid.UUID) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	acct, ok := m.accounts[id]
+	if !ok {
+		return "", skerr.ErrNotFound
+	}
+	return acct.AppFolderID, nil
+}
+
+// SetAppFolderID mirrors the conditional UPDATE: it writes only when no folder
+// is recorded yet, and reports ErrNotFound when another writer won. Holding the
+// lock across the check and the write is what makes it atomic here, exactly as
+// the WHERE clause does in Postgres.
+func (m *MemoryStore) SetAppFolderID(_ context.Context, id uuid.UUID, folderID string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	acct, ok := m.accounts[id]
+	if !ok {
+		return "", skerr.ErrNotFound
+	}
+	if acct.AppFolderID != "" {
+		return "", skerr.ErrNotFound
+	}
+	acct.AppFolderID = folderID
+	m.accounts[id] = acct
+	return folderID, nil
+}
+
 // DeleteAccount unlinks an account the user owns.
 func (m *MemoryStore) DeleteAccount(_ context.Context, userID, id uuid.UUID) (int64, error) {
 	m.mu.Lock()

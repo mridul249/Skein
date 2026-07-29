@@ -31,12 +31,44 @@ import (
 var version = "dev"
 
 func main() {
-	if err := run(); err != nil {
+	// Subcommands are a flat switch rather than a flag package: there are
+	// two of them, and the default is the one everybody runs.
+	cmd := "serve"
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
+	}
+
+	var err error
+	switch cmd {
+	case "serve":
+		err = run()
+	case "migrate-folders":
+		err = runMigrateFolders()
+	case "help", "-h", "--help":
+		usage()
+		return
+	default:
+		fmt.Fprintf(os.Stderr, "skein: unknown command %q\n\n", cmd)
+		usage()
+		os.Exit(2)
+	}
+
+	if err != nil {
 		// The logger may not exist yet if config failed, so this one
 		// write goes to stderr directly.
 		fmt.Fprintf(os.Stderr, "skein: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func usage() {
+	fmt.Fprint(os.Stderr, `skein — your free cloud accounts, pooled, striped and encrypted
+
+  skein [serve]        run the server (default)
+  skein migrate-folders  move shards left at drive root into the Skein folder
+
+Configuration comes from the environment; see .env.example.
+`)
 }
 
 func run() error {
