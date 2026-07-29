@@ -325,7 +325,20 @@ func (s *Service) backendFor(ctx context.Context, acct StoredAccount) (storage.B
 		client.Transport = http.DefaultTransport
 	}
 
-	return gdrive.New(client), nil
+	// Establish the app folder before handing out a backend, so every shard
+	// this backend writes is parented correctly. A failure here is not fatal
+	// to the upload: shards land at root as they did before, which is worse
+	// but not broken, and the next attempt retries.
+	folderID, err := s.ensureAppFolder(ctx, acct, client)
+	if err != nil {
+		s.log.WarnContext(ctx, "could not establish the provider app folder; "+
+			"shards will land at drive root until this succeeds",
+			slog.String("account_id", acct.ID.String()),
+			slog.String("error", err.Error()))
+		folderID = ""
+	}
+
+	return gdrive.New(client, folderID), nil
 }
 
 // SyncOne refreshes one account's capacity.

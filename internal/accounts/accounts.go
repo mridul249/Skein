@@ -104,6 +104,9 @@ type StoredAccount struct {
 	ProviderAccountID string
 	AccessTokenEnc    []byte
 	RefreshTokenEnc   []byte
+	// AppFolderID is the provider folder shards are written into. Empty
+	// means one has not been established yet; it is never "root".
+	AppFolderID string
 }
 
 // PendingOAuth is a state row awaiting its callback.
@@ -123,6 +126,12 @@ type Store interface {
 	ListAccountsForSync(ctx context.Context) ([]StoredAccount, error)
 	NextOrdinal(ctx context.Context, userID uuid.UUID) (int32, error)
 	SetAccountStatus(ctx context.Context, id uuid.UUID, status, lastErr string) error
+
+	// GetAppFolderID returns "" when no folder has been established.
+	GetAppFolderID(ctx context.Context, id uuid.UUID) (string, error)
+	// SetAppFolderID writes the folder id only if none is set yet, and
+	// returns ErrNotFound when another writer got there first.
+	SetAppFolderID(ctx context.Context, id uuid.UUID, folderID string) (string, error)
 	DeleteAccount(ctx context.Context, userID, id uuid.UUID) (int64, error)
 
 	UpsertCapacity(ctx context.Context, accountID uuid.UUID, total, used int64) error

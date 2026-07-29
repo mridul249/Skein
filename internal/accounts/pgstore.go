@@ -126,6 +126,34 @@ func (s *PGStore) SetAccountStatus(ctx context.Context, id uuid.UUID, status, la
 	return nil
 }
 
+// GetAppFolderID returns the stored app folder id, or "" if none.
+func (s *PGStore) GetAppFolderID(ctx context.Context, id uuid.UUID) (string, error) {
+	got, err := s.q.GetAppFolderID(ctx, id)
+	if err != nil {
+		return "", mapNoRows(err, "select app folder id")
+	}
+	if got == nil {
+		return "", nil
+	}
+	return *got, nil
+}
+
+// SetAppFolderID writes the folder id only when the column is still NULL.
+// Zero rows means another writer won, which the caller resolves by re-reading.
+func (s *PGStore) SetAppFolderID(ctx context.Context, id uuid.UUID, folderID string) (string, error) {
+	got, err := s.q.SetAppFolderID(ctx, gen.SetAppFolderIDParams{
+		ID:          id,
+		AppFolderID: &folderID,
+	})
+	if err != nil {
+		return "", mapNoRows(err, "set app folder id")
+	}
+	if got == nil {
+		return "", nil
+	}
+	return *got, nil
+}
+
 // DeleteAccount unlinks an account the user owns.
 func (s *PGStore) DeleteAccount(ctx context.Context, userID, id uuid.UUID) (int64, error) {
 	n, err := s.q.DeleteConnectedAccount(ctx, gen.DeleteConnectedAccountParams{ID: id, UserID: userID})
@@ -248,7 +276,15 @@ func toStoredAccount(r gen.ConnectedAccount) StoredAccount {
 		ProviderAccountID: r.ProviderAccountID,
 		AccessTokenEnc:    r.AccessTokenEnc,
 		RefreshTokenEnc:   r.RefreshTokenEnc,
+		AppFolderID:       deref(r.AppFolderID),
 	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func mapNoRows(err error, what string) error {
