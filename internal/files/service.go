@@ -29,7 +29,10 @@ type PlannedShard struct {
 // Plan is an ordered shard layout for one upload.
 type Plan struct {
 	UserID uuid.UUID
-	Shards []PlannedShard
+	// UploadID identifies the capacity reservations this plan holds. It is
+	// uuid.Nil for a planner that does not reserve.
+	UploadID uuid.UUID
+	Shards   []PlannedShard
 }
 
 // Planner decides how an upload is laid out across accounts. It is an
@@ -37,6 +40,13 @@ type Plan struct {
 // replace it with the striping one without touching the upload path.
 type Planner interface {
 	Plan(ctx context.Context, userID uuid.UUID, size int64) (Plan, error)
+}
+
+// ReleasingPlanner is a Planner that holds capacity reservations and needs to
+// be told when an upload is over. The upload path checks for it rather than
+// widening Planner, so the single-shard planner stays a two-line type.
+type ReleasingPlanner interface {
+	Release(ctx context.Context, uploadID uuid.UUID) error
 }
 
 // BackendResolver hands out a storage.Backend for an account.
@@ -86,14 +96,38 @@ func NewService(
 // applied before it reaches the provider, and reports how many bytes the
 // provider will receive.
 //
-// Encryption is not wired in this phase, so the two numbers are equal and the
-// reader is passed through untouched. The seam exists now because the provider
-// needs an authoritative byte count up front — a resumable session declares its
-// length before the first byte — and retrofitting a size transform into a path
-// that has already assumed plainSize == storedSize is exactly the kind of
-// change that gets a byte-count check quietly deleted.
-func (s *Service) wrapForStorage(_ uuid.UUID, _ int32, r io.Reader, plainSize int64) (io.Reader, int64, error) {
-	return r, plainSize, nil
+// With encryption on — the default — the reader is the framed AEAD stream and
+// the stored size is larger than the plaintext by a header plus one tag per
+// 64 KiB frame. The provider needs that number before the first byte, because
+// a resumable session commits to its length up front, which is why this
+// returns a size rather than discovering one as it goes.
+func (s *Service) wrapForStorage(fileID uuid.UUID, shardIndex int32, r io.Reader, plainSize int64) (io.Reader, int64, error) {
+	if !s.encrypt {
+		return r, plainSize, nil
+	}
+	if s.keyring == nil {
+		return nil, 0, errors.New("files: encryption is enabled but no keyring was wired")
+	}
+
+	// The stored size has to be exact and known now: a resumable session
+	// commits to its length before the first byte is sent, so it cannot be
+	// discovered as the ciphertext is produced.
+	enc, err := s.keyring.NewEncryptReader(fileID[:], uint32(shardIndex), r)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open encrypt reader for shard %d: %w", shardIndex, err)
+	}
+	return enc, skcrypto.StreamOverhead(plainSize), nil
+}
+
+// StoredSizeFor reports how many provider bytes a plaintext shard takes. The
+// planner needs it so a reservation covers the ciphertext rather than the
+// plaintext; reserving the smaller number runs a drive out of space at the
+// final frame.
+func (s *Service) StoredSizeFor(plainSize int64) int64 {
+	if !s.encrypt {
+		return plainSize
+	}
+	return skcrypto.StreamOverhead(plainSize)
 }
 
 // Get returns one file with its manifest.

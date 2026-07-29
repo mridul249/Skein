@@ -35,7 +35,7 @@ type UploadRequest struct {
 // This is the path the whole product is an argument about, so the shape is
 // deliberate:
 //
-//	r  ──►  TeeReader (SHA-256)  ──►  [encrypter]  ──►  ShardWriter  ──►  provider
+//	r  ──►  TeeReader (SHA-256)  ──►  StreamEncrypter  ──►  ShardWriter  ──►  provider
 //
 // Every stage is an io.Reader or io.Writer over a fixed buffer. Nothing in it
 // grows with file size, nothing calls ReadAll, and no []byte is allocated per
@@ -82,6 +82,13 @@ func (s *Service) Upload(ctx context.Context, req UploadRequest, r io.Reader) (F
 	committed := false
 	writtenShards := make([]committedShard, 0, len(plan.Shards))
 	defer func() {
+		// Reservations are released either way. On success the bytes are
+		// used rather than reserved; on failure they were never used at
+		// all. Holding them past this point is wrong in both cases, and
+		// leaving it to the janitor would strand capacity for half an
+		// hour after every single upload.
+		s.releasePlan(ctx, plan)
+
 		if committed {
 			return
 		}
@@ -161,7 +168,14 @@ func (s *Service) writeShards(
 		// short, so the count is a maximum rather than a promise.
 		limited := &countingReader{r: io.LimitReader(r, ps.PlainSize)}
 
-		body, storedSize, err := s.wrapForStorage(fileID, int32(i), limited, ps.PlainSize)
+		// Per-shard checksum over plaintext, taken as the bytes go past.
+		// It is what makes an integrity check on read possible without
+		// re-reading the whole file, and it localises a corrupt shard to
+		// one drive rather than to "somewhere in a 30 GB file".
+		shardDigest := sha256.New()
+		hashedShard := io.TeeReader(limited, shardDigest)
+
+		body, storedSize, err := s.wrapForStorage(fileID, int32(i), hashedShard, ps.PlainSize)
 		if err != nil {
 			return total, written, err
 		}
@@ -188,7 +202,7 @@ func (s *Service) writeShards(
 			SizeBytes:   ref.Size,
 			PlainSize:   plainWritten,
 			PlainOffset: ps.PlainOffset,
-			SHA256:      nil,
+			SHA256:      shardDigest.Sum(nil),
 		})
 		if err != nil {
 			// The object exists at the provider but the row does not.
@@ -358,4 +372,26 @@ func CleanName(raw string) (string, error) {
 		}
 	}
 	return name, nil
+}
+
+// releasePlan gives back the capacity a plan reserved, if the planner holds
+// any. It runs on a detached context for the same reason cleanup does: the
+// usual failure is a cancelled request, and skipping the release exactly when
+// an upload died is how a pool shrinks over time.
+func (s *Service) releasePlan(ctx context.Context, plan Plan) {
+	releaser, ok := s.planner.(ReleasingPlanner)
+	if !ok || plan.UploadID == uuid.Nil {
+		return
+	}
+
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+
+	if err := releaser.Release(releaseCtx, plan.UploadID); err != nil {
+		// Not fatal: the janitor reclaims it at expiry. Still worth
+		// knowing, because capacity is briefly understated until then.
+		s.log.WarnContext(releaseCtx, "could not release upload reservations",
+			slog.String("upload_id", plan.UploadID.String()),
+			slog.String("error", err.Error()))
+	}
 }
