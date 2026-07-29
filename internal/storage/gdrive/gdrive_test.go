@@ -3,6 +3,7 @@ package gdrive
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,11 @@ type stubDrive struct {
 
 	// sessionBody records what arrived on the resumable PUT.
 	uploadedBytes int64
+
+	// folderID is the app folder shards should be parented into.
+	folderID string
+	// sessionParents records the parents the resumable session declared.
+	sessionParents []string
 
 	// knobs
 	sessionStatus  int
@@ -63,7 +69,7 @@ func (s *stubDrive) backend() *Backend {
 	s.t.Cleanup(srv.Close)
 
 	client := &http.Client{Transport: &rewriteTransport{base: srv.URL}}
-	return New(client)
+	return New(client, s.folderID)
 }
 
 // rewriteTransport sends every request to the stub server, preserving the path
@@ -126,6 +132,16 @@ func (s *stubDrive) handleSessionStart(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-Upload-Content-Length") == "" {
 		s.t.Error("session start did not declare X-Upload-Content-Length")
 	}
+	// Capture the parents so a test can assert shards are filed, not
+	// dumped at root.
+	var meta struct {
+		Parents []string `json:"parents"`
+	}
+	if body, rerr := io.ReadAll(io.LimitReader(r.Body, 1<<20)); rerr == nil {
+		_ = json.Unmarshal(body, &meta)
+	}
+	s.sessionParents = meta.Parents
+
 	if !s.omitLocation {
 		w.Header().Set("Location", "/upload/session/abc")
 	}
@@ -492,5 +508,39 @@ func TestScopeIsDriveFileOnly(t *testing.T) {
 	// project into Google's restricted-scope review.
 	if Scope != "https://www.googleapis.com/auth/drive.file" {
 		t.Errorf("Scope = %q, want drive.file only", Scope)
+	}
+}
+
+// Shards must be parented into the app folder, not left at Drive root where
+// they look like junk and get deleted. The resumable session declares the
+// parent, and it is a separate code path from any other create call.
+func TestPutParentsShardsIntoTheAppFolder(t *testing.T) {
+	s := newStub(t)
+	s.folderID = "app-folder-123"
+	b := s.backend()
+
+	if _, err := b.Put(context.Background(), bytes.NewReader([]byte("shard")),
+		storage.ObjectSpec{Name: "skein-abc-0000.bin", Size: 5}); err != nil {
+		t.Fatalf("Put() = %v", err)
+	}
+
+	if len(s.sessionParents) != 1 || s.sessionParents[0] != "app-folder-123" {
+		t.Errorf("resumable session declared parents %v, want [app-folder-123]", s.sessionParents)
+	}
+}
+
+// With no folder established the shard still uploads, to root, exactly as
+// before. A folder that could not be created must not block an upload.
+func TestPutFallsBackToRootWithNoFolder(t *testing.T) {
+	s := newStub(t)
+	s.folderID = ""
+	b := s.backend()
+
+	if _, err := b.Put(context.Background(), bytes.NewReader([]byte("shard")),
+		storage.ObjectSpec{Name: "skein-abc-0000.bin", Size: 5}); err != nil {
+		t.Fatalf("Put() = %v", err)
+	}
+	if len(s.sessionParents) != 0 {
+		t.Errorf("parents = %v, want none when no folder is set", s.sessionParents)
 	}
 }
