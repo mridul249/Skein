@@ -145,7 +145,7 @@ matter:
 
 | Variable | Notes |
 |---|---|
-| `SKEIN_MASTER_KEY` | 32 bytes, base64. **Back it up somewhere that is not the database disk.** |
+| `SKEIN_MASTER_KEY` | 32 bytes, base64. **Back it up — and the database too, see [Backups](#backups).** |
 | `SKEIN_JWT_SECRET` | Separate from the master key so either can rotate alone |
 | `SKEIN_DATABASE_URL` | Postgres 15+ |
 | `SKEIN_TRUSTED_PROXIES` | CIDRs. `X-Forwarded-For` is ignored from anywhere else |
@@ -167,6 +167,31 @@ typo is a startup error rather than a surprise on someone's first upload.
 - File content served with a twelve-entry inline allowlist, `nosniff`, and
   `default-src 'none'; sandbox`. `text/html`, `*+xml` and SVG are never inline
 - No object is ever granted provider-side public permissions
+
+## Backups
+
+**Two things have to survive, not one.**
+
+The master key decrypts shard contents. The database records which shard is
+part of which file, in what order, on which drive. With the key but no
+database, your shards are unlabelled encrypted blobs and nothing can
+reassemble them. With the database but no key, the manifest is intact and the
+contents are unreadable.
+
+```bash
+make backup            # -> backups/skein-<timestamp>.sql.gz
+```
+
+Keep the key somewhere else entirely — a password manager, not the same disk.
+
+```bash
+# Restore
+gunzip -c backups/skein-20260730-120000.sql.gz | psql "$SKEIN_DATABASE_URL"
+```
+
+> Making the drives self-describing — so the database becomes a rebuildable
+> cache rather than a single point of failure — is Phase 7 Task 5 and is not
+> built yet. Until it lands, the database is load-bearing. Back it up.
 
 ## Development
 
