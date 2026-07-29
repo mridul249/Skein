@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	skcrypto "github.com/mridul60214/skein/internal/crypto"
 	"github.com/mridul60214/skein/internal/skerr"
 	"github.com/mridul60214/skein/internal/storage"
 )
@@ -96,12 +97,13 @@ func (s *Service) openRange(ctx context.Context, userID uuid.UUID, file File, st
 	}
 
 	return &shardReader{
-		ctx:      ctx,
-		svc:      s,
-		userID:   userID,
-		fileID:   file.ID,
-		segments: segments,
-		current:  -1,
+		ctx:       ctx,
+		svc:       s,
+		userID:    userID,
+		fileID:    file.ID,
+		encrypted: file.IsEncrypted,
+		segments:  segments,
+		current:   -1,
 	}, nil
 }
 
@@ -114,7 +116,10 @@ type readSegment struct {
 	offset int64
 	// length is how many bytes to take from it.
 	length int64
-	index  int32
+	// plainSize is the shard's whole plaintext length, which the ciphertext
+	// offset arithmetic needs to locate the short final frame.
+	plainSize int64
+	index     int32
 }
 
 // planRead selects the shards intersecting [start, start+length) and the slice
@@ -140,11 +145,12 @@ func planRead(shards []Shard, start, length int64) []readSegment {
 		to := min(end, shardEnd)
 
 		out = append(out, readSegment{
-			shard:   storage.ObjectRef{ProviderID: sh.ProviderID, Size: sh.SizeBytes},
-			account: sh.AccountID,
-			offset:  from - shardStart,
-			length:  to - from,
-			index:   sh.Index,
+			shard:     storage.ObjectRef{ProviderID: sh.ProviderID, Size: sh.SizeBytes},
+			account:   sh.AccountID,
+			offset:    from - shardStart,
+			length:    to - from,
+			plainSize: sh.PlainSize,
+			index:     sh.Index,
 		})
 	}
 	return out
@@ -153,14 +159,20 @@ func planRead(shards []Shard, start, length int64) []readSegment {
 // shardReader concatenates shard slices in order, opening each one only when
 // the previous is exhausted.
 type shardReader struct {
-	ctx      context.Context
-	svc      *Service
-	userID   uuid.UUID
-	fileID   uuid.UUID
-	segments []readSegment
-	current  int
-	body     io.ReadCloser
-	closed   bool
+	ctx       context.Context
+	svc       *Service
+	userID    uuid.UUID
+	fileID    uuid.UUID
+	encrypted bool
+	segments  []readSegment
+	current   int
+	// body is what Read consumes: the provider stream for plaintext, or the
+	// decrypting reader wrapped around it when the file is encrypted.
+	body io.Reader
+	// closer is always the provider stream. The decrypting reader has no
+	// resources of its own, so this is what has to be closed.
+	closer io.Closer
+	closed bool
 }
 
 func (r *shardReader) Read(p []byte) (int, error) {
@@ -185,12 +197,7 @@ func (r *shardReader) Read(p []byte) (int, error) {
 			// This shard is done; move to the next one. The loop
 			// continues rather than returning 0, nil, which callers
 			// are allowed to treat as a stall.
-			if cerr := r.body.Close(); cerr != nil {
-				r.svc.log.WarnContext(r.ctx, "closing shard reader",
-					slog.String("file_id", r.fileID.String()),
-					slog.String("error", cerr.Error()))
-			}
-			r.body = nil
+			r.closeCurrent()
 			continue
 		}
 		if err != nil {
@@ -212,10 +219,25 @@ func (r *shardReader) openNext() error {
 			"The drive holding shard %d of this file is not connected.", seg.index)
 	}
 
-	body, n, err := backend.Get(r.ctx, seg.shard, &storage.ByteRange{
-		Start:  seg.offset,
-		Length: seg.length,
-	})
+	// The provider request is expressed in stored bytes. For plaintext that
+	// is the same range the caller asked for; for ciphertext it is the
+	// frames that overlap it, which is what keeps a one-byte range from
+	// fetching a whole 256 MiB shard.
+	fetch := storage.ByteRange{Start: seg.offset, Length: seg.length}
+	var firstFrame uint64
+	var skip int
+
+	if r.encrypted {
+		cStart, cLen, frame, sk := skcrypto.CipherRange(seg.offset, seg.length, seg.plainSize)
+		if cLen == 0 {
+			return skerr.Public(skerr.ErrIntegrity,
+				"Shard %d of this file does not cover the bytes requested.", seg.index)
+		}
+		fetch = storage.ByteRange{Start: cStart, Length: cLen}
+		firstFrame, skip = frame, sk
+	}
+
+	body, n, err := backend.Get(r.ctx, seg.shard, &fetch)
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotFound) {
 			// The manifest points at something that is not there. This
@@ -230,7 +252,7 @@ func (r *shardReader) openNext() error {
 
 	// The provider disagreeing about length means the object is not what
 	// the manifest says it is.
-	if n >= 0 && n != seg.length {
+	if n >= 0 && n != fetch.Length {
 		if cerr := body.Close(); cerr != nil {
 			r.svc.log.WarnContext(r.ctx, "closing mismatched shard",
 				slog.String("error", cerr.Error()))
@@ -239,8 +261,35 @@ func (r *shardReader) openNext() error {
 			"Shard %d of this file is the wrong size.", seg.index)
 	}
 
+	r.closer = body
 	r.body = body
+
+	if r.encrypted {
+		dec, derr := r.svc.keyring.NewDecryptRangeReader(
+			r.fileID[:], uint32(seg.index), body, firstFrame, skip, seg.length)
+		if derr != nil {
+			r.closeCurrent()
+			return fmt.Errorf("open decrypt reader for shard %d: %w", seg.index, derr)
+		}
+		r.body = dec
+	}
+
 	return nil
+}
+
+// closeCurrent releases the provider stream for the shard in hand. The
+// decrypting reader wraps it and holds nothing of its own, so this is the only
+// thing that needs closing.
+func (r *shardReader) closeCurrent() {
+	if r.closer != nil {
+		if cerr := r.closer.Close(); cerr != nil {
+			r.svc.log.WarnContext(r.ctx, "closing shard reader",
+				slog.String("file_id", r.fileID.String()),
+				slog.String("error", cerr.Error()))
+		}
+	}
+	r.closer = nil
+	r.body = nil
 }
 
 // Close releases the shard currently open. It is safe to call more than once.
@@ -249,12 +298,14 @@ func (r *shardReader) Close() error {
 		return nil
 	}
 	r.closed = true
-	if r.body == nil {
+	if r.closer == nil {
+		r.body = nil
 		return nil
 	}
-	body := r.body
+	closer := r.closer
+	r.closer = nil
 	r.body = nil
-	if err := body.Close(); err != nil {
+	if err := closer.Close(); err != nil {
 		return fmt.Errorf("close shard reader: %w", err)
 	}
 	return nil
