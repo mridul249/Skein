@@ -69,6 +69,11 @@ migrate-status:
 ## web: build the frontend into internal/web/dist for embedding
 web:
 	cd web && npm ci && npm run build
+	@# Vite empties the output directory, which takes the .gitkeep with it.
+	@# //go:embed needs internal/web/dist to exist on a fresh clone, so the
+	@# marker is restored here rather than left to whoever notices the
+	@# build breaking.
+	@touch $(WEB_DIST)/.gitkeep
 
 ## web-dev: run the Vite dev server against a local API
 web-dev:
