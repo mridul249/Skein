@@ -159,8 +159,17 @@ export function Drives() {
                     className="rounded p-2 text-overlay0 transition-colors duration-hover hover:text-red"
                     onClick={() => {
                       // Design.md §7: name the consequence, not "Are you sure?".
+                      //
+                      // This used to end "until you reconnect", which is false:
+                      // disconnect deletes the account row, so the shards' link
+                      // to it is nulled and reconnecting mints a new row that
+                      // re-links nothing. Known issue #19. The mechanism fix is
+                      // scheduled for Session 3 (soft delete, keeping the row id
+                      // stable); until it lands the warning has to say what
+                      // actually happens. Restore the reassuring wording when
+                      // the fix makes it true.
                       const ok = window.confirm(
-                        `Disconnect ${drive.email}? Files stored on it become unreadable until you reconnect. Nothing is deleted from Google.`,
+                        `Disconnect ${drive.email}? Files with a shard on it become unreadable, and reconnecting does NOT currently restore access — the link between those files and this drive is lost. Nothing is deleted from Google; the data is still there, but Skein will not be able to find it.`,
                       );
                       if (ok) disconnect.mutate(drive.id);
                     }}
