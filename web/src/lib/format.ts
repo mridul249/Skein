@@ -51,6 +51,14 @@ export function relativeTime(iso: string): string {
  * drive is the same colour in the sidebar rail, the pooled quota bar and every
  * shard dot, and that consistency is what turns a palette into an information
  * system.
+ *
+ * The input is `ordinal`, a column persisted on the account row at link time
+ * (`NextAccountOrdinal` = `MAX(ordinal)+1`), **never a position in an array**.
+ * That distinction is the whole point: an index-based ramp would reshuffle
+ * every colour when a drive is removed from the middle of the list, and since
+ * shard dots encode which drive holds each shard, every existing file's shard
+ * map would quietly start naming the wrong drives. Reconnecting the same
+ * Google identity reuses the same row and therefore the same colour.
  */
 const RAMP = [
   'drive1',
@@ -81,6 +89,39 @@ export const DRIVE_BG: Record<DriveColor, string> = {
   drive7: 'bg-drive7',
   drive8: 'bg-drive8',
 };
+
+/**
+ * The colour for a shard whose drive cannot be identified.
+ *
+ * Deliberately **not** a ramp colour. A shard orphaned by a disconnect carries
+ * `account_id: null` (known issue #19), and this used to fall back to ordinal
+ * 1 — so an orphaned shard rendered in the first drive's blue, visually
+ * claiming to live on a drive that does not hold it. A neutral surface says
+ * "unknown", which is the true answer.
+ *
+ * Design.md §5 still applies: never colour alone. Callers pair this with the
+ * ✕ glyph and a text label.
+ */
+export const UNKNOWN_DRIVE_BG = 'bg-surface1';
+export const UNKNOWN_DRIVE_TEXT = 'text-subtext0';
+
+/** A drive as the colour system needs to see it. */
+interface Rampable {
+  id: string;
+  ordinal: number;
+}
+
+/**
+ * shardColor resolves a shard's account id to its ramp colour, or `null` when
+ * the drive is unknown — orphaned, or not in the list the caller was given.
+ * Returning `null` rather than a default is what stops an unidentifiable shard
+ * from impersonating a real drive.
+ */
+export function shardColor(accountId: string | null, drives: Rampable[]): DriveColor | null {
+  if (accountId === null) return null;
+  const drive = drives.find((d) => d.id === accountId);
+  return drive ? driveColor(drive.ordinal) : null;
+}
 
 export const DRIVE_TEXT: Record<DriveColor, string> = {
   drive1: 'text-drive1',

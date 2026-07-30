@@ -3,7 +3,14 @@ import { Lock } from 'lucide-react';
 import clsx from 'clsx';
 
 import type { Drive, FileItem } from '../lib/api';
-import { DRIVE_BG, DRIVE_TEXT, bytes, driveColor } from '../lib/format';
+import {
+  DRIVE_BG,
+  DRIVE_TEXT,
+  UNKNOWN_DRIVE_BG,
+  UNKNOWN_DRIVE_TEXT,
+  bytes,
+  shardColor,
+} from '../lib/format';
 
 /**
  * The shard map. Design.md §5.
@@ -29,8 +36,19 @@ interface Props {
 export function ShardMap({ file, drives, activeShard }: Props) {
   const [open, setOpen] = useState(false);
 
-  const ordinalOf = (accountId: string | null): number =>
-    drives.find((d) => d.id === accountId)?.ordinal ?? 1;
+  // Returns null for a shard whose drive cannot be identified. This used to
+  // be `?? 1`, which painted an orphaned shard in the first drive's colour —
+  // the map's whole job is saying which drive holds what, so a confident wrong
+  // answer was worse than none.
+  const bgFor = (accountId: string | null): string => {
+    const color = shardColor(accountId, drives);
+    return color ? DRIVE_BG[color] : UNKNOWN_DRIVE_BG;
+  };
+
+  const textFor = (accountId: string | null): string => {
+    const color = shardColor(accountId, drives);
+    return color ? DRIVE_TEXT[color] : UNKNOWN_DRIVE_TEXT;
+  };
 
   const driveLabel = (accountId: string | null): string => {
     const drive = drives.find((d) => d.id === accountId);
@@ -64,7 +82,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
             key={shard.index}
             className={clsx(
               'h-2 w-2',
-              DRIVE_BG[driveColor(ordinalOf(shard.account_id))],
+              bgFor(shard.account_id),
               activeShard === shard.index && 'shard-active',
             )}
           />
@@ -95,7 +113,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
                 <div
                   key={shard.index}
                   className={clsx(
-                    DRIVE_BG[driveColor(ordinalOf(shard.account_id))],
+                    bgFor(shard.account_id),
                     activeShard === shard.index && 'shard-active',
                   )}
                   style={{ width: `${Math.max(share, 1)}%` }}
@@ -106,12 +124,11 @@ export function ShardMap({ file, drives, activeShard }: Props) {
 
           <ul className="mb-3 space-y-1.5">
             {file.shards.map((shard) => {
-              const color = driveColor(ordinalOf(shard.account_id));
-              const missing = shard.account_id === null;
+              const missing = shardColor(shard.account_id, drives) === null;
               return (
                 <li key={shard.index} className="flex items-center gap-2 text-data">
-                  <span className={clsx('h-2 w-2 shrink-0', DRIVE_BG[color])} />
-                  <span className={clsx('flex-1 truncate', DRIVE_TEXT[color])}>
+                  <span className={clsx('h-2 w-2 shrink-0', bgFor(shard.account_id))} />
+                  <span className={clsx('flex-1 truncate', textFor(shard.account_id))}>
                     {driveLabel(shard.account_id)}
                   </span>
                   <span className="tabular shrink-0 text-subtext0">shard {shard.index}</span>
