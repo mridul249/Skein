@@ -2,7 +2,7 @@ import clsx from 'clsx';
 
 import type { Drive, Quota } from '../lib/api';
 import { DRIVE_BG, bytes, driveColor, percent, usageTone } from '../lib/format';
-import { Tooltip } from './Tooltip';
+import { Overlay } from './Overlay';
 
 /**
  * The pooled quota bar. Design.md §4.
@@ -113,11 +113,11 @@ function PackedBar({
               flexShrink: 0,
             }}
           >
-            <Tooltip
+            <Overlay
               disabled={!showTooltips}
               label={label}
               className={clsx(
-                'h-full w-full cursor-default border-r border-crust',
+                'block h-full w-full cursor-default border-r border-crust',
                 'hover:brightness-125 focus-visible:brightness-125',
                 DRIVE_BG[driveColor(drive.ordinal)],
               )}
