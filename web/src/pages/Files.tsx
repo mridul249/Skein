@@ -13,6 +13,7 @@ import clsx from 'clsx';
 import { ApiError, api, type FileItem, type Folder } from '../lib/api';
 import { QuotaBar } from '../components/QuotaBar';
 import { ShardMap } from '../components/ShardMap';
+import { Modal } from '../components/Modal';
 import { bytes, relativeTime } from '../lib/format';
 import { useUploads } from '../lib/uploads-context';
 
@@ -21,6 +22,9 @@ export function Files() {
   const [folderId, setFolderId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [banner, setBanner] = useState('');
+  /** Open dialogs. Only one can be open at a time by construction. */
+  const [naming, setNaming] = useState(false);
+  const [deleting, setDeleting] = useState<Folder | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { start: startUploadJob } = useUploads();
 
@@ -85,6 +89,15 @@ export function Files() {
       setBanner(err instanceof ApiError ? err.message : 'Could not create that folder.'),
   });
 
+  // Was a bare `api.deleteFolder(...).then(refresh)` behind a window.confirm,
+  // so a failure went nowhere — no banner, no retry, the row just stayed.
+  const removeFolder = useMutation({
+    mutationFn: (id: string) => api.deleteFolder(id),
+    onSuccess: refresh,
+    onError: (err: unknown) =>
+      setBanner(err instanceof ApiError ? err.message : 'Could not delete that folder.'),
+  });
+
   /**
    * Hands the transfer to the browser rather than running it in the tab.
    *
@@ -129,16 +142,43 @@ export function Files() {
         dragging && 'outline-dashed outline-2 outline-offset-4 outline-mauve',
       )}
     >
+      {/* The window.prompt replacement. A native prompt could not be styled,
+          could not show which folder it was creating inside, and dropped the
+          user into browser chrome mid-task. */}
+      <Modal
+        open={naming}
+        title="New folder"
+        confirmLabel="Create"
+        prompt={{ label: 'Name', placeholder: 'projects' }}
+        onCancel={() => setNaming(false)}
+        onConfirm={(name) => {
+          newFolder.mutate(name);
+          setNaming(false);
+        }}
+      />
+
+      {/* Design.md §7: name what goes, not "Are you sure?". */}
+      <Modal
+        open={deleting !== null}
+        title={deleting ? `Delete ${deleting.name} and everything in it?` : ''}
+        intent="danger"
+        confirmLabel="Delete"
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => {
+          if (deleting) removeFolder.mutate(deleting.id);
+          setDeleting(null);
+        }}
+      >
+        Files inside this folder go to Trash, where you can still restore them.
+      </Modal>
+
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-display-m font-bold">Files</h1>
         <div className="flex gap-2">
           <button
             type="button"
             className="btn-ghost"
-            onClick={() => {
-              const name = window.prompt('Folder name');
-              if (name) newFolder.mutate(name);
-            }}
+            onClick={() => setNaming(true)}
           >
             <FolderPlus size={15} aria-hidden />
             New folder
@@ -235,11 +275,7 @@ export function Files() {
                     type="button"
                     aria-label={`Delete folder ${folder.name}`}
                     className="p-1 text-subtext0 transition-colors duration-hover hover:text-red"
-                    onClick={() => {
-                      if (window.confirm(`Delete ${folder.name} and everything in it?`)) {
-                        void api.deleteFolder(folder.id).then(refresh);
-                      }
-                    }}
+                    onClick={() => setDeleting(folder)}
                   >
                     <Trash2 size={15} aria-hidden />
                   </button>

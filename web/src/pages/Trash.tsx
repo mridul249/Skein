@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RotateCcw, Trash2 } from 'lucide-react';
 
-import { ApiError, api } from '../lib/api';
+import { ApiError, api, type FileItem } from '../lib/api';
 import { bytes, relativeTime } from '../lib/format';
+import { Modal } from '../components/Modal';
 
 /**
  * Trash. Nothing here has been deleted at the provider — trashing is
@@ -12,6 +13,8 @@ import { bytes, relativeTime } from '../lib/format';
 export function Trash() {
   const qc = useQueryClient();
   const [banner, setBanner] = useState('');
+  /** The file awaiting a permanent-delete confirmation, if any. */
+  const [erasing, setErasing] = useState<FileItem | null>(null);
 
   const { data, isLoading } = useQuery({ queryKey: ['trash'], queryFn: api.listTrash });
 
@@ -36,9 +39,31 @@ export function Trash() {
   });
 
   const files = data?.files ?? [];
+  const shardCount = erasing?.shards.length ?? 0;
 
   return (
     <div>
+      {/* Design.md §7: "Delete archive.tar.zst and its 3 shards?", never
+          "Are you sure?". The count is the whole point — it is the only place
+          the user learns the file was striped. */}
+      <Modal
+        open={erasing !== null}
+        title={
+          erasing
+            ? `Delete ${erasing.name} and its ${shardCount} ${shardCount === 1 ? 'shard' : 'shards'}?`
+            : ''
+        }
+        intent="danger"
+        confirmLabel="Delete forever"
+        onCancel={() => setErasing(null)}
+        onConfirm={() => {
+          if (erasing) erase.mutate(erasing.id);
+          setErasing(null);
+        }}
+      >
+        This cannot be undone.
+      </Modal>
+
       <header className="mb-5">
         <h1 className="font-display text-display-m font-bold">Trash</h1>
         <p className="mt-1 text-body text-subtext0">
@@ -94,13 +119,7 @@ export function Trash() {
                       type="button"
                       aria-label={`Delete ${file.name} permanently`}
                       className="p-1 text-subtext0 transition-colors duration-hover hover:text-red"
-                      onClick={() => {
-                        const shards = file.shards.length;
-                        const ok = window.confirm(
-                          `Delete ${file.name} and its ${shards} ${shards === 1 ? 'shard' : 'shards'}? This cannot be undone.`,
-                        );
-                        if (ok) erase.mutate(file.id);
-                      }}
+                      onClick={() => setErasing(file)}
                     >
                       <Trash2 size={15} aria-hidden />
                     </button>
