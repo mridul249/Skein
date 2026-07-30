@@ -49,7 +49,7 @@ export function Tooltip({
           id={id}
           role="tooltip"
           className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 w-max max-w-xs
-                     -translate-x-1/2 rounded border border-surface0 bg-base px-2.5 py-1.5
+                     -translate-x-1/2 border border-surface0 bg-base px-1ch py-halfline
                      text-left shadow-none"
         >
           {content}

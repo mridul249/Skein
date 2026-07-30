@@ -48,7 +48,7 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center px-5">
       <div className="w-full max-w-sm">
         <div className="mb-8">
-          <h1 className="font-display text-display-m font-semibold tracking-tight text-text">
+          <h1 className="font-display text-display-m font-bold text-text">
             Skein
           </h1>
           <p className="mt-1 text-body text-subtext0">
@@ -56,7 +56,7 @@ export function Login() {
           </p>
         </div>
 
-        <form onSubmit={(e) => void submit(e)} className="card space-y-4 p-5" noValidate>
+        <form onSubmit={(e) => void submit(e)} className="card space-y-1line p-2ch" noValidate>
           <div>
             <label htmlFor="email" className="label">
               Email
@@ -100,7 +100,7 @@ export function Login() {
               </p>
             ) : (
               mode === 'register' && (
-                <p id="password-hint" className="mt-1 text-caption text-overlay0">
+                <p id="password-hint" className="mt-1 text-caption text-subtext0">
                   At least 12 characters. Length is what matters, not symbols.
                 </p>
               )

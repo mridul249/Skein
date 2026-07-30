@@ -6,10 +6,11 @@
     <meta name="color-scheme" content="dark" />
     <meta name="description" content="Your free cloud accounts, pooled, striped and encrypted." />
     <!-- No external font or analytics request: a self-hosted tool that
-         phones home on every page load is a contradiction. -->
+         phones home on every page load is a contradiction. JetBrains Mono is
+         vendored as woff2 under src/fonts and bundled by Vite. -->
     <title>Skein</title>
   </head>
-  <body class="bg-crust text-text font-sans antialiased">
+  <body class="bg-crust text-text font-mono antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

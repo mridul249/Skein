@@ -39,7 +39,7 @@ export function UploadList() {
         const live = isActive(job);
         const fraction = job.size > 0 ? Math.min(1, job.sent / job.size) : 0;
         return (
-          <li key={job.id} className="card px-4 py-3">
+          <li key={job.id} className="card px-2ch py-1line">
             <div className="mb-1.5 flex items-baseline justify-between gap-3">
               <span className="truncate text-label text-text">{job.name}</span>
               <span
@@ -51,7 +51,7 @@ export function UploadList() {
                 {label(job)}
               </span>
             </div>
-            <div className="h-1 w-full overflow-hidden rounded bg-surface0">
+            <div className="h-1 w-full overflow-hidden bg-surface0">
               <div
                 className={clsx(
                   'h-full transition-[width] duration-hover',
@@ -66,7 +66,7 @@ export function UploadList() {
             <div className="mt-1.5 text-right">
               <button
                 type="button"
-                className="text-caption text-overlay0 hover:text-red"
+                className="text-caption text-subtext0 hover:text-red"
                 onClick={() => (live ? cancel(job.id) : dismiss(job.id))}
               >
                 {live ? 'Cancel' : 'Dismiss'}

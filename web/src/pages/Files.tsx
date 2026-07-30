@@ -125,12 +125,12 @@ export function Files() {
         for (const file of Array.from(e.dataTransfer.files)) startUpload(file);
       }}
       className={clsx(
-        'min-h-[60vh] rounded transition-colors duration-hover',
+        'min-h-[60vh] transition-colors duration-hover',
         dragging && 'outline-dashed outline-2 outline-offset-4 outline-mauve',
       )}
     >
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-display-m font-semibold tracking-tight">Files</h1>
+        <h1 className="font-display text-display-m font-bold">Files</h1>
         <div className="flex gap-2">
           <button
             type="button"
@@ -167,7 +167,7 @@ export function Files() {
       )}
 
       {banner && (
-        <p role="alert" className="mb-4 rounded border border-red/40 bg-red/10 px-3 py-2 text-body text-red">
+        <p role="alert" className="mb-4 border border-red/40 bg-red/10 px-2ch py-halfline text-body text-red">
           {banner}
         </p>
       )}
@@ -189,22 +189,22 @@ export function Files() {
       )}
 
       <div className="card overflow-x-auto">
-        <table className="w-full min-w-[40rem] border-collapse">
+        <table className="w-full min-w-[46rem] border-collapse">
           <thead>
             <tr className="border-b border-surface0 text-left">
-              <th scope="col" className="px-4 py-2.5 text-label font-medium text-subtext0">
+              <th scope="col" className="px-2ch py-halfline text-label font-bold text-subtext0">
                 Name
               </th>
-              <th scope="col" className="w-28 px-4 py-2.5 text-right text-label font-medium text-subtext0">
+              <th scope="col" className="w-28 px-2ch py-halfline text-right text-label font-bold text-subtext0">
                 Size
               </th>
-              <th scope="col" className="w-28 px-4 py-2.5 text-label font-medium text-subtext0">
+              <th scope="col" className="w-28 px-2ch py-halfline text-label font-bold text-subtext0">
                 Stored
               </th>
-              <th scope="col" className="w-24 px-4 py-2.5 text-label font-medium text-subtext0">
+              <th scope="col" className="w-28 px-2ch py-halfline text-label font-bold text-subtext0">
                 Added
               </th>
-              <th scope="col" className="w-24 px-4 py-2.5">
+              <th scope="col" className="w-24 px-2ch py-halfline">
                 <span className="sr-only">Actions</span>
               </th>
             </tr>
@@ -215,7 +215,7 @@ export function Files() {
                 key={folder.id}
                 className="h-row border-b border-surface0/60 transition-colors duration-hover hover:bg-surface0"
               >
-                <td className="px-4">
+                <td className="px-2ch">
                   <button
                     type="button"
                     className="flex items-center gap-2 text-body text-text"
@@ -225,16 +225,16 @@ export function Files() {
                     {folder.name}
                   </button>
                 </td>
-                <td className="px-4 text-right text-data text-overlay0">—</td>
-                <td className="px-4" />
-                <td className="px-4 text-data text-overlay0">
+                <td className="px-2ch text-right text-data text-subtext0">—</td>
+                <td className="px-2ch" />
+                <td className="px-2ch text-data text-subtext0">
                   {relativeTime(folder.created_at)}
                 </td>
-                <td className="px-4 text-right">
+                <td className="px-2ch text-right">
                   <button
                     type="button"
                     aria-label={`Delete folder ${folder.name}`}
-                    className="rounded p-1 text-overlay0 transition-colors duration-hover hover:text-red"
+                    className="p-1 text-subtext0 transition-colors duration-hover hover:text-red"
                     onClick={() => {
                       if (window.confirm(`Delete ${folder.name} and everything in it?`)) {
                         void api.deleteFolder(folder.id).then(refresh);
@@ -252,20 +252,20 @@ export function Files() {
                 key={file.id}
                 className="h-row border-b border-surface0/60 transition-colors duration-hover hover:bg-surface0"
               >
-                <td className="max-w-0 truncate px-4 text-body">{file.name}</td>
-                <td className="tabular px-4 text-right text-data text-subtext0">
+                <td className="max-w-0 truncate px-2ch text-body">{file.name}</td>
+                <td className="tabular px-2ch text-right text-data text-subtext0">
                   {bytes(file.size_bytes)}
                 </td>
-                <td className="px-4">
+                <td className="px-2ch">
                   <ShardMap file={file} drives={drives} />
                 </td>
-                <td className="px-4 text-data text-overlay0">{relativeTime(file.created_at)}</td>
-                <td className="px-4">
+                <td className="px-2ch text-data text-subtext0">{relativeTime(file.created_at)}</td>
+                <td className="px-2ch">
                   <div className="flex items-center justify-end gap-1">
                     <button
                       type="button"
                       aria-label={`Download ${file.name}`}
-                      className="rounded p-1 text-overlay0 transition-colors duration-hover hover:text-text"
+                      className="p-1 text-subtext0 transition-colors duration-hover hover:text-text"
                       onClick={() => void download(file)}
                     >
                       <Download size={15} aria-hidden />
@@ -273,7 +273,7 @@ export function Files() {
                     <button
                       type="button"
                       aria-label={`Move ${file.name} to trash`}
-                      className="rounded p-1 text-overlay0 transition-colors duration-hover hover:text-red"
+                      className="p-1 text-subtext0 transition-colors duration-hover hover:text-red"
                       onClick={() => trash.mutate(file.id)}
                     >
                       <Trash2 size={15} aria-hidden />
@@ -286,16 +286,16 @@ export function Files() {
         </table>
 
         {!isLoading && files.length === 0 && children.length === 0 && (
-          <div className="px-4 py-16 text-center">
+          <div className="px-2ch py-16 text-center">
             <p className="font-display text-heading text-subtext0">Nothing here yet.</p>
-            <p className="mt-1 text-body text-overlay0">Drag a file in, or press U.</p>
+            <p className="mt-1 text-body text-subtext0">Drag a file in, or press U.</p>
           </div>
         )}
 
-        {isLoading && <div className="px-4 py-16 text-center text-body text-overlay0">Loading…</div>}
+        {isLoading && <div className="px-2ch py-16 text-center text-body text-subtext0">Loading…</div>}
 
         {listError && (
-          <div className="px-4 py-16 text-center text-body text-red">
+          <div className="px-2ch py-16 text-center text-body text-red">
             {listError instanceof ApiError ? listError.message : 'Could not load your files.'}
           </div>
         )}

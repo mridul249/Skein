@@ -3,15 +3,37 @@
 @tailwind utilities;
 
 /*
- * Fonts are declared but not bundled here. Design.md §3 wants three
- * self-hosted woff2 faces in web/src/fonts/; until those files are added the
- * stack falls through to the system sans, which is a correct-looking
- * placeholder rather than a CDN request.
+ * Design.md §3. One face, self-hosted.
+ *
+ * JetBrains Mono, subset to Latin plus the handful of symbols the interface
+ * actually draws, built from the official v2.304 release with `subset-font`.
+ * 80 KB for both weights, under the 120 KB budget in §8. No Google Fonts
+ * request: a self-hosted tool that phones home on first paint is a
+ * contradiction, and a font that arrives over someone else's network is a
+ * dependency the whole project exists to avoid. Licence in ./fonts/OFL.txt.
  */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/JetBrainsMono-Regular-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/JetBrainsMono-Bold-latin.woff2') format('woff2');
+}
 
 @layer base {
   :root {
     color-scheme: dark;
+    /* The character cell. Every horizontal rhythm value is a multiple of
+       this, and every line height a multiple of --line. */
+    --line: 1.4rem;
   }
 
   html,
@@ -23,20 +45,28 @@
   body {
     background-color: theme('colors.crust');
     color: theme('colors.text');
+    /* Global, not per-element. This interface is mostly numbers — sizes,
+       percentages, shard counts, checksums — and a figure that changes width
+       when it changes value makes a column jitter as it updates. Previously
+       this rode on the .tabular class, so anything that forgot the class got
+       proportional digits. */
+    font-variant-numeric: tabular-nums;
   }
 
   /* Design.md §8: visible keyboard focus on every interactive element.
-     Not negotiable, not announced. */
+     Not negotiable, not announced. Radius 0 changes the ring's shape, not
+     its existence. */
   :focus-visible {
     outline: 2px solid theme('colors.mauve');
     outline-offset: 2px;
-    border-radius: 6px;
+    border-radius: 0;
   }
 
-  /* Numbers are most of this interface. Tabular figures mean the size
-     column lines up without per-cell hacks. */
+  /* Retained as an explicit marker on numeric cells. The font and the
+     tabular figures are now global, so this no longer changes rendering —
+     it documents which columns are data, and is the hook if a future
+     proportional face is ever introduced alongside. */
   .tabular {
-    font-family: theme('fontFamily.mono');
     font-variant-numeric: tabular-nums;
   }
 
@@ -54,7 +84,7 @@
   }
   ::-webkit-scrollbar-thumb {
     background: theme('colors.surface0');
-    border-radius: 6px;
+    border-radius: 0;
   }
   ::-webkit-scrollbar-thumb:hover {
     background: theme('colors.surface1');
@@ -63,12 +93,15 @@
 
 @layer components {
   .card {
-    @apply rounded border border-surface0 bg-base;
+    @apply border border-surface0 bg-base;
   }
 
+  /* Padding that borders text is measured in characters: a button's label
+     sits a whole cell in from its border, so buttons of different lengths
+     still align to the same grid. Vertical padding is half a line. */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded border px-3 py-2
-           text-label font-medium transition-colors duration-hover
+    @apply inline-flex items-center justify-center gap-1ch border px-2ch py-halfline
+           text-label font-bold transition-colors duration-hover
            disabled:cursor-not-allowed disabled:opacity-50;
   }
 
@@ -85,13 +118,13 @@
   }
 
   .input {
-    @apply w-full rounded border border-surface2 bg-mantle px-3 py-2 text-body
+    @apply w-full border border-surface2 bg-mantle px-1ch py-halfline text-body
            text-text placeholder:text-overlay0 transition-colors duration-hover
            focus:border-mauve focus:outline-none;
   }
 
   .label {
-    @apply mb-1.5 block text-label font-medium text-subtext0;
+    @apply mb-halfline block text-label font-bold text-subtext0;
   }
 }
 

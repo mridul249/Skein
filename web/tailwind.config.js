@@ -41,27 +41,53 @@ export default {
         drive8: '#eba0ac',
       },
       fontFamily: {
-        display: ['"Bricolage Grotesque"', 'system-ui', 'sans-serif'],
-        sans: ['"IBM Plex Sans"', 'system-ui', 'sans-serif'],
+        // Design.md §3, after the Phase 7 Task 4.2 option A decision: one
+        // face. `display` and `sans` are kept as aliases rather than deleted
+        // so a stray `font-display` cannot silently fall back to system sans.
+        display: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        sans: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },
       fontSize: {
-        'display-l': ['40px', { lineHeight: '44px', letterSpacing: '-0.02em' }],
-        'display-m': ['28px', { lineHeight: '34px', letterSpacing: '-0.015em' }],
-        heading: ['18px', { lineHeight: '26px' }],
-        body: ['15px', { lineHeight: '23px' }],
-        label: ['13px', { lineHeight: '18px', letterSpacing: '0.01em' }],
-        caption: ['12px', { lineHeight: '16px' }],
-        data: ['13px', { lineHeight: '18px' }],
-        'data-sm': ['11px', { lineHeight: '15px' }],
+        // Every line height is a whole multiple of the 1.4rem baseline, so
+        // mixed sizes still land on one grid. Letter-spacing is gone: a
+        // monospace face has a fixed advance and tracking it fights the grid.
+        'display-l': ['40px', { lineHeight: '2.8rem' }],
+        'display-m': ['28px', { lineHeight: '2.8rem' }],
+        heading: ['18px', { lineHeight: '1.4rem' }],
+        body: ['15px', { lineHeight: '1.4rem' }],
+        label: ['13px', { lineHeight: '1.4rem' }],
+        caption: ['12px', { lineHeight: '1.4rem' }],
+        data: ['13px', { lineHeight: '1.4rem' }],
+        'data-sm': ['11px', { lineHeight: '1.4rem' }],
       },
       borderRadius: {
-        // Design.md §4: one value, no exceptions.
-        DEFAULT: '6px',
+        // Design.md §4: radius 0 everywhere, no exceptions. Every named key
+        // Tailwind ships is overridden, so `rounded-full` and friends cannot
+        // reintroduce a curve by reaching past DEFAULT.
+        none: '0',
+        sm: '0',
+        DEFAULT: '0',
+        md: '0',
+        lg: '0',
+        xl: '0',
+        '2xl': '0',
+        '3xl': '0',
+        full: '0',
       },
       spacing: {
         sidebar: '240px',
         row: '44px',
+        // Horizontal rhythm is measured in characters, not pixels: padding
+        // that borders text is a whole number of cells, so a label and the
+        // text beside it share one grid. Vertical rhythm stays in rem
+        // multiples of the 1.4rem baseline.
+        '1ch': '1ch',
+        '2ch': '2ch',
+        '3ch': '3ch',
+        '4ch': '4ch',
+        '1line': '1.4rem',
+        halfline: '0.7rem',
       },
       maxWidth: {
         content: '1400px',

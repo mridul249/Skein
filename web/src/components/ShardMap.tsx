@@ -39,7 +39,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
   };
 
   if (file.shards.length === 0) {
-    return <span className="text-data-sm text-overlay0">—</span>;
+    return <span className="text-data-sm text-subtext0">—</span>;
   }
 
   return (
@@ -50,7 +50,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
     >
       <button
         type="button"
-        className="flex items-center gap-1 rounded px-1 py-1"
+        className="flex items-center gap-1 px-1 py-1"
         aria-label={`${file.shards.length} ${
           file.shards.length === 1 ? 'shard' : 'shards'
         } across ${new Set(file.shards.map((s) => s.account_id)).size} drives`}
@@ -63,7 +63,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
           <span
             key={shard.index}
             className={clsx(
-              'h-2 w-2 rounded-full',
+              'h-2 w-2',
               DRIVE_BG[driveColor(ordinalOf(shard.account_id))],
               activeShard === shard.index && 'shard-active',
             )}
@@ -74,11 +74,11 @@ export function ShardMap({ file, drives, activeShard }: Props) {
       {open && (
         <div
           role="tooltip"
-          className="absolute right-0 top-full z-20 mt-2 w-[26rem] max-w-[90vw] rounded
-                     border border-surface0 bg-base p-4 shadow-none"
+          className="absolute right-0 top-full z-20 mt-2 w-[30rem] max-w-[90vw]
+                     border border-surface0 bg-base p-2ch shadow-none"
         >
           <div className="mb-3 flex items-baseline justify-between gap-3">
-            <span className="truncate text-label font-medium text-text">{file.name}</span>
+            <span className="truncate text-label font-bold text-text">{file.name}</span>
             <span className="tabular shrink-0 text-data-sm text-subtext0">
               {bytes(file.size_bytes)} · {file.shards.length}{' '}
               {file.shards.length === 1 ? 'shard' : 'shards'}
@@ -87,7 +87,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
 
           {/* Proportional to real shard sizes, with a hairline crust gap at
               each boundary so the segmentation reads as structure. */}
-          <div className="mb-3 flex h-3 w-full gap-px overflow-hidden rounded bg-crust">
+          <div className="mb-3 flex h-3 w-full gap-px overflow-hidden bg-crust">
             {file.shards.map((shard) => {
               const share =
                 file.size_bytes > 0 ? (shard.plain_size_bytes / file.size_bytes) * 100 : 100;
@@ -110,7 +110,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
               const missing = shard.account_id === null;
               return (
                 <li key={shard.index} className="flex items-center gap-2 text-data">
-                  <span className={clsx('h-2 w-2 shrink-0 rounded-full', DRIVE_BG[color])} />
+                  <span className={clsx('h-2 w-2 shrink-0', DRIVE_BG[color])} />
                   <span className={clsx('flex-1 truncate', DRIVE_TEXT[color])}>
                     {driveLabel(shard.account_id)}
                   </span>
@@ -131,7 +131,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
           </ul>
 
           <div className="flex items-center justify-between border-t border-surface0 pt-2">
-            <span className="tabular truncate text-data-sm text-overlay0">
+            <span className="tabular truncate text-data-sm text-subtext0">
               {file.sha256 ? `sha256 ${file.sha256.slice(0, 4)}…${file.sha256.slice(-4)}` : ''}
             </span>
             <span className="flex items-center gap-1 text-data-sm text-subtext0">
