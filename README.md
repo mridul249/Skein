@@ -204,14 +204,22 @@ gunzip -c backups/skein-20260730-172157-v7.sql.gz \
 # 3. Migrate. The dump lands at whatever schema version it was taken at — the
 #    version in its filename. If the binary has moved on since, the restore is
 #    behind until this runs.
-#
-#    Call goose directly, NOT `make migrate`. Every migrate target sources .env
-#    after the shell's environment, so .env wins and a SKEIN_DATABASE_URL passed
-#    on the command line is silently ignored — `make migrate` would migrate your
-#    LIVE database, not the restored one.
-goose -dir internal/db/migrations postgres \
-  'postgres://postgres@localhost/skein_restored?sslmode=disable' up
+SKEIN_DATABASE_URL='postgres://postgres@localhost/skein_restored?sslmode=disable' \
+  make migrate
 ```
+
+Every db target prints the database it is about to touch, host and name only,
+and says whether the URL came from your environment or from `.env`:
+
+```
+--> localhost/skein_restored (from environment)
+```
+
+**Read that line before pressing on**, particularly for `make migrate-down`. An
+explicitly-set `SKEIN_DATABASE_URL` beats `.env`, so the command above reaches
+the restored database and not your live one — but the printed line is what
+confirms it, and it is the last thing standing between you and a rollback
+against the wrong database.
 
 **Restore into an empty database, never over a live one.** The dump contains
 `CREATE TABLE`, so layering it over existing tables fails on every one of them —
