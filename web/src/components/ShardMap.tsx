@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Lock } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -11,6 +10,7 @@ import {
   bytes,
   shardColor,
 } from '../lib/format';
+import { Overlay } from './Overlay';
 
 /**
  * The shard map. Design.md §5.
@@ -34,8 +34,6 @@ interface Props {
 }
 
 export function ShardMap({ file, drives, activeShard }: Props) {
-  const [open, setOpen] = useState(false);
-
   // Returns null for a shard whose drive cannot be identified. This used to
   // be `?? 1`, which painted an orphaned shard in the first drive's colour —
   // the map's whole job is saying which drive holds what, so a confident wrong
@@ -61,40 +59,17 @@ export function ShardMap({ file, drives, activeShard }: Props) {
   }
 
   return (
-    <div
-      className="relative inline-flex"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
-      <button
-        type="button"
-        className="flex items-center gap-1 px-1 py-1"
-        aria-label={`${file.shards.length} ${
-          file.shards.length === 1 ? 'shard' : 'shards'
-        } across ${new Set(file.shards.map((s) => s.account_id)).size} drives`}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-      >
-        {file.shards.map((shard) => (
-          <span
-            key={shard.index}
-            className={clsx(
-              'h-2 w-2',
-              bgFor(shard.account_id),
-              activeShard === shard.index && 'shard-active',
-            )}
-          />
-        ))}
-      </button>
-
-      {open && (
-        <div
-          role="tooltip"
-          className="absolute right-0 top-full z-20 mt-2 w-[30rem] max-w-[90vw]
-                     border border-surface0 bg-base p-2ch shadow-none"
-        >
+    <Overlay
+      // Below the row it belongs to, which is where a row's detail is looked
+      // for. It flips above by itself near the bottom of the viewport.
+      placement="bottom"
+      className="inline-flex items-center gap-1 px-1 py-1"
+      panelClassName="w-[30rem] p-2ch"
+      label={`${file.shards.length} ${
+        file.shards.length === 1 ? 'shard' : 'shards'
+      } across ${new Set(file.shards.map((s) => s.account_id)).size} drives`}
+      content={
+        <>
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <span className="truncate text-label font-bold text-text">{file.name}</span>
             <span className="tabular shrink-0 text-data-sm text-subtext0">
@@ -161,8 +136,19 @@ export function ShardMap({ file, drives, activeShard }: Props) {
               )}
             </span>
           </div>
-        </div>
-      )}
-    </div>
+        </>
+      }
+    >
+      {file.shards.map((shard) => (
+        <span
+          key={shard.index}
+          className={clsx(
+            'h-2 w-2',
+            bgFor(shard.account_id),
+            activeShard === shard.index && 'shard-active',
+          )}
+        />
+      ))}
+    </Overlay>
   );
 }

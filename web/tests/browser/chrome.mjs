@@ -49,7 +49,12 @@ export async function withChrome({ bin, width = 1280, height = 900, mobile = fal
       '--headless=new',
       '--disable-gpu',
       '--no-sandbox',
-      '--hide-scrollbars',
+      // Deliberately NOT --hide-scrollbars. That flag makes scrollbars take
+      // no width, which silently hid a real defect: opening a panel inside a
+      // scroll container raised a scrollbar, narrowed the content box by 10px
+      // and shifted the trigger out from under the pointer. Headless must
+      // lay out the way the user's browser does, or the harness certifies
+      // bugs as fixed.
       '--no-first-run',
       '--disable-extensions',
       `--remote-debugging-port=${port}`,

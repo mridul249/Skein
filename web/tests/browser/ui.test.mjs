@@ -77,7 +77,7 @@ test('quota bar packs used bytes left, then one remainder', async () => {
     const segs = await p.eval(`(() => {
       const bar = document.querySelector('[role="group"][aria-label^="Pooled storage"]');
       return [...bar.children].map((el) => {
-        const probe = el.querySelector('[role="img"]') ?? el;
+        const probe = el.querySelector('button') ?? el;
         return { w: el.getBoundingClientRect().width,
                  bg: getComputedStyle(probe).backgroundColor,
                  label: probe.getAttribute('aria-label') };
@@ -106,7 +106,7 @@ test('every quota segment is reachable by keyboard and describes itself', async 
       reached = await p.eval(`(() => {
         const bar = document.querySelector('[role="group"][aria-label^="Pooled storage"]');
         return !!bar && bar.contains(document.activeElement)
-          && document.activeElement.getAttribute('role') === 'img';
+          && document.activeElement.tagName === 'BUTTON';
       })()`);
     }
     assert.ok(reached, 'tabbing from the top of the page must reach a quota segment');
@@ -139,6 +139,117 @@ test('an orphaned shard never borrows a real drive colour', async () => {
     // drive 1's blue, claiming to live on a drive that does not hold it.
     assert.notEqual(dots[2], dots[0], 'an orphaned shard must not look like drive 1');
     assert.equal(dots[2], 'rgb(69, 71, 90)', 'an unidentifiable shard is neutral surface1');
+  });
+});
+
+test('an overlay panel is never clipped by an ancestor', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    const r = await p.eval(`(async () => {
+      const btn = [...document.querySelectorAll('button[aria-label*="shard"]')][0];
+      btn.click();
+      await new Promise((r) => setTimeout(r, 400));
+      const panel = document.querySelector('[role="tooltip"]');
+      const box = panel.getBoundingClientRect();
+
+      // Walk every ancestor and check none of them clips the panel. A portal
+      // means the chain is body/html only; anything else here would mean the
+      // panel had drifted back inside a scroll container.
+      const clippers = [];
+      for (let el = panel.parentElement; el && el !== document.documentElement; el = el.parentElement) {
+        const s = getComputedStyle(el);
+        if (s.overflowX !== 'visible' || s.overflowY !== 'visible') {
+          const b = el.getBoundingClientRect();
+          if (box.bottom > b.bottom + 1 || box.right > b.right + 1 ||
+              box.top < b.top - 1 || box.left < b.left - 1) {
+            clippers.push(el.tagName + '.' + String(el.className).slice(0, 40));
+          }
+        }
+      }
+
+      const de = document.documentElement;
+      const root = panel.closest('[data-overlay-root]');
+      return {
+        parent: root?.parentElement?.tagName,
+        position: getComputedStyle(root).position,
+        clippers,
+        inViewport: box.top >= -1 && box.left >= -1 &&
+                    box.bottom <= de.clientHeight + 1 && box.right <= de.clientWidth + 1,
+        box: { t: Math.round(box.top), b: Math.round(box.bottom),
+               l: Math.round(box.left), r: Math.round(box.right) },
+      };
+    })()`);
+    assert.equal(r.parent, 'BODY', 'the panel must be portalled to document.body');
+    assert.equal(r.position, 'fixed', 'positioned from the viewport, not from an ancestor');
+    assert.deepEqual(r.clippers, [], 'no ancestor may clip the panel');
+    assert.ok(r.inViewport, `panel must sit inside the viewport: ${JSON.stringify(r.box)}`);
+  });
+});
+
+test('opening an overlay does not move its own trigger', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    // The old panel was a child of the scrolling card, so opening it grew the
+    // card's scrollHeight, raised a scrollbar, narrowed the content box and
+    // shifted the trigger 10px left — out from under the cursor that had just
+    // opened it. That is the flicker.
+    const r = await p.eval(`(async () => {
+      const btn = [...document.querySelectorAll('button[aria-label*="shard"]')][0];
+      const card = btn.closest('.card');
+      const before = { x: btn.getBoundingClientRect().x, w: card.clientWidth, sh: card.scrollHeight };
+      btn.click();
+      await new Promise((r) => setTimeout(r, 400));
+      const after = { x: btn.getBoundingClientRect().x, w: card.clientWidth, sh: card.scrollHeight };
+      return { before, after };
+    })()`);
+    assert.equal(r.after.x, r.before.x, 'the trigger must not move when the panel opens');
+    assert.equal(r.after.w, r.before.w, 'no ancestor may gain a scrollbar');
+    assert.equal(r.after.sh, r.before.sh, "the panel must not add to an ancestor's scroll height");
+  });
+});
+
+test('moving the pointer from trigger onto the panel keeps it open', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    const rects = await p.eval(`(async () => {
+      const btn = [...document.querySelectorAll('button[aria-label*="shard"]')][0];
+      const b = btn.getBoundingClientRect();
+      btn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      btn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
+      return JSON.stringify({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
+    })()`);
+    const { x, y } = JSON.parse(rects);
+
+    // Real pointer, real gap crossing.
+    await p.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 });
+    await sleep(250);
+    assert.equal(
+      await p.eval(`!!document.querySelector('[role="tooltip"]')`),
+      true,
+      'hovering the trigger opens the panel',
+    );
+
+    const panel = JSON.parse(
+      await p.eval(`(() => { const r = document.querySelector('[role="tooltip"]').getBoundingClientRect();
+        return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2, top: r.top, bottom: r.bottom }); })()`),
+    );
+
+    // Step across the gap between the two boxes, then onto the panel itself.
+    const from = Math.min(y, panel.bottom);
+    const to = Math.max(y, panel.top);
+    for (let step = 0; step <= 6; step++) {
+      const py = from + ((to - from) * step) / 6;
+      await p.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y: py, buttons: 0 });
+      await sleep(40);
+    }
+    await p.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: panel.x, y: panel.y, buttons: 0 });
+    await sleep(250);
+
+    assert.equal(
+      await p.eval(`!!document.querySelector('[role="tooltip"]')`),
+      true,
+      'the panel must survive the pointer travelling onto it',
+    );
   });
 });
 
