@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mridul60214/skein/internal/capability"
 	"github.com/mridul60214/skein/internal/files"
 	"github.com/mridul60214/skein/internal/httpapi/httpx"
 	"github.com/mridul60214/skein/internal/httpapi/middleware"
@@ -29,15 +30,24 @@ type Files struct {
 	uploads        *middleware.ConcurrencyLimiter
 	maxUploadBytes int64
 	previewOrigin  string
+	caps           *capability.Signer
 }
 
-// NewFiles builds the files handler group.
-func NewFiles(svc *files.Service, uploads *middleware.ConcurrencyLimiter, maxUploadBytes int64, previewOrigin string) *Files {
+// NewFiles builds the files handler group. caps may be nil, in which case
+// minting a download URL is unavailable rather than unauthenticated.
+func NewFiles(
+	svc *files.Service,
+	uploads *middleware.ConcurrencyLimiter,
+	maxUploadBytes int64,
+	previewOrigin string,
+	caps *capability.Signer,
+) *Files {
 	return &Files{
 		svc:            svc,
 		uploads:        uploads,
 		maxUploadBytes: maxUploadBytes,
 		previewOrigin:  previewOrigin,
+		caps:           caps,
 	}
 }
 
@@ -234,6 +244,48 @@ func readSmallPart(p *multipart.Part) (string, error) {
 		return "", skerr.Public(skerr.ErrValidation, "That form field is too long.")
 	}
 	return strings.TrimSpace(string(b)), nil
+}
+
+// contentURLResponse is the minted grant. The URL is relative: it is always
+// this origin, and building an absolute one from configuration is a way to
+// hand a user a link to somebody else's host when that configuration is wrong.
+type contentURLResponse struct {
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// ContentURL handles POST /api/files/{id}/content-url.
+//
+// It mints a short-lived capability URL for one file, so the browser can fetch
+// the bytes itself — an <a download> streams to disk and holds nothing in JS
+// memory, which is the fix for known issue #15. Minting requires a session:
+// this route sits behind Auth, and that is the property that keeps a capability
+// from being a way to reach content without one.
+func (h *Files) ContentURL(w http.ResponseWriter, r *http.Request) {
+	userID, fileID, err := userAndFileID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if h.caps == nil {
+		httpx.WriteError(w, r, skerr.Public(skerr.ErrNotFound, "Downloads are not available."))
+		return
+	}
+
+	// Ownership is proved before a credential is handed out, not only when
+	// it is spent. Get filters by user_id, so a file belonging to someone
+	// else is a not-found here rather than a grant that fails later.
+	if _, err := h.svc.Get(r.Context(), userID, fileID); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+
+	expires := time.Now().Add(capability.TTL)
+	q := h.caps.Sign(fileID, userID, expires)
+	httpx.WriteJSON(w, r, http.StatusOK, contentURLResponse{
+		URL:       "/api/files/" + fileID.String() + "/content?" + q.Encode(),
+		ExpiresAt: expires.UTC().Format(time.RFC3339),
+	})
 }
 
 // Content handles GET /api/files/{id}/content, with Range support.

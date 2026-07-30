@@ -10,10 +10,13 @@ import (
 	"net/netip"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/mridul60214/skein/internal/accounts"
 	"github.com/mridul60214/skein/internal/auth"
+	"github.com/mridul60214/skein/internal/capability"
 	"github.com/mridul60214/skein/internal/config"
+	skcrypto "github.com/mridul60214/skein/internal/crypto"
 	"github.com/mridul60214/skein/internal/files"
 	"github.com/mridul60214/skein/internal/httpapi/handlers"
 	"github.com/mridul60214/skein/internal/httpapi/httpx"
@@ -46,6 +49,9 @@ type Deps struct {
 	Auth     *auth.Service
 	Accounts *accounts.Service
 	Files    *files.Service
+	// Keyring signs content capability URLs. Without it the download
+	// endpoint still works for a bearer token; only minting is unavailable.
+	Keyring *skcrypto.Keyring
 }
 
 // Server owns the router and the middleware chain.
@@ -57,6 +63,10 @@ type Server struct {
 	// uploadSlots is shared by every route that starts an upload, so the
 	// per-user concurrency budget is one budget rather than one per mount.
 	uploadSlots *middleware.ConcurrencyLimiter
+
+	// caps signs and verifies content capability URLs. Nil when no keyring
+	// was wired.
+	caps *capability.Signer
 }
 
 // New builds the server. It returns an error when configuration the router
@@ -73,8 +83,26 @@ func New(d Deps) (*Server, error) {
 		trusted:     trusted,
 		uploadSlots: middleware.NewConcurrencyLimiter(d.Config.MaxUploadsPerUser),
 	}
+	if d.Keyring != nil {
+		signer, serr := capability.NewSigner(d.Keyring)
+		if serr != nil {
+			return nil, serr
+		}
+		s.caps = signer
+	}
 	s.routes()
 	return s, nil
+}
+
+// capVerifier returns the capability verifier as an interface, or a genuinely
+// nil one. Assigning a nil *capability.Signer straight into the interface would
+// produce a non-nil interface holding a nil pointer, and the middleware's
+// nil check would pass while every call panicked.
+func (s *Server) capVerifier() middleware.CapabilityVerifier {
+	if s.caps == nil {
+		return nil
+	}
+	return s.caps
 }
 
 // Handler returns the root http.Handler.
@@ -194,6 +222,10 @@ func (s *Server) mountFiles(api chi.Router) {
 
 		g.Get("/files", h.List)
 		g.Get("/files/{id}", h.Get)
+		// Minting sits here, inside the authenticated JSON group, and not
+		// beside the streaming routes: requiring a session to obtain a
+		// capability is what stops the capability being a way around one.
+		g.Post("/files/{id}/content-url", h.ContentURL)
 		g.Patch("/files/{id}", h.Update)
 		g.Delete("/files/{id}", h.Delete)
 		g.Post("/files/{id}/restore", h.Restore)
@@ -207,9 +239,14 @@ func (s *Server) mountFiles(api chi.Router) {
 
 }
 
-// mountStreaming mounts the two routes that carry file bytes. They live
-// outside the JSON group so no body cap applies; the upload ceiling and the
-// per-user concurrency limit are enforced inside the handler.
+// mountStreaming mounts the routes that carry file bytes. They live outside
+// the JSON group so no body cap applies; the upload ceiling and the per-user
+// concurrency limit are enforced inside the handler.
+//
+// Content and upload no longer share a middleware. Content accepts a signed
+// capability URL as well as a bearer token, because a browser-managed download
+// cannot set a header; upload stays bearer-only, so the second credential can
+// never write anything.
 func (s *Server) mountStreaming(r chi.Router) {
 	if s.deps.Files == nil || s.deps.Auth == nil {
 		return
@@ -217,11 +254,30 @@ func (s *Server) mountStreaming(r chi.Router) {
 	h := s.filesHandler()
 
 	r.Group(func(g chi.Router) {
-		g.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
+		g.Use(middleware.ContentAuth(s.deps.Auth, s.capVerifier(), contentFileID, httpx.WriteError))
+		// Rate limited, unlike before: a capability URL makes this route
+		// reachable without a session, and the limiter keys on the user
+		// the grant resolves to. Range requests are cheap against a
+		// 300/min budget.
+		g.Use(middleware.RateLimit(middleware.NewLimiter(apiRatePerMin)))
 		g.Get("/api/files/{id}/content", h.Content)
 		g.Head("/api/files/{id}/content", h.Content)
+	})
+
+	r.Group(func(g chi.Router) {
+		g.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
 		g.Post("/api/uploads", h.Upload)
 	})
+}
+
+// contentFileID pulls the requested file from the route so the capability
+// signature is checked against the file actually being served.
+func contentFileID(r *http.Request) (uuid.UUID, bool) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		return uuid.Nil, false
+	}
+	return id, true
 }
 
 func (s *Server) filesHandler() *handlers.Files {
@@ -230,6 +286,7 @@ func (s *Server) filesHandler() *handlers.Files {
 		s.uploadSlots,
 		s.deps.Config.MaxUploadBytes,
 		s.deps.Config.PreviewOrigin,
+		s.caps,
 	)
 }
 

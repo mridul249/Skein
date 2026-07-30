@@ -119,15 +119,24 @@ export function Files() {
       setBanner(err instanceof ApiError ? err.message : 'Could not create that folder.'),
   });
 
+  /**
+   * Hands the transfer to the browser rather than running it in the tab.
+   *
+   * Only the short capability URL crosses JS; the bytes never do. The browser
+   * streams straight to disk, shows the transfer in its own download manager,
+   * and keeps going if this tab closes — which is also why no beforeunload
+   * warning belongs on this path, and why there is no progress bar to build.
+   */
   async function download(file: FileItem) {
     try {
       const url = await api.contentURL(file.id);
       const a = document.createElement('a');
       a.href = url;
+      // The server already sends Content-Disposition: attachment with the
+      // real name. This is the same-origin hint for the browser, not the
+      // authority on the filename.
       a.download = file.name;
       a.click();
-      // Revoked on the next tick: the click has already started the save.
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       setBanner(err instanceof ApiError ? err.message : 'Could not download that file.');
     }

@@ -113,7 +113,9 @@ func newRoundRobinStriped(t *testing.T, drives int, capacityEach, shardSize int6
 func contentHandler(t *testing.T, f *stripedFixture) http.Handler {
 	t.Helper()
 
-	h := handlers.NewFiles(f.svc, middleware.NewConcurrencyLimiter(4), 1<<40, "")
+	// No capability signer: this fixture injects its principal directly, so
+	// it exercises the handler rather than either credential path.
+	h := handlers.NewFiles(f.svc, middleware.NewConcurrencyLimiter(4), 1<<40, "", nil)
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
