@@ -73,8 +73,12 @@ export function Drives() {
   return (
     <div>
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-display text-display-m font-semibold tracking-tight">Drives</h1>
+        {/* Capped in characters, not pixels. At a monospace body face this
+            sentence is ~85 cells wide and pushed the primary action onto its
+            own row at 1280px; wrapping the prose instead keeps the action
+            where Design.md §4 puts it. */}
+        <div className="max-w-[52ch]">
+          <h1 className="font-display text-display-m font-bold">Drives</h1>
           <p className="mt-1 text-body text-subtext0">
             Skein sees only the files it created. It cannot read anything already in your Drive.
           </p>
@@ -94,7 +98,7 @@ export function Drives() {
         <p
           role="status"
           className={clsx(
-            'mb-4 rounded border px-3 py-2 text-body',
+            'mb-4 border px-2ch py-halfline text-body',
             tone === 'error' ? 'border-red/40 bg-red/10 text-red' : 'border-green/40 bg-green/10 text-green',
           )}
         >
@@ -103,7 +107,7 @@ export function Drives() {
       )}
 
       {data && drives.length > 0 && (
-        <div className="card mb-5 px-4 py-3">
+        <div className="card mb-5 px-2ch py-1line">
           <p className="tabular text-data text-subtext0">
             {bytes(data.used_bytes)} used of {bytes(data.total_bytes)} pooled ·{' '}
             {bytes(data.free_bytes)} free
@@ -111,12 +115,12 @@ export function Drives() {
         </div>
       )}
 
-      {isLoading && <p className="text-body text-overlay0">Loading…</p>}
+      {isLoading && <p className="text-body text-subtext0">Loading…</p>}
 
       {!isLoading && drives.length === 0 && (
-        <div className="card px-4 py-16 text-center">
+        <div className="card px-2ch py-16 text-center">
           <p className="font-display text-heading text-subtext0">No drives yet.</p>
-          <p className="mt-1 text-body text-overlay0">
+          <p className="mt-1 text-body text-subtext0">
             Connect a Google account to give Skein somewhere to put your files.
           </p>
         </div>
@@ -127,16 +131,16 @@ export function Drives() {
           const pct = percent(drive.used_bytes, drive.total_bytes);
           const usage = usageTone(drive.used_bytes, drive.total_bytes);
           return (
-            <li key={drive.id} className="card p-4">
+            <li key={drive.id} className="card p-2ch">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
                   <span
-                    className={clsx('h-3 w-3 shrink-0 rounded-full', DRIVE_BG[driveColor(drive.ordinal)])}
+                    className={clsx('h-3 w-3 shrink-0', DRIVE_BG[driveColor(drive.ordinal)])}
                     aria-hidden
                   />
                   <div className="min-w-0">
                     <p className="truncate text-body text-text">{drive.email}</p>
-                    <p className="tabular text-data-sm text-overlay0">
+                    <p className="tabular text-data-sm text-subtext0">
                       {drive.kind === 'gdrive' ? 'Google Drive' : drive.kind}
                       {drive.last_synced_at && ` · synced ${relative(drive.last_synced_at)}`}
                     </p>
@@ -147,7 +151,7 @@ export function Drives() {
                   <button
                     type="button"
                     aria-label={`Refresh quota for ${drive.email}`}
-                    className="rounded p-2 text-overlay0 transition-colors duration-hover hover:text-text"
+                    className="p-2 text-subtext0 transition-colors duration-hover hover:text-text"
                     disabled={sync.isPending}
                     onClick={() => sync.mutate(drive.id)}
                   >
@@ -156,7 +160,7 @@ export function Drives() {
                   <button
                     type="button"
                     aria-label={`Disconnect ${drive.email}`}
-                    className="rounded p-2 text-overlay0 transition-colors duration-hover hover:text-red"
+                    className="p-2 text-subtext0 transition-colors duration-hover hover:text-red"
                     onClick={() => {
                       // Design.md §7: name the consequence, not "Are you sure?".
                       //
@@ -196,7 +200,7 @@ export function Drives() {
                     {pct}%
                   </span>
                 </div>
-                <div className="h-1.5 w-full overflow-hidden rounded bg-surface0">
+                <div className="h-1.5 w-full overflow-hidden bg-surface0">
                   <div
                     className={clsx('h-full', DRIVE_BG[driveColor(drive.ordinal)])}
                     style={{ width: `${pct}%` }}

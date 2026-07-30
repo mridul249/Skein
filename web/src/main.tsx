@@ -56,7 +56,7 @@ function App() {
     // that responds in 20ms is theatre.
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <span className="font-display text-heading text-overlay0">Skein</span>
+        <span className="font-display text-heading text-subtext0">Skein</span>
       </div>
     );
   }

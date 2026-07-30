@@ -29,7 +29,7 @@ export function QuotaBar({ quota }: { quota: Quota }) {
 
   if (drives.length === 0) {
     return (
-      <div className="card px-4 py-3">
+      <div className="card px-2ch py-1line">
         <p className="text-body text-subtext0">
           No drives connected.{' '}
           <a href="/settings" className="text-sapphire underline underline-offset-2">
@@ -76,7 +76,7 @@ function PackedBar({
 
   return (
     <div
-      className={clsx('flex w-full overflow-hidden rounded-full bg-surface0', height)}
+      className={clsx('flex w-full overflow-hidden bg-surface0', height)}
       role="group"
       aria-label={`Pooled storage: ${bytes(totalUsed)} used of ${bytes(total)}`}
     >
@@ -102,12 +102,12 @@ function PackedBar({
               className="h-full w-full block"
               content={
                 <div className="space-y-0.5">
-                  <div className="text-label font-medium text-text">{drive.email}</div>
+                  <div className="text-label font-bold text-text">{drive.email}</div>
                   <div className="tabular text-data-sm text-subtext0">
                     {bytes(drive.used_bytes)} of {bytes(drive.total_bytes)} ·{' '}
                     {percent(drive.used_bytes, drive.total_bytes)}%
                   </div>
-                  <div className="tabular text-data-sm text-overlay0">
+                  <div className="tabular text-data-sm text-subtext0">
                     {bytes(Math.max(0, drive.total_bytes - drive.used_bytes))} free
                   </div>
                 </div>
@@ -149,7 +149,7 @@ export function QuotaRail({ quota }: { quota: Quota | undefined }) {
   const active = quota.drives.filter((d) => d.status !== 'disabled');
 
   return (
-    <div className="space-y-3 border-t border-surface0 px-4 py-4">
+    <div className="space-y-3 border-t border-surface0 px-2ch py-1line">
       {active.length > 0 && (
         // The same packed bar, compact, tooltips off — the per-drive rows
         // below already carry the numbers.
@@ -165,7 +165,7 @@ export function QuotaRail({ quota }: { quota: Quota | undefined }) {
               <span className="flex min-w-0 items-center gap-1.5">
                 <span
                   className={clsx(
-                    'h-2 w-2 shrink-0 rounded-full',
+                    'h-2 w-2 shrink-0',
                     DRIVE_BG[driveColor(drive.ordinal)],
                   )}
                   aria-hidden
