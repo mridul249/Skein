@@ -3,14 +3,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, RefreshCw, Unlink } from 'lucide-react';
 import clsx from 'clsx';
 
-import { ApiError, api } from '../lib/api';
+import { ApiError, api, type Drive } from '../lib/api';
 import { DRIVE_BG, bytes, driveColor, percent, usageTone } from '../lib/format';
+import { Modal } from '../components/Modal';
 
 /** Drives: connect, sync and disconnect the accounts that hold the bytes. */
 export function Drives() {
   const qc = useQueryClient();
   const [banner, setBanner] = useState('');
   const [tone, setTone] = useState<'error' | 'ok'>('ok');
+  /** The drive awaiting a disconnect confirmation, if any. */
+  const [confirming, setConfirming] = useState<Drive | null>(null);
 
   const { data, isLoading } = useQuery({ queryKey: ['quota'], queryFn: api.quota });
 
@@ -72,6 +75,35 @@ export function Drives() {
 
   return (
     <div>
+      {/*
+        Design.md §7: name the consequence, not "Are you sure?".
+
+        The wording below is load-bearing and is reproduced verbatim from the
+        `window.confirm` this replaced. It used to end "until you reconnect",
+        which is false: disconnect deletes the account row, so the shards' link
+        to it is nulled and reconnecting mints a new row that re-links nothing.
+        Known issue #19. The mechanism fix is scheduled for Session 3 (soft
+        delete, keeping the row id stable); until it lands the warning has to
+        say what actually happens. Restore the reassuring wording when the fix
+        makes it true — and not before.
+      */}
+      <Modal
+        open={confirming !== null}
+        title={confirming ? `Disconnect ${confirming.email}?` : ''}
+        intent="danger"
+        confirmLabel="Disconnect"
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (confirming) disconnect.mutate(confirming.id);
+          setConfirming(null);
+        }}
+      >
+        Files with a shard on it become unreadable, and reconnecting does NOT
+        currently restore access — the link between those files and this drive is
+        lost. Nothing is deleted from Google; the data is still there, but Skein
+        will not be able to find it.
+      </Modal>
+
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         {/* Capped in characters, not pixels. At a monospace body face this
             sentence is ~85 cells wide and pushed the primary action onto its
@@ -161,22 +193,7 @@ export function Drives() {
                     type="button"
                     aria-label={`Disconnect ${drive.email}`}
                     className="p-2 text-subtext0 transition-colors duration-hover hover:text-red"
-                    onClick={() => {
-                      // Design.md §7: name the consequence, not "Are you sure?".
-                      //
-                      // This used to end "until you reconnect", which is false:
-                      // disconnect deletes the account row, so the shards' link
-                      // to it is nulled and reconnecting mints a new row that
-                      // re-links nothing. Known issue #19. The mechanism fix is
-                      // scheduled for Session 3 (soft delete, keeping the row id
-                      // stable); until it lands the warning has to say what
-                      // actually happens. Restore the reassuring wording when
-                      // the fix makes it true.
-                      const ok = window.confirm(
-                        `Disconnect ${drive.email}? Files with a shard on it become unreadable, and reconnecting does NOT currently restore access — the link between those files and this drive is lost. Nothing is deleted from Google; the data is still there, but Skein will not be able to find it.`,
-                      );
-                      if (ok) disconnect.mutate(drive.id);
-                    }}
+                    onClick={() => setConfirming(drive)}
                   >
                     <Unlink size={15} aria-hidden />
                   </button>

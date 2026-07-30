@@ -96,6 +96,19 @@ export default {
         hover: '120ms',
         panel: '180ms',
       },
+      keyframes: {
+        // Design.md §6: 180ms on panel open, and no travel worth calling a
+        // transition — the dialog arrives, it does not slide in from
+        // somewhere. Applied via motion-safe:, so it does not exist at all
+        // under prefers-reduced-motion.
+        'modal-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+      },
+      animation: {
+        'modal-in': 'modal-in 180ms ease-out',
+      },
     },
   },
   plugins: [],
