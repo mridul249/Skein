@@ -69,37 +69,58 @@ function PackedBar({
   drives: Drive[];
   total: number;
   height: string;
+  /**
+   * Off for the sidebar rail. That copy is decorative: the per-drive rows
+   * directly beneath it state the same numbers as text, so exposing it too
+   * would announce the pool twice and put a keyboard stop on every drive for
+   * information the user is about to read anyway.
+   */
   showTooltips?: boolean;
 }) {
   const totalUsed = drives.reduce((sum, d) => sum + d.used_bytes, 0);
   const freeShare = total > 0 ? Math.max(0, ((total - totalUsed) / total) * 100) : 100;
+  const decorative = !showTooltips;
 
   return (
     <div
       className={clsx('flex w-full overflow-hidden bg-surface0', height)}
-      role="group"
-      aria-label={`Pooled storage: ${bytes(totalUsed)} used of ${bytes(total)}`}
+      {...(decorative
+        ? { 'aria-hidden': true }
+        : {
+            role: 'group',
+            'aria-label': `Pooled storage: ${bytes(totalUsed)} used of ${bytes(total)}`,
+          })}
     >
       {drives.map((drive) => {
         const share = usedShare(drive, total);
+        const free = Math.max(0, drive.total_bytes - drive.used_bytes);
         const label = `${drive.email}: ${bytes(drive.used_bytes)} of ${bytes(
           drive.total_bytes,
-        )} used, ${bytes(Math.max(0, drive.total_bytes - drive.used_bytes))} free`;
+        )} used, ${bytes(free)} free`;
 
         return (
           <div
             key={drive.id}
-            // Lift the width styles and transition to this explicit flex child
             className="h-full motion-safe:transition-[width] motion-safe:duration-300"
             style={{
               width: `${share}%`,
+              // A drive holding a few megabytes of a 400 GB pool rounds to a
+              // sub-pixel slice. The floor keeps it visible and hoverable —
+              // an account you cannot see is an account you cannot inspect.
               minWidth: share > 0 ? '3px' : undefined,
+              // Used segments never give up their floor. See the remainder
+              // below for what absorbs the resulting overflow.
+              flexShrink: 0,
             }}
           >
             <Tooltip
               disabled={!showTooltips}
-              // Tell the tooltip wrapper to take up the full space
-              className="h-full w-full block"
+              label={label}
+              className={clsx(
+                'h-full w-full cursor-default border-r border-crust',
+                'hover:brightness-125 focus-visible:brightness-125',
+                DRIVE_BG[driveColor(drive.ordinal)],
+              )}
               content={
                 <div className="space-y-0.5">
                   <div className="text-label font-bold text-text">{drive.email}</div>
@@ -107,33 +128,31 @@ function PackedBar({
                     {bytes(drive.used_bytes)} of {bytes(drive.total_bytes)} ·{' '}
                     {percent(drive.used_bytes, drive.total_bytes)}%
                   </div>
-                  <div className="tabular text-data-sm text-subtext0">
-                    {bytes(Math.max(0, drive.total_bytes - drive.used_bytes))} free
-                  </div>
+                  <div className="tabular text-data-sm text-subtext0">{bytes(free)} free</div>
                 </div>
               }
-            >
-              <div
-                tabIndex={showTooltips ? 0 : -1}
-                role="img"
-                aria-label={label}
-                title={showTooltips ? undefined : label}
-                // Change width handling here: remove the `style` prop and add `w-full`
-                className={clsx(
-                  'h-full w-full cursor-default border-r border-crust',
-                  'hover:brightness-125 focus-visible:brightness-125',
-                  DRIVE_BG[driveColor(drive.ordinal)],
-                )}
-              />
-            </Tooltip>
+            />
           </div>
         );
       })}
 
-      {/* One remainder block, always last. */}
+      {/*
+        One remainder block, always last — and the thing that absorbs overflow.
+
+        Segment widths sum to exactly 100%, but each used segment also carries
+        a 3px floor. Whenever a floor exceeds a segment's true share the row
+        adds up to more than the container, and the default flex behaviour is
+        to shrink *every* item proportionally — which silently distorts each
+        drive's share to pay for another drive's floor.
+
+        So the remainder shrinks and the used segments do not: it is the only
+        item with a shrink factor. Free space is the honest place to take it
+        from, because the coloured run is the answer to "how much have I used"
+        and must stay true; the remainder is already whatever is left over.
+      */}
       <div
         className="h-full bg-surface0 motion-safe:transition-[width] motion-safe:duration-300"
-        style={{ width: `${freeShare}%` }}
+        style={{ width: `${freeShare}%`, flexShrink: 1, minWidth: 0 }}
       />
     </div>
   );

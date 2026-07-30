@@ -77,7 +77,14 @@ export function Trash() {
         </p>
       )}
 
-      <div className="card overflow-x-auto">
+      {/*
+        `relative` is load-bearing. Without it the card is not the containing
+        block for its absolutely-positioned descendants, so the `sr-only`
+        spans in the table header escape `overflow-x-auto` entirely and extend
+        the *document's* scrollable width — the whole page scrolled sideways
+        by 305px at 375px while the table looked correctly clipped.
+      */}
+      <div className="card relative overflow-x-auto">
         <table className="w-full min-w-[42rem] border-collapse">
           <thead>
             <tr className="border-b border-surface0 text-left">
