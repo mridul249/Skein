@@ -96,13 +96,18 @@ tools:
 backup:
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 	mkdir -p backups; \
-	out="backups/skein-$$(date +%Y%m%d-%H%M%S).sql.gz"; \
+	ver=$$(psql "$$SKEIN_DATABASE_URL" -qAt \
+	        -c 'SELECT max(version_id) FROM goose_db_version' 2>/dev/null); \
+	[ -n "$$ver" ] || ver=unknown; \
+	out="backups/skein-$$(date +%Y%m%d-%H%M%S)-v$$ver.sql.gz"; \
 	pg_dump --no-owner --no-privileges "$$SKEIN_DATABASE_URL" | gzip > "$$out"; \
 	echo "wrote $$out ($$(du -h "$$out" | cut -f1))"; \
+	echo "schema version: $$ver — restoring this dump lands at v$$ver, then run 'make migrate'"; \
 	echo; \
 	echo "This dump is only half a backup. It records which shard belongs to"; \
 	echo "which file; SKEIN_MASTER_KEY decrypts their contents. Restoring needs"; \
-	echo "both. Keep the key somewhere this dump is not."
+	echo "both. Keep the key somewhere this dump is not."; \
+	echo "Restore is a three-step procedure, not one pipe. See README \"Backups\"."
 
 ## clean: remove build output
 clean:

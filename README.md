@@ -179,15 +179,74 @@ reassemble them. With the database but no key, the manifest is intact and the
 contents are unreadable.
 
 ```bash
-make backup            # -> backups/skein-<timestamp>.sql.gz
+make backup            # -> backups/skein-<timestamp>-v<schema-version>.sql.gz
 ```
 
 Keep the key somewhere else entirely — a password manager, not the same disk.
 
+### Restoring
+
+**Three steps, not one pipe.** This procedure has been tested end to end; the
+one-line version that used to be here had not, and it does not work.
+
 ```bash
-# Restore
-gunzip -c backups/skein-20260730-120000.sql.gz | psql "$SKEIN_DATABASE_URL"
+# 1. Create an EMPTY target database. This needs a superuser or a role holding
+#    CREATEDB. The skein role has neither, deliberately — the application never
+#    needs to create a database, so it should not be able to.
+createdb -U postgres skein_restored
+
+# 2. Restore. ON_ERROR_STOP=1 is not optional: psql continues past errors by
+#    default, so without it a restore can report success while having silently
+#    dropped objects.
+gunzip -c backups/skein-20260730-172157-v7.sql.gz \
+  | psql -v ON_ERROR_STOP=1 -U postgres skein_restored
+
+# 3. Migrate. The dump lands at whatever schema version it was taken at — the
+#    version in its filename. If the binary has moved on since, the restore is
+#    behind until this runs.
+#
+#    Call goose directly, NOT `make migrate`. Every migrate target sources .env
+#    after the shell's environment, so .env wins and a SKEIN_DATABASE_URL passed
+#    on the command line is silently ignored — `make migrate` would migrate your
+#    LIVE database, not the restored one.
+goose -dir internal/db/migrations postgres \
+  'postgres://postgres@localhost/skein_restored?sslmode=disable' up
 ```
+
+**Restore into an empty database, never over a live one.** The dump contains
+`CREATE TABLE`, so layering it over existing tables fails on every one of them —
+and with `ON_ERROR_STOP=1` the restore aborts partway. There is no in-place
+restore.
+
+**Step 3 is the one people skip.** A restore that stops at the dump's schema
+version looks complete and starts a binary expecting newer tables. The
+`-v<version>` suffix on the filename exists so you can tell what you are holding
+without decompressing it; a version recorded only in a log line gets separated
+from the file it describes.
+
+**The dump needs `citext` available on the target.** `CREATE EXTENSION IF NOT
+EXISTS citext` is the first DDL in the file — everything before it is `SET`
+boilerplate that cannot fail — so this is the first thing that breaks a restore,
+and it breaks it at the very start. On Debian and Ubuntu the extension lives in
+`postgresql-contrib`, which minimal container images often omit. It is a
+*trusted* extension on PostgreSQL 13 and later, so a non-superuser database owner
+can install it, but only if the files are on disk. (The SQLite path in Phase 7
+Task 3.4 maps `CITEXT` to `TEXT COLLATE NOCASE` and sidesteps this entirely.)
+
+**Restore with a `psql` at least as new as the `pg_dump` that wrote the file.**
+These dumps begin with a `\restrict` meta-command, emitted by PostgreSQL 18's
+`pg_dump`. An older `psql` does not know it and will fail on line one. Not tested
+here — only PostgreSQL 18 is installed on the machine this was verified on — but
+worth knowing before restoring onto an older host.
+
+What has been verified, on a throwaway cluster with no `skein` role present: the
+dump carries schema, data, extensions, sequences with correct `setval` values,
+and the `goose_db_version` table with its rows — so a restore does **not** re-run
+every migration from scratch. Restored object counts match the live database
+exactly: 13 tables, 38 indexes, and every check, foreign-key, unique and
+primary-key constraint. Because `pg_dump` runs with `--no-owner
+--no-privileges`, the dump restores onto a machine that has never heard of the
+`skein` role.
 
 > Making the drives self-describing — so the database becomes a rebuildable
 > cache rather than a single point of failure — is Phase 7 Task 5 and is not
