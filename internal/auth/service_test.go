@@ -271,11 +271,37 @@ func TestRefreshConcurrentUseRevokesFamily(t *testing.T) {
 		t.Fatalf("%d concurrent refreshes succeeded, want exactly 1", okCount)
 	}
 
+	// Re-expressed as behaviour rather than row state. This previously asserted
+	// that every session in the family carries revoked_at, which was a proxy for
+	// the real property and is no longer true of a correct implementation: a
+	// successor inserted after its family was revoked is born DEAD, not born
+	// revoked, so its own revoked_at is nil while it is entirely unusable.
+	//
+	// Asserting the row state would now fail against working code and pass
+	// against a broken implementation that set revoked_at without enforcing
+	// anything. What Rules.md §2.8 actually requires is that no member of the
+	// family can refresh again.
 	family, _ := store.SessionByID(first.SessionID)
+
+	// 1. The property. No token in this family may be refreshed, whatever its
+	//    own row says.
+	if _, err := svc.Refresh(ctx, first.RefreshToken, testMeta()); err == nil {
+		t.Error("the presented token still refreshed after its family was revoked")
+	}
 	for _, s := range store.SessionsInFamily(family.FamilyID) {
-		if s.RevokedAt == nil {
-			t.Errorf("session %s survived a concurrent-use race", s.ID)
+		if _, err := store.ClaimSession(ctx, s.ID); err == nil {
+			t.Errorf("session %s is still claimable after a concurrent-use race", s.ID)
 		}
+	}
+
+	// 2. The mechanism. Asserting both means a change that keeps the row state
+	//    but breaks enforcement still fails here.
+	revokedAt, ok := store.FamilyRevokedAt(family.FamilyID)
+	if !ok {
+		t.Fatalf("family %s has no token_families row", family.FamilyID)
+	}
+	if revokedAt == nil {
+		t.Errorf("family %s was not revoked by a concurrent-use race", family.FamilyID)
 	}
 }
 
