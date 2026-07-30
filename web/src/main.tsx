@@ -9,6 +9,7 @@ import { Files } from './pages/Files';
 import { Login } from './pages/Login';
 import { Trash } from './pages/Trash';
 import { SessionContext, type SessionValue } from './lib/session';
+import { UploadsProvider } from './lib/uploads-context';
 import { api, onSessionChange, type User } from './lib/api';
 import './styles/index.css';
 
@@ -62,17 +63,24 @@ function App() {
 
   return (
     <SessionContext.Provider value={value}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-          <Route element={user ? <Layout /> : <Navigate to="/login" replace />}>
-            <Route path="/" element={<Files />} />
-            <Route path="/trash" element={<Trash />} />
-            <Route path="/settings" element={<Drives />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+      {/*
+        UploadsProvider sits ABOVE BrowserRouter deliberately. Inside it, a
+        navigation would unmount the store and orphan every in-flight upload —
+        known issue #13, and the cause of the reservation-leak incident.
+      */}
+      <UploadsProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+            <Route element={user ? <Layout /> : <Navigate to="/login" replace />}>
+              <Route path="/" element={<Files />} />
+              <Route path="/trash" element={<Trash />} />
+              <Route path="/settings" element={<Drives />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </UploadsProvider>
     </SessionContext.Provider>
   );
 }

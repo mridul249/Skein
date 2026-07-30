@@ -334,10 +334,16 @@ export const api = {
    * bar at all. The body is a FormData holding the File object itself, so the
    * browser streams it from disk — the page never holds the bytes either.
    */
+  /**
+   * onProgress reports bytes, not a fraction, and the bytes are those handed
+   * to the browser's network stack — not bytes the server has accepted. The
+   * caller is responsible for not presenting the two as the same thing; see
+   * UploadJob.sent.
+   */
   upload(
     file: File,
     folderId: string | null,
-    onProgress: (fraction: number) => void,
+    onProgress: (sent: number, total: number) => void,
     signal?: AbortSignal,
   ): Promise<FileItem> {
     return new Promise((resolve, reject) => {
@@ -363,12 +369,12 @@ export const api = {
         xhr.withCredentials = true;
 
         xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
+          if (e.lengthComputable && e.total > 0) onProgress(e.loaded, e.total);
         });
 
         xhr.addEventListener('load', () => {
           if (xhr.status >= 200 && xhr.status < 300) {
-            onProgress(1);
+            onProgress(file.size, file.size);
             resolve(JSON.parse(xhr.responseText) as FileItem);
             return;
           }

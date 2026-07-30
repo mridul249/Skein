@@ -5,6 +5,7 @@ import clsx from 'clsx';
 
 import { api } from '../lib/api';
 import { QuotaRail } from './QuotaBar';
+import { UploadList } from './UploadList';
 import { useSession } from '../lib/session';
 
 /**
@@ -94,6 +95,12 @@ export function Layout() {
 
       <main className="min-w-0 flex-1 max-md:order-1 md:h-screen md:overflow-y-auto">
         <div className="mx-auto max-w-content p-5 md:p-8">
+          {/*
+            Above the Outlet, so an upload started on Files stays visible from
+            Drives and Trash. #13: an upload the UI cannot see is an upload the
+            user cannot cancel.
+          */}
+          <UploadList />
           <Outlet context={{ quota }} />
         </div>
       </main>
