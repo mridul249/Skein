@@ -35,6 +35,26 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 // what keeps Flush and SetWriteDeadline working on streaming responses.
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
+// levelFor decides how loudly one request is logged.
+//
+// Not every 5xx is a server fault. 507 means the user's drives are full and
+// 503 means a provider is unreachable; both are conditions the user or the
+// provider resolves, and logging them at Error fills the error log with
+// ordinary traffic until nobody reads it. Error is reserved for the statuses
+// that mean this process or something it depends on is genuinely broken.
+func levelFor(status int) slog.Level {
+	switch {
+	case status == http.StatusInternalServerError,
+		status == http.StatusBadGateway,
+		status == http.StatusGatewayTimeout:
+		return slog.LevelError
+	case status >= 500:
+		return slog.LevelWarn
+	default:
+		return slog.LevelInfo
+	}
+}
+
 // Recoverer converts a panic into a 500 rather than a dead process.
 // Rules.md §2.6: this is a backstop, not a strategy.
 func Recoverer(next http.Handler) http.Handler {
@@ -95,11 +115,7 @@ func AccessLog(base *slog.Logger) func(http.Handler) http.Handler {
 			if uid, ok := UserIDFrom(ctx); ok {
 				attrs = append(attrs, slog.String("user_id", uid.String()))
 			}
-			lvl := slog.LevelInfo
-			if rec.status >= 500 {
-				lvl = slog.LevelError
-			}
-			lg.LogAttrs(ctx, lvl, "request", attrs...)
+			lg.LogAttrs(ctx, levelFor(rec.status), "request", attrs...)
 		})
 	}
 }

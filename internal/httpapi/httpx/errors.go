@@ -72,12 +72,25 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		fields = pub.Fields
 	}
 
+	// Error level is reserved for something an operator has to act on.
+	//
+	// A 5xx carrying a PublicError is not that: the domain layer shaped it
+	// for a user, so it is an expected condition wearing a 5xx status code.
+	// "No drive is connected" and "a drive filled up" are 507s that mean the
+	// user should connect a drive, not that the server is broken — logging
+	// them at Error fills the error log with normal traffic and trains
+	// whoever reads it to ignore the level entirely.
 	lg := middleware.LoggerFrom(r.Context())
-	if status >= 500 {
+	switch {
+	case status >= 500 && pub == nil:
 		lg.ErrorContext(r.Context(), "request failed",
 			slog.String("error", err.Error()),
 			slog.Int("status", status))
-	} else {
+	case status >= 500:
+		lg.WarnContext(r.Context(), "request refused",
+			slog.String("error", err.Error()),
+			slog.Int("status", status))
+	default:
 		lg.DebugContext(r.Context(), "request rejected",
 			slog.String("error", err.Error()),
 			slog.Int("status", status))
