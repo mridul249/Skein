@@ -1,0 +1,15 @@
+<!doctype html>
+<!-- Render fixture for the browser harness. Not an application entry point:
+     `vite build` only bundles index.html, so nothing here ships. -->
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Skein render fixture</title>
+  </head>
+  <body class="bg-crust text-text font-mono antialiased">
+    <div id="root"></div>
+    <script type="module" src="./fixture.tsx"></script>
+  </body>
+</html>
