@@ -26,6 +26,9 @@ type MemoryStore struct {
 	byEmail  map[string]uuid.UUID
 	sessions map[uuid.UUID]Session
 	byHash   map[string]uuid.UUID
+	// families mirrors token_families. The value is the revocation time, nil
+	// while the family is live.
+	families map[uuid.UUID]*time.Time
 	events   []SecurityEvent
 	clock    func() time.Time
 }
@@ -37,6 +40,7 @@ func NewMemoryStore() *MemoryStore {
 		byEmail:  map[string]uuid.UUID{},
 		sessions: map[uuid.UUID]Session{},
 		byHash:   map[string]uuid.UUID{},
+		families: map[uuid.UUID]*time.Time{},
 		clock:    time.Now,
 	}
 }
@@ -91,6 +95,37 @@ func (m *MemoryStore) UpdateUserPassword(_ context.Context, id uuid.UUID, hash s
 }
 
 // CreateSession records one issued refresh token.
+// CreateTokenFamily records a family. Mirrors the FK ordering the real schema
+// enforces: a session cannot be inserted before its family exists.
+func (m *MemoryStore) CreateTokenFamily(_ context.Context, familyID, _ uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.families[familyID]; !exists {
+		m.families[familyID] = nil
+	}
+	return nil
+}
+
+// RevokeTokenFamily marks a family revoked, preserving the first revocation.
+func (m *MemoryStore) RevokeTokenFamily(_ context.Context, familyID uuid.UUID) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if at, ok := m.families[familyID]; ok && at != nil {
+		return 0, nil // already revoked; do not move the timestamp
+	}
+	t := m.clock()
+	m.families[familyID] = &t
+	return 1, nil
+}
+
+// FamilyRevokedAt reports a family's revocation time. Test support.
+func (m *MemoryStore) FamilyRevokedAt(familyID uuid.UUID) (*time.Time, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	at, ok := m.families[familyID]
+	return at, ok
+}
+
 func (m *MemoryStore) CreateSession(_ context.Context, n NewSession) (Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -133,6 +168,14 @@ func (m *MemoryStore) ClaimSession(_ context.Context, id uuid.UUID) (Session, er
 	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
 	if !ok || s.UsedAt != nil || s.RevokedAt != nil || !s.ExpiresAt.After(m.clock()) {
+		return Session{}, skerr.ErrNotFound
+	}
+	// The family half of the two-part condition, mirroring the NOT EXISTS in
+	// MarkSessionUsed. Known issue #11: a successor inserted after its
+	// family was revoked has RevokedAt nil, so the check above passes and
+	// only this one stops it. If these two predicates ever diverge, the
+	// doubles validate against semantics the database no longer has.
+	if at, exists := m.families[s.FamilyID]; exists && at != nil {
 		return Session{}, skerr.ErrNotFound
 	}
 	t := m.clock()

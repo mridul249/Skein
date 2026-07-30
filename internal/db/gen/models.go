@@ -119,6 +119,13 @@ type StorageAccount struct {
 	LastError          string
 }
 
+type TokenFamily struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	CreatedAt pgtype.Timestamptz
+	RevokedAt pgtype.Timestamptz
+}
+
 type Upload struct {
 	ID            uuid.UUID
 	UserID        uuid.UUID

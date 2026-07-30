@@ -92,6 +92,27 @@ func (s *PGStore) CreateSession(ctx context.Context, n NewSession) (Session, err
 	return toSession(row), nil
 }
 
+// CreateTokenFamily records a new login's family.
+func (s *PGStore) CreateTokenFamily(ctx context.Context, familyID, userID uuid.UUID) error {
+	if err := s.q.CreateTokenFamily(ctx, gen.CreateTokenFamilyParams{
+		ID:     familyID,
+		UserID: userID,
+	}); err != nil {
+		return fmt.Errorf("create token family: %w", err)
+	}
+	return nil
+}
+
+// RevokeTokenFamily marks a family revoked. This is the write that actually
+// stops future refreshes; see the comment on Store.RevokeTokenFamily.
+func (s *PGStore) RevokeTokenFamily(ctx context.Context, familyID uuid.UUID) (int64, error) {
+	n, err := s.q.RevokeTokenFamily(ctx, familyID)
+	if err != nil {
+		return 0, fmt.Errorf("revoke token family: %w", err)
+	}
+	return n, nil
+}
+
 // GetSessionByRefreshHash looks up a session by token hash, including rows
 // that are used, revoked or expired.
 func (s *PGStore) GetSessionByRefreshHash(ctx context.Context, hash []byte) (Session, error) {
