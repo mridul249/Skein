@@ -188,6 +188,13 @@ func (s *Service) Refresh(ctx context.Context, presented string, meta RequestMet
 
 	now := s.now()
 
+	// Advisory only, and deliberately not exhaustive. These read the snapshot
+	// taken above, and they cannot see a revoked FAMILY: a successor inserted
+	// after its family was revoked has RevokedAt nil, so the second case below
+	// does not fire for it. The claim gate is what rejects that row, and
+	// revokeFamily's audit detail distinguishes it. Do not add a family read
+	// here — it would put a round trip on every refresh to improve an error
+	// string.
 	switch {
 	case sess.UsedAt != nil:
 		// Reuse. The successor of this token is already out there, so
@@ -281,6 +288,13 @@ func (s *Service) Logout(ctx context.Context, presented string, meta RequestMeta
 		}
 		return fmt.Errorf("look up session: %w", err)
 	}
+	// Same ordering and the same reasoning as revokeFamily: the family marker
+	// enforces, the session sweep records. Known issue #17 — Logout raced a
+	// concurrent refresh in exactly the way #11 did, and the family marker
+	// closes both with the same code.
+	if _, err := s.store.RevokeTokenFamily(ctx, sess.FamilyID); err != nil {
+		return fmt.Errorf("revoke token family: %w", err)
+	}
 	if _, err := s.store.RevokeSessionFamily(ctx, sess.FamilyID); err != nil {
 		return fmt.Errorf("revoke family: %w", err)
 	}
@@ -324,6 +338,13 @@ func (s *Service) startSession(ctx context.Context, user User, meta RequestMeta)
 	}
 	familyID := uuid.New()
 
+	// Family first, then the session: sessions.family_id references
+	// token_families, so the reverse order is an FK violation. This order
+	// risks at worst an orphan family row, which is harmless.
+	if err := s.store.CreateTokenFamily(ctx, familyID, user.ID); err != nil {
+		return TokenPair{}, fmt.Errorf("create token family: %w", err)
+	}
+
 	sess, err := s.store.CreateSession(ctx, NewSession{
 		ID:          uuid.New(),
 		UserID:      user.ID,
@@ -354,12 +375,40 @@ func (s *Service) startSession(ctx context.Context, user User, meta RequestMeta)
 }
 
 // revokeFamily tears down every token descended from one login and records why.
+//
+// The order of the two writes is load-bearing and they look interchangeable.
+// PGStore has no transactions — each call is its own implicit transaction — so a
+// partial failure is possible and ordering is the only control available.
+//
+//	RevokeTokenFamily is the write that ENFORCES. It is what makes a
+//	successor inserted after this point unclaimable, and it must not be
+//	skipped or reordered after the sweep.
+//
+//	RevokeSessionFamily is the AUDIT RECORD. It keeps revoked_at meaningful
+//	for inspection and covers the sessions that already exist, but it is no
+//	longer the mechanism.
+//
+// Sweeping first and then failing to mark the family silently reproduces known
+// issue #11 exactly: sessions revoked, family live, successor usable.
 func (s *Service) revokeFamily(ctx context.Context, sess Session, reason string, meta RequestMeta) {
-	n, err := s.store.RevokeSessionFamily(ctx, sess.FamilyID)
+	// RevokeTokenFamily is idempotent and reports zero rows when the family
+	// was already dead. That rowcount is free and distinguishes a fresh
+	// detection from a replay against an already-revoked chain, which is the
+	// case the advisory switch above structurally cannot report.
+	families, err := s.store.RevokeTokenFamily(ctx, sess.FamilyID)
 	if err != nil {
-		s.log.ErrorContext(ctx, "could not revoke session family",
+		// Loud, because this is the write that actually stops the attacker.
+		s.log.ErrorContext(ctx, "could not revoke token family; the chain is still live",
 			slog.String("family_id", sess.FamilyID.String()),
 			slog.String("error", err.Error()))
+	}
+	firstDetection := families > 0
+
+	n, serr := s.store.RevokeSessionFamily(ctx, sess.FamilyID)
+	if serr != nil {
+		s.log.ErrorContext(ctx, "could not revoke session family",
+			slog.String("family_id", sess.FamilyID.String()),
+			slog.String("error", serr.Error()))
 	}
 	// Logged at Warn, not Info: this is the signal an operator is meant to
 	// notice. The token itself is never included.
@@ -367,12 +416,16 @@ func (s *Service) revokeFamily(ctx context.Context, sess Session, reason string,
 		slog.String("user_id", sess.UserID.String()),
 		slog.String("family_id", sess.FamilyID.String()),
 		slog.String("reason", reason),
-		slog.Int64("sessions_revoked", n))
+		slog.Int64("sessions_revoked", n),
+		slog.Bool("first_detection", firstDetection))
 
 	s.record(ctx, &sess.UserID, EventRefreshReuse, map[string]any{
 		"reason":           reason,
 		"family_id":        sess.FamilyID.String(),
 		"sessions_revoked": n,
+		// False means the family was already revoked, so this is a replay
+		// against a dead chain rather than a newly detected theft.
+		"first_detection": firstDetection,
 	}, meta)
 }
 

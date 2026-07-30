@@ -77,12 +77,28 @@ type Store interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 
+	// CreateTokenFamily records a new login's family. It must be called
+	// before the first session of that family, because sessions.family_id
+	// references it.
+	CreateTokenFamily(ctx context.Context, familyID, userID uuid.UUID) error
+
+	// RevokeTokenFamily kills every token descended from one login,
+	// including successors not yet inserted. Known issue #11: this is the
+	// enforcing write, and RevokeSessionFamily is only the audit record.
+	// Idempotent, and it preserves the first revocation's timestamp.
+	RevokeTokenFamily(ctx context.Context, familyID uuid.UUID) (int64, error)
+
 	CreateSession(ctx context.Context, s NewSession) (Session, error)
 	GetSessionByRefreshHash(ctx context.Context, hash []byte) (Session, error)
 
 	// ClaimSession marks a session used, but only if it is currently
-	// unused, unrevoked and unexpired. It returns ErrNotFound when the
-	// claim loses that race — which the caller must treat as reuse.
+	// unused, unrevoked, unexpired and its family is not revoked. It
+	// returns ErrNotFound when the claim loses that race — which the caller
+	// must treat as reuse.
+	//
+	// The family half of that condition is what closes known issue #11. A
+	// successor inserted after its family was revoked carries revoked_at
+	// NULL, so its own row says nothing; the family is read fresh here.
 	ClaimSession(ctx context.Context, id uuid.UUID) (Session, error)
 
 	RevokeSessionFamily(ctx context.Context, familyID uuid.UUID) (int64, error)
