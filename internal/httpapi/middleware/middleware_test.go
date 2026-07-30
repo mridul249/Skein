@@ -233,3 +233,28 @@ func TestMaxJSONBodyCaps(t *testing.T) {
 		t.Errorf("status = %d, want 413", rec.Code)
 	}
 }
+
+// Not every 5xx is a server fault. A 507 means the user's drives are full and
+// a 503 means a provider is unreachable; logging those at Error fills the
+// error log with ordinary traffic until nobody reads the level at all.
+func TestLevelForReservesErrorForRealFaults(t *testing.T) {
+	tests := []struct {
+		status int
+		want   slog.Level
+	}{
+		{http.StatusOK, slog.LevelInfo},
+		{http.StatusNotFound, slog.LevelInfo},
+		{http.StatusTooManyRequests, slog.LevelInfo},
+		{http.StatusInternalServerError, slog.LevelError},
+		{http.StatusBadGateway, slog.LevelError},
+		{http.StatusGatewayTimeout, slog.LevelError},
+		{http.StatusNotImplemented, slog.LevelWarn},
+		{http.StatusServiceUnavailable, slog.LevelWarn},
+		{http.StatusInsufficientStorage, slog.LevelWarn},
+	}
+	for _, tc := range tests {
+		if got := levelFor(tc.status); got != tc.want {
+			t.Errorf("levelFor(%d) = %v, want %v", tc.status, got, tc.want)
+		}
+	}
+}
