@@ -87,43 +87,46 @@ function PackedBar({
         )} used, ${bytes(Math.max(0, drive.total_bytes - drive.used_bytes))} free`;
 
         return (
-          <Tooltip
+          <div
             key={drive.id}
-            disabled={!showTooltips}
-            className="h-full"
-            content={
-              <div className="space-y-0.5">
-                <div className="text-label font-medium text-text">{drive.email}</div>
-                <div className="tabular text-data-sm text-subtext0">
-                  {bytes(drive.used_bytes)} of {bytes(drive.total_bytes)} ·{' '}
-                  {percent(drive.used_bytes, drive.total_bytes)}%
-                </div>
-                <div className="tabular text-data-sm text-overlay0">
-                  {bytes(Math.max(0, drive.total_bytes - drive.used_bytes))} free
-                </div>
-              </div>
-            }
+            // Lift the width styles and transition to this explicit flex child
+            className="h-full motion-safe:transition-[width] motion-safe:duration-300"
+            style={{
+              width: `${share}%`,
+              minWidth: share > 0 ? '3px' : undefined,
+            }}
           >
-            <div
-              // Focusable so the numbers are reachable without a mouse.
-              tabIndex={showTooltips ? 0 : -1}
-              role="img"
-              aria-label={label}
-              title={showTooltips ? undefined : label}
-              className={clsx(
-                'h-full cursor-default border-r border-crust',
-                'motion-safe:transition-[width] motion-safe:duration-300',
-                'hover:brightness-125 focus-visible:brightness-125',
-                DRIVE_BG[driveColor(drive.ordinal)],
-              )}
-              style={{
-                width: `${share}%`,
-                // A nearly empty drive still has to be visible and hoverable,
-                // or it silently vanishes from the bar it belongs in.
-                minWidth: share > 0 ? '3px' : undefined,
-              }}
-            />
-          </Tooltip>
+            <Tooltip
+              disabled={!showTooltips}
+              // Tell the tooltip wrapper to take up the full space
+              className="h-full w-full block"
+              content={
+                <div className="space-y-0.5">
+                  <div className="text-label font-medium text-text">{drive.email}</div>
+                  <div className="tabular text-data-sm text-subtext0">
+                    {bytes(drive.used_bytes)} of {bytes(drive.total_bytes)} ·{' '}
+                    {percent(drive.used_bytes, drive.total_bytes)}%
+                  </div>
+                  <div className="tabular text-data-sm text-overlay0">
+                    {bytes(Math.max(0, drive.total_bytes - drive.used_bytes))} free
+                  </div>
+                </div>
+              }
+            >
+              <div
+                tabIndex={showTooltips ? 0 : -1}
+                role="img"
+                aria-label={label}
+                title={showTooltips ? undefined : label}
+                // Change width handling here: remove the `style` prop and add `w-full`
+                className={clsx(
+                  'h-full w-full cursor-default border-r border-crust',
+                  'hover:brightness-125 focus-visible:brightness-125',
+                  DRIVE_BG[driveColor(drive.ordinal)],
+                )}
+              />
+            </Tooltip>
+          </div>
         );
       })}
 
