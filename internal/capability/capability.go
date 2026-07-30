@@ -143,6 +143,15 @@ func (s *Signer) Verify(fileID uuid.UUID, q url.Values, now time.Time) (uuid.UUI
 	// exp is attacker-supplied text; afterwards it is a value this server
 	// signed. Checking expiry first would be checking a number the caller
 	// chose. Rules.md §2.9: constant time.
+	//
+	// Do not "simplify" this to ==. No test covers the difference and none
+	// can: ConstantTimeCompare and == are functionally identical and differ
+	// only in timing, so swapping them leaves the suite green. That was
+	// confirmed by mutation on 2026-07-30 — the swap broke nothing, while
+	// removing the comparison altogether failed seven assertions, which is
+	// how the tests were shown to be non-vacuous. The absence of a failing
+	// test here is therefore evidence about what tests can observe, not
+	// evidence that the call is unnecessary.
 	if subtle.ConstantTimeCompare(got, s.mac(fileID, userID, exp)) != 1 {
 		return uuid.Nil, ErrInvalid
 	}
