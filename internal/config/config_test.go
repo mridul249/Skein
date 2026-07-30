@@ -113,6 +113,13 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 			wantIn:    "SKEIN_SHARD_SIZE_BYTES",
 		},
 		{
+			// 1100000 clears the 1 MiB floor, so only the frame-alignment
+			// branch can be what rejects it. 1100000 % 65536 = 51424.
+			name:      "shard size not a whole number of AEAD frames",
+			overrides: map[string]string{"SKEIN_SHARD_SIZE_BYTES": "1100000"},
+			wantIn:    "must be a multiple of the 65536-byte AEAD frame size; 1100000 leaves a remainder of 51424",
+		},
+		{
 			name: "plaintext public url in production",
 			overrides: map[string]string{
 				"SKEIN_ENV":        "production",
@@ -171,4 +178,53 @@ func TestGoogleConfigured(t *testing.T) {
 	if !cfg.GoogleConfigured() {
 		t.Error("GoogleConfigured() = false with full credentials")
 	}
+}
+
+// The boot check that a shard is a whole number of AEAD frames. It shipped
+// unasserted: the "shard size below 1MiB" case above matches on the variable
+// name alone, and an undersized value trips the 1 MiB floor as well, so nothing
+// proved the alignment branch rejects for its own reason or that a valid size is
+// still accepted.
+//
+// Plaintext basis is the point. A shard's ciphertext is 5 + N*65552, which is
+// odd, so a ciphertext-basis check could never be satisfied by any shard size.
+func TestShardSizeMustBeAWholeNumberOfAEADFrames(t *testing.T) {
+	t.Run("rejects a size that is not a frame multiple", func(t *testing.T) {
+		_, err := loadWith(t, map[string]string{"SKEIN_SHARD_SIZE_BYTES": "1100000"})
+		if err == nil {
+			t.Fatal("Load() = nil, want the frame-alignment error")
+		}
+		const want = "SKEIN_SHARD_SIZE_BYTES must be a multiple of the 65536-byte AEAD frame size; " +
+			"1100000 leaves a remainder of 51424"
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load() = %v, want an error containing %q", err, want)
+		}
+		// 1100000 > 1 MiB, so the floor must not be what fired. Without this
+		// the case would pass for the wrong reason at any undersized value.
+		if strings.Contains(err.Error(), "at least 1 MiB") {
+			t.Errorf("Load() rejected 1100000 for being under 1 MiB: %v", err)
+		}
+	})
+
+	t.Run("accepts an exact frame multiple", func(t *testing.T) {
+		// 1048576 / 65536 = 16 frames exactly.
+		cfg, err := loadWith(t, map[string]string{"SKEIN_SHARD_SIZE_BYTES": "1048576"})
+		if err != nil {
+			t.Fatalf("Load() = %v, want a 1 MiB shard size to be accepted", err)
+		}
+		if cfg.ShardSizeBytes != 1048576 {
+			t.Errorf("ShardSizeBytes = %d, want 1048576", cfg.ShardSizeBytes)
+		}
+	})
+
+	t.Run("accepts the 256 MiB default", func(t *testing.T) {
+		cfg, err := loadWith(t, nil)
+		if err != nil {
+			t.Fatalf("Load() = %v", err)
+		}
+		if rem := cfg.ShardSizeBytes % (64 * 1024); rem != 0 {
+			t.Errorf("the default shard size %d is not frame-aligned (remainder %d)",
+				cfg.ShardSizeBytes, rem)
+		}
+	})
 }
