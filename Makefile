@@ -8,6 +8,36 @@ WEB_DIST    := internal/web/dist
 
 export CGO_ENABLED := 0
 
+# LOADENV sources .env and then lets an explicitly-set shell environment win.
+#
+# Issue #20. The original order sourced .env last, so .env silently beat whatever
+# the caller had set — backwards from the convention every tool in this space
+# follows, and dangerous in both directions. An attempted override was ignored;
+# worse, an operator with a production .env in the working directory who ran a db
+# target aimed at a scratch database got production, with no override attempted
+# and no warning. Session 2 runs migrations against scratch databases repeatedly.
+#
+# src records which source won, so the target can say so out loud.
+LOADENV = pre_db="$$SKEIN_DATABASE_URL"; \
+	set -a; [ -f .env ] && . ./.env; set +a; \
+	if [ -n "$$pre_db" ]; then \
+		SKEIN_DATABASE_URL="$$pre_db"; src="environment"; \
+	else \
+		src=".env"; \
+	fi
+
+# SHOWDB names the database a target is about to touch, host and name only.
+# Never the password: Rules.md §6, and this line ends up in terminal scrollback.
+# A destructive target that does not say what it is about to act on is the root
+# of #20, not the precedence order alone.
+#
+# The sed delimiter is | rather than a hash on purpose: make strips everything
+# from a literal hash onward, even inside a variable definition, which silently
+# truncated this expression mid-quote and produced an unrunnable recipe.
+SHOWDB = printf '\033[36m--> %s (from %s)\033[0m\n' \
+	"$$(printf '%s' "$$SKEIN_DATABASE_URL" | sed -E 's|^[a-z+]+://||; s|^[^@/]*@||; s|\?.*$$||')" \
+	"$$src"
+
 .DEFAULT_GOAL := help
 
 ## help: list targets
@@ -16,7 +46,7 @@ help:
 
 ## run: run the server with .env loaded
 run:
-	@set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/skein
+	@$(LOADENV); $(SHOWDB); go run ./cmd/skein
 
 ## build: build the single binary (frontend must be built first)
 build: web
@@ -53,17 +83,17 @@ sqlc:
 
 ## migrate: apply migrations against SKEIN_DATABASE_URL
 migrate:
-	@set -a; [ -f .env ] && . ./.env; set +a; \
+	@$(LOADENV); $(SHOWDB); \
 	$(GOBIN)/goose -dir internal/db/migrations postgres "$$SKEIN_DATABASE_URL" up
 
 ## migrate-down: roll back one migration
 migrate-down:
-	@set -a; [ -f .env ] && . ./.env; set +a; \
+	@$(LOADENV); $(SHOWDB); \
 	$(GOBIN)/goose -dir internal/db/migrations postgres "$$SKEIN_DATABASE_URL" down
 
 ## migrate-status: show migration state
 migrate-status:
-	@set -a; [ -f .env ] && . ./.env; set +a; \
+	@$(LOADENV); $(SHOWDB); \
 	$(GOBIN)/goose -dir internal/db/migrations postgres "$$SKEIN_DATABASE_URL" status
 
 ## web: build the frontend into internal/web/dist for embedding
@@ -94,7 +124,7 @@ tools:
 
 ## backup: dump the database (the master key alone cannot restore your files)
 backup:
-	@set -a; [ -f .env ] && . ./.env; set +a; \
+	@$(LOADENV); $(SHOWDB); \
 	mkdir -p backups; \
 	ver=$$(psql "$$SKEIN_DATABASE_URL" -qAt \
 	        -c 'SELECT max(version_id) FROM goose_db_version' 2>/dev/null); \
