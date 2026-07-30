@@ -25,12 +25,17 @@ const KeyLen = 32
 //
 //nolint:gosec // G101: these are HKDF domain separators, not credentials.
 const (
-	InfoToken   = "skein-token-v1"
-	InfoFile    = "skein-file-v1"
-	InfoShare   = "skein-share-v1"
-	InfoOAuth   = "skein-oauth-state-v1"
-	infoKeyID   = "skein-key-id-v1"
-	keyIDLength = 4
+	InfoToken = "skein-token-v1"
+	InfoFile  = "skein-file-v1"
+	InfoShare = "skein-share-v1"
+	InfoOAuth = "skein-oauth-state-v1"
+	// InfoCapability namespaces the key that signs content capability URLs.
+	// It is deliberately not the JWT signing secret: that secret authenticates
+	// sessions, and a signing oracle for one must never be a signing oracle
+	// for the other.
+	InfoCapability = "skein-capability-v1"
+	infoKeyID      = "skein-key-id-v1"
+	keyIDLength    = 4
 )
 
 // ErrKeyLength reports a master key that is not 32 bytes.

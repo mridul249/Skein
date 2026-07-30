@@ -401,20 +401,24 @@ export const api = {
   },
 
   /**
-   * Fetches file content as a blob URL for preview or download.
+   * Mints a short-lived capability URL the browser can fetch on its own.
    *
-   * The URL cannot simply be an <a href> because the access token lives in
-   * memory and an anchor cannot carry an Authorization header.
+   * This replaces reading the response into a Blob. A Blob URL required the
+   * entire file to be materialised in the tab before a single byte reached
+   * disk, which undid the constant-memory guarantee the server upholds all
+   * the way to the last hop (known issue #15). Nothing here touches the
+   * bytes: the returned URL carries its own signature, so an <a download>
+   * authenticates without an Authorization header the anchor cannot set.
+   *
+   * The returned URL is a credential. It is scoped to this one file and this
+   * one user and expires in minutes, but it should not be logged, copied into
+   * a bug report, or persisted anywhere.
    */
   async contentURL(id: string): Promise<string> {
-    const token = await ensureToken();
-    if (!token) throw new ApiError(401, 'unauthorized', 'Sign in to continue.');
-
-    const res = await fetch(`/api/files/${encodeURIComponent(id)}/content`, {
-      headers: { Authorization: `Bearer ${token}` },
-      credentials: 'same-origin',
-    });
-    if (!res.ok) throw new ApiError(res.status, 'download_failed', 'Could not download that file.');
-    return URL.createObjectURL(await res.blob());
+    const res = await request<{ url: string; expires_at: string }>(
+      `/api/files/${encodeURIComponent(id)}/content-url`,
+      { method: 'POST' },
+    );
+    return res.url;
   },
 };

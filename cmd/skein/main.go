@@ -186,6 +186,7 @@ func run() error {
 		Auth:     authSvc,
 		Accounts: accountsSvc,
 		Files:    filesSvc,
+		Keyring:  keyring,
 	})
 	if err != nil {
 		return fmt.Errorf("build server: %w", err)
