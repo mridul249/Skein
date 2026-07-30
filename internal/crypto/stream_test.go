@@ -51,7 +51,13 @@ func TestStreamRoundTrip(t *testing.T) {
 			t.Errorf("size %d: ciphertext is %d bytes, StreamOverhead said %d",
 				size, len(cipher), want)
 		}
-		if size > 0 && bytes.Contains(cipher, plain) {
+		// Only meaningful once the plaintext is long enough that a coincidental
+		// match is impossible. A 1-byte plaintext encrypts to 22 bytes (5-byte
+		// header + 1 + 16-byte tag), so the chance that some byte of it happens
+		// to equal that one plaintext byte is 1-(255/256)^22 ≈ 8% — a false
+		// failure, not a leak. At 16 bytes the coincidence needs 16 consecutive
+		// bytes to match, around 2^-128. Do not lower this bound.
+		if size >= 16 && bytes.Contains(cipher, plain) {
 			t.Errorf("size %d: the plaintext appears verbatim in the ciphertext", size)
 		}
 
@@ -66,6 +72,27 @@ func TestStreamRoundTrip(t *testing.T) {
 		if !bytes.Equal(got, plain) {
 			t.Errorf("size %d: round trip changed the bytes", size)
 		}
+	}
+
+	// One distinctive plaintext, long enough for the leak check above to carry
+	// real weight rather than being skipped by the 16-byte guard. A repeated
+	// marker rather than incrementing or zero bytes: those occur naturally in
+	// headers and padding, so finding them would prove nothing either way.
+	marker := []byte("SKEINPLAINTEXTMARKER0123456789AB") // 32 bytes
+	cipher := encrypt(t, k, fileID, 0, marker)
+	if bytes.Contains(cipher, marker) {
+		t.Error("the marker plaintext appears verbatim in the ciphertext")
+	}
+	dec, err := k.NewDecryptReader(fileID, 0, bytes.NewReader(cipher))
+	if err != nil {
+		t.Fatalf("NewDecryptReader(marker) = %v", err)
+	}
+	got, err := io.ReadAll(dec)
+	if err != nil {
+		t.Fatalf("decrypt marker = %v", err)
+	}
+	if !bytes.Equal(got, marker) {
+		t.Error("round trip changed the marker plaintext")
 	}
 }
 

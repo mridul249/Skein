@@ -64,7 +64,15 @@ func TestSealOpenRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Seal(%d bytes) = %v", n, err)
 		}
-		if bytes.Contains(sealed, plaintext) && n > 0 {
+		// The verbatim-leak check is only meaningful once the plaintext is long
+		// enough that a coincidental match is impossible. A sealed 1-byte
+		// plaintext is 34 bytes of effectively random output (17-byte header +
+		// 1 + 16-byte tag), so the chance that some byte of it happens to equal
+		// that one plaintext byte is 1-(255/256)^34 ≈ 12% — a false failure,
+		// not a leak. At 16 bytes the coincidence needs 16 consecutive bytes to
+		// match, around 2^-128. Do not lower this bound; a real leak of a
+		// secret this cipher protects is never one byte long.
+		if n >= 16 && bytes.Contains(sealed, plaintext) {
 			t.Fatalf("the plaintext appears verbatim in the ciphertext (n=%d)", n)
 		}
 
@@ -75,6 +83,27 @@ func TestSealOpenRoundTrip(t *testing.T) {
 		if !bytes.Equal(got, plaintext) {
 			t.Fatalf("round trip mismatch at %d bytes", n)
 		}
+	}
+
+	// One distinctive plaintext, long enough for the leak check above to carry
+	// real weight rather than being skipped by the 16-byte guard. A repeated
+	// marker rather than incrementing or zero bytes: those appear in headers,
+	// padding and length fields by accident, so finding them would prove
+	// nothing either way.
+	marker := []byte("SKEINPLAINTEXTMARKER0123456789AB") // 32 bytes
+	sealed, err := k.Seal(InfoToken, salt, marker)
+	if err != nil {
+		t.Fatalf("Seal(marker) = %v", err)
+	}
+	if bytes.Contains(sealed, marker) {
+		t.Fatal("the marker plaintext appears verbatim in the ciphertext")
+	}
+	got, err := k.Open(InfoToken, salt, sealed)
+	if err != nil {
+		t.Fatalf("Open(marker) = %v", err)
+	}
+	if !bytes.Equal(got, marker) {
+		t.Fatal("round trip changed the marker plaintext")
 	}
 }
 
