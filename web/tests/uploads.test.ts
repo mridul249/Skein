@@ -252,6 +252,13 @@ test('beforeunload warns only while an upload is in flight', async () => {
   const id = store.start(file('big.bin', 1000), null);
   assert.equal(win.count(), 1, 'an in-flight upload must prompt');
 
+  // `finishing` must still prompt. Every byte has been handed to the socket,
+  // but the server is still writing shards to Drive — the window where a
+  // reload is most expensive and least obviously dangerous.
+  nth(inFlight, 0).progress(1000, 1000);
+  assert.equal(nth(store.getSnapshot(), 0).status, 'finishing');
+  assert.equal(win.count(), 1, 'finishing is still in flight and must still prompt');
+
   store.cancel(id);
   await settle();
   assert.equal(win.count(), 0, 'nothing in flight, no prompt');
