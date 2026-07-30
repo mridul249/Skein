@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b --force",
     "test": "tsc -p tests/tsconfig.json && node -e \"require('fs').writeFileSync('.test-build/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\" && node --test '.test-build/tests/*.test.js'"
   },
   "dependencies": {
