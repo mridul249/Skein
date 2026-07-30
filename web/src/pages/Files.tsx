@@ -14,23 +14,15 @@ import { ApiError, api, type FileItem, type Folder } from '../lib/api';
 import { QuotaBar } from '../components/QuotaBar';
 import { ShardMap } from '../components/ShardMap';
 import { bytes, relativeTime } from '../lib/format';
-
-interface UploadJob {
-  id: string;
-  name: string;
-  size: number;
-  progress: number;
-  error?: string;
-  controller: AbortController;
-}
+import { useUploads } from '../lib/uploads-context';
 
 export function Files() {
   const qc = useQueryClient();
   const [folderId, setFolderId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [banner, setBanner] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const { start: startUploadJob } = useUploads();
 
   const { data: quota } = useQuery({ queryKey: ['quota'], queryFn: api.quota });
   const { data: drivesData } = useQuery({ queryKey: ['drives'], queryFn: api.listDrives });
@@ -55,37 +47,11 @@ export function Files() {
     void qc.invalidateQueries({ queryKey: ['folders'] });
   }, [qc]);
 
+  // The job list lives above the router, so navigating away no longer
+  // orphans an in-flight upload (#13). Nothing here aborts on unmount.
   const startUpload = useCallback(
-    (file: File) => {
-      const job: UploadJob = {
-        id: `${file.name}-${Date.now()}-${Math.random()}`,
-        name: file.name,
-        size: file.size,
-        progress: 0,
-        controller: new AbortController(),
-      };
-      setJobs((prev) => [...prev, job]);
-
-      api
-        .upload(
-          file,
-          folderId,
-          (fraction) =>
-            setJobs((prev) =>
-              prev.map((j) => (j.id === job.id ? { ...j, progress: fraction } : j)),
-            ),
-          job.controller.signal,
-        )
-        .then(() => {
-          setJobs((prev) => prev.filter((j) => j.id !== job.id));
-          refresh();
-        })
-        .catch((err: unknown) => {
-          const message = err instanceof ApiError ? err.message : 'Upload failed.';
-          setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, error: message } : j)));
-        });
-    },
-    [folderId, refresh],
+    (file: File) => startUploadJob(file, folderId),
+    [folderId, startUploadJob],
   );
 
   // Design.md §8: U uploads, Del trashes, / searches. Shortcuts are ignored
@@ -220,43 +186,6 @@ export function Files() {
             </span>
           ))}
         </nav>
-      )}
-
-      {jobs.length > 0 && (
-        <ul className="mb-4 space-y-2">
-          {jobs.map((job) => (
-            <li key={job.id} className="card px-4 py-3">
-              <div className="mb-1.5 flex items-baseline justify-between gap-3">
-                <span className="truncate text-label text-text">{job.name}</span>
-                <span className="tabular shrink-0 text-data-sm text-subtext0">
-                  {job.error ? (
-                    <span className="text-red">{job.error}</span>
-                  ) : (
-                    `${Math.round(job.progress * 100)}% of ${bytes(job.size)}`
-                  )}
-                </span>
-              </div>
-              <div className="h-1 w-full overflow-hidden rounded bg-surface0">
-                <div
-                  className={clsx('h-full transition-[width] duration-hover', job.error ? 'bg-red' : 'bg-mauve')}
-                  style={{ width: `${job.progress * 100}%` }}
-                />
-              </div>
-              <div className="mt-1.5 text-right">
-                <button
-                  type="button"
-                  className="text-caption text-overlay0 hover:text-red"
-                  onClick={() => {
-                    job.controller.abort();
-                    setJobs((prev) => prev.filter((j) => j.id !== job.id));
-                  }}
-                >
-                  {job.error ? 'Dismiss' : 'Cancel'}
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
       )}
 
       <div className="card overflow-x-auto">
