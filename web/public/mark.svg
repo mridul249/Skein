@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"
+     fill="none" stroke="#cba6f7" stroke-width="2" stroke-linejoin="miter">
+  <title>Skein</title>
+  <!--
+    A skein of yarn: one looped hank with a band around its middle. Monoline,
+    single stroke weight, no fill — a fill and a stroke merge into a blob at
+    favicon size.
+
+    Axis-aligned, and that is a legibility decision rather than a stylistic
+    one. The first version put the loop on a 45° diagonal, which is the livelier
+    drawing and was unreadable at 16px: diagonal strokes land between pixel
+    boundaries and antialias into mush, and the band's crossings merged with the
+    loop. Rendered side by side at 16/20/24/32/64, the axis-aligned form was the
+    only one where the band still read as a band. Checked, not assumed.
+
+    Radius 0 governs the interface, not the mark — a skein is a loop, and a
+    rectangular one would be a different object. The band is the only straight
+    element and its corners are deliberately square (miter, not round), which is
+    what ties the mark back to the UI it sits in.
+
+    On a light browser tab this is mauve on white, which is low contrast. That is
+    accepted: the mark is an identifier, not something anyone has to read, and
+    changing colour by background would mean two marks.
+  -->
+  <ellipse cx="12" cy="12" rx="10" ry="5.5" />
+  <rect x="9" y="4.5" width="6" height="15" />
+</svg>
