@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { QuotaRail } from './QuotaBar';
 import { UploadList } from './UploadList';
 import { useSession } from '../lib/session';
+import { Wordmark } from './Wordmark';
 
 /**
  * The shell. Design.md §4: a 240px fixed sidebar on mantle whose bottom
@@ -41,10 +42,9 @@ export function Layout() {
         className="flex shrink-0 flex-col border-surface0 bg-mantle
                    max-md:order-2 max-md:border-t md:h-screen md:w-sidebar md:border-r"
       >
-        <div className="hidden px-2ch py-1line md:block">
-          <span className="font-display text-heading font-bold text-text">
-            Skein
-          </span>
+        <div className="hidden items-center gap-1ch px-2ch py-1line md:flex">
+          <img src="/mark.svg" width="18" height="18" alt="" aria-hidden />
+          <Wordmark className="text-heading" />
         </div>
 
         <nav className="flex gap-1 px-1ch max-md:justify-around max-md:py-halfline md:flex-col md:py-0">

@@ -12,6 +12,7 @@ import { SessionContext, type SessionValue } from './lib/session';
 import { UploadsProvider } from './lib/uploads-context';
 import { api, onSessionChange, type User } from './lib/api';
 import './styles/index.css';
+import { Wordmark } from './components/Wordmark';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -56,7 +57,7 @@ function App() {
     // that responds in 20ms is theatre.
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <span className="font-display text-heading text-subtext0">Skein</span>
+        <Wordmark className="text-heading opacity-60" />
       </div>
     );
   }

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { ApiError, api } from '../lib/api';
 import { useSession } from '../lib/session';
+import { Wordmark } from '../components/Wordmark';
 
 /**
  * Sign in and sign up on one screen.
@@ -48,8 +49,9 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center px-5">
       <div className="w-full max-w-sm">
         <div className="mb-8">
-          <h1 className="font-display text-display-m font-bold text-text">
-            Skein
+          <h1 className="flex items-center gap-1ch">
+            <img src="/mark.svg" width="28" height="28" alt="" aria-hidden />
+            <Wordmark className="text-display-m" />
           </h1>
           <p className="mt-1 text-body text-subtext0">
             Your free cloud accounts, pooled, striped and encrypted.
