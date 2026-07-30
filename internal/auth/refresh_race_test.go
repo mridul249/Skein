@@ -188,26 +188,43 @@ func TestRefreshConcurrentUseRevokesFamilyDeterministically(t *testing.T) {
 		t.Fatalf("session %s vanished", first.SessionID)
 	}
 
-	var survivors []Session
-	for _, s := range store.SessionsInFamily(family.FamilyID) {
-		if s.RevokedAt == nil {
-			survivors = append(survivors, s)
+	// Behaviour, not row state. Under the forced interleaving the successor is
+	// inserted after the revocation, so a correct implementation leaves its
+	// revoked_at nil and makes it unclaimable instead. Asserting revoked_at
+	// here would fail against working code.
+	sessions := store.SessionsInFamily(family.FamilyID)
+	var claimable []Session
+	for _, s := range sessions {
+		if _, cerr := store.ClaimSession(ctx, s.ID); cerr == nil {
+			claimable = append(claimable, s)
 		}
 	}
 
-	if len(survivors) > 0 {
+	if len(claimable) > 0 {
 		describeFamily(t, store, family.FamilyID)
-		for _, s := range survivors {
+		for _, s := range claimable {
 			role := "the ORIGINAL login session"
 			if s.PrevID != nil {
 				role = fmt.Sprintf("a ROTATED SUCCESSOR of %s", s.PrevID)
 			}
-			t.Errorf("session %s survived the family revocation: %s "+
+			t.Errorf("session %s is still CLAIMABLE after the family revocation: %s "+
 				"(prev_id=%s used_at=%s revoked_at=%s)",
 				s.ID, role, fmtPrev(s.PrevID), fmtTime(s.UsedAt), fmtTime(s.RevokedAt))
 		}
 		t.Errorf("Rules.md §2.8 requires reuse to revoke the ENTIRE family; "+
-			"%d of %d sessions are still live after revocation",
-			len(survivors), len(store.SessionsInFamily(family.FamilyID)))
+			"%d of %d sessions can still refresh after revocation",
+			len(claimable), len(sessions))
+	}
+
+	// The mechanism, asserted alongside the property so a change that keeps one
+	// without the other cannot pass.
+	revokedAt, ok := store.FamilyRevokedAt(family.FamilyID)
+	if !ok {
+		t.Fatalf("family %s has no token_families row", family.FamilyID)
+	}
+	if revokedAt == nil {
+		describeFamily(t, store, family.FamilyID)
+		t.Errorf("family %s carries no revoked_at, so nothing binds a successor "+
+			"inserted after the sweep", family.FamilyID)
 	}
 }
