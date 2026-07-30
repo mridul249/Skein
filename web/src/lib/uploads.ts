@@ -63,6 +63,10 @@ export type Uploader = (
 /** Called once a job reaches a terminal state, for cache invalidation. */
 export type SettledListener = (job: UploadJob) => void;
 
+// `finishing` is deliberately absent: every byte has been handed to the socket
+// but the server is still writing shards to Drive, so it is still in flight —
+// and it is exactly when a reload is most expensive and least obviously
+// dangerous. A predicate keying on `sending` alone drops that window silently.
 const TERMINAL: readonly UploadStatus[] = ['done', 'error', 'cancelled'];
 
 /** isActive reports whether a job still has a request in flight. */
