@@ -3,15 +3,36 @@
 @tailwind utilities;
 
 /*
- * Design.md §3. One face, self-hosted.
+ * Design.md §3. Two faces, both vendored as woff2 subsets in ./fonts.
  *
- * JetBrains Mono, subset to Latin plus the handful of symbols the interface
- * actually draws, built from the official v2.304 release with `subset-font`.
- * 80 KB for both weights, under the 120 KB budget in §8. No Google Fonts
- * request: a self-hosted tool that phones home on first paint is a
- * contradiction, and a font that arrives over someone else's network is a
- * dependency the whole project exists to avoid. Licence in ./fonts/OFL.txt.
+ * IBM Plex Sans for prose, JetBrains Mono for data. 90.2 KB for all three
+ * files, inside the §8 budget — and slightly *less* than the two mono weights
+ * this replaced, because dropping the box-drawing and block-element ranges
+ * paid for the whole sans. Those ranges existed for the character-cell shard
+ * map, which this direction replaces with a proportional tiled bar.
+ *
+ * No Google Fonts call, ever: a self-hosted tool that phones home on first
+ * paint is a contradiction. Licences beside the files.
  */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/IBMPlexSans-Regular-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  /* 600, not 700. It carries every emphasis this UI has, and a 700 UI sans
+     reads as shouting. Only these two weights exist, so nothing can ask for
+     a weight the browser would have to synthesise. */
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/IBMPlexSans-SemiBold-latin.woff2') format('woff2');
+}
+
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
@@ -20,20 +41,9 @@
   src: url('../fonts/JetBrainsMono-Regular-latin.woff2') format('woff2');
 }
 
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('../fonts/JetBrainsMono-Bold-latin.woff2') format('woff2');
-}
-
 @layer base {
   :root {
     color-scheme: dark;
-    /* The character cell. Every horizontal rhythm value is a multiple of
-       this, and every line height a multiple of --line. */
-    --line: 1.4rem;
   }
 
   html,
@@ -43,100 +53,126 @@
   }
 
   body {
-    background-color: theme('colors.crust');
+    background-color: theme('colors.canvas');
     color: theme('colors.text');
-    /* Global, not per-element. This interface is mostly numbers — sizes,
-       percentages, shard counts, checksums — and a figure that changes width
-       when it changes value makes a column jitter as it updates. Previously
-       this rode on the .tabular class, so anything that forgot the class got
-       proportional digits. */
-    font-variant-numeric: tabular-nums;
+    font-family: theme('fontFamily.sans');
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * Only 400 and 600 are vendored, so nothing may ask for 700 — the browser
+   * would synthesise it by smearing the 600, which is a different and worse
+   * letterform. The user agent defaults `th` and `b`/`strong` to bold, and
+   * Tailwind's preflight resets headings but not these, so they are pinned
+   * here rather than patched at each call site. Asserted by the harness.
+   */
+  th,
+  b,
+  strong {
+    font-weight: 600;
   }
 
   /* Design.md §8: visible keyboard focus on every interactive element.
-     Not negotiable, not announced. Radius 0 changes the ring's shape, not
-     its existence. */
+     Not negotiable, not announced. */
   :focus-visible {
-    outline: 2px solid theme('colors.mauve');
+    outline: 2px solid theme('colors.accent');
     outline-offset: 2px;
-    border-radius: 0;
+    border-radius: theme('borderRadius.DEFAULT');
   }
 
-  /* Retained as an explicit marker on numeric cells. The font and the
-     tabular figures are now global, so this no longer changes rendering —
-     it documents which columns are data, and is the hook if a future
-     proportional face is ever introduced alongside. */
+  /*
+   * Data — byte counts, hashes, timestamps, shard and account numbers — is
+   * monospace with tabular figures. Applied per element rather than globally:
+   * prose is a proportional face now, and `tabular-nums` on a sans makes the
+   * figures in a sentence sit oddly wide.
+   *
+   * A figure that changes width when it changes value makes a live column
+   * jitter as it updates, which is the whole reason this exists.
+   */
   .tabular {
+    font-family: theme('fontFamily.mono');
     font-variant-numeric: tabular-nums;
+    font-feature-settings: 'zero' 1;
   }
 
   ::selection {
-    background-color: theme('colors.mauve');
-    color: theme('colors.crust');
+    background-color: theme('colors.accent');
+    color: theme('colors.canvas');
   }
 
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
   }
   ::-webkit-scrollbar-track {
-    background: theme('colors.crust');
+    background: theme('colors.canvas');
   }
   ::-webkit-scrollbar-thumb {
-    background: theme('colors.surface0');
-    border-radius: 0;
+    background: theme('colors.border');
+    border: 3px solid theme('colors.canvas');
+    border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: theme('colors.surface1');
+    background: theme('colors.borderStrong');
   }
 }
 
 @layer components {
+  /* Elevation is fill plus a 1px border. There is no shadow in this design. */
   .card {
-    @apply border border-surface0 bg-base;
+    @apply rounded-md border border-border bg-surface;
   }
 
-  /* Padding that borders text is measured in characters: a button's label
-     sits a whole cell in from its border, so buttons of different lengths
-     still align to the same grid. Vertical padding is half a line. */
   .btn {
-    @apply inline-flex items-center justify-center gap-1ch border px-2ch py-halfline
-           text-label font-bold transition-colors duration-hover
-           disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded border px-3.5 py-2
+           text-label font-semibold transition-colors duration-hover
+           disabled:cursor-not-allowed disabled:opacity-45;
   }
 
+  /* The accent appears here and almost nowhere else. Dark text on the accent,
+     which clears 7.47:1. */
   .btn-primary {
-    @apply btn border-mauve bg-mauve text-crust hover:border-lavender hover:bg-lavender;
+    @apply btn border-accent bg-accent text-canvas hover:border-accentHover hover:bg-accentHover;
   }
 
   .btn-ghost {
-    @apply btn border-surface0 bg-transparent text-text hover:bg-surface0;
+    @apply btn border-border bg-transparent text-text hover:bg-raised;
+  }
+
+  .btn-quiet {
+    @apply btn border-transparent bg-transparent text-muted hover:bg-raised hover:text-text;
   }
 
   .btn-danger {
-    @apply btn border-surface0 bg-transparent text-red hover:border-red hover:bg-red hover:text-crust;
+    @apply btn border-border bg-transparent text-danger
+           hover:border-danger hover:bg-danger hover:text-canvas;
   }
 
   .input {
-    @apply w-full border border-surface2 bg-mantle px-1ch py-halfline text-body
-           text-text placeholder:text-overlay0 transition-colors duration-hover
-           focus:border-mauve focus:outline-none;
+    @apply w-full rounded border border-borderStrong bg-canvas px-3 py-2 text-body
+           text-text placeholder:text-faint transition-colors duration-hover
+           focus:border-accent focus:outline-none;
   }
 
   .label {
-    @apply mb-halfline block text-label font-bold text-subtext0;
+    @apply mb-1.5 block text-label font-semibold text-muted;
+  }
+
+  /* Column headers and other small structural labels. Sentence case — the
+     ALL-CAPS eyebrow is the tell of a template. */
+  .th {
+    @apply px-4 py-3 text-left text-label font-semibold text-muted;
   }
 }
 
-/* Design.md §6: the pulse and the bar animation are the one orchestrated
-   moment. Both are off when the viewer has asked for less motion. */
+/* Design.md §6: the upload is the one orchestrated moment. */
 @keyframes shard-pulse {
   0%,
   100% {
     opacity: 1;
   }
   50% {
-    opacity: 0.35;
+    opacity: 0.4;
   }
 }
 

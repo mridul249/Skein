@@ -139,7 +139,7 @@ export function Files() {
       }}
       className={clsx(
         'min-h-[60vh] transition-colors duration-hover',
-        dragging && 'outline-dashed outline-2 outline-offset-4 outline-mauve',
+        dragging && 'outline-dashed outline-2 outline-offset-4 outline-accent',
       )}
     >
       {/* The window.prompt replacement. A native prompt could not be styled,
@@ -173,7 +173,7 @@ export function Files() {
       </Modal>
 
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-display-m font-bold">Files</h1>
+        <h1 className="text-title font-semibold">Files</h1>
         <div className="flex gap-2">
           <button
             type="button"
@@ -207,20 +207,20 @@ export function Files() {
       )}
 
       {banner && (
-        <p role="alert" className="mb-4 border border-red/40 bg-red/10 px-2ch py-halfline text-body text-red">
+        <p role="alert" className="mb-4 border border-danger/40 bg-danger/10 px-4 py-2 text-body text-danger">
           {banner}
         </p>
       )}
 
       {breadcrumb.length > 0 && (
         <nav aria-label="Breadcrumb" className="mb-3 flex items-center gap-1 text-label">
-          <button type="button" className="text-sapphire" onClick={() => setFolderId(null)}>
+          <button type="button" className="text-accent" onClick={() => setFolderId(null)}>
             All files
           </button>
           {breadcrumb.map((f) => (
             <span key={f.id} className="flex items-center gap-1">
-              <ChevronRight size={13} className="text-overlay0" aria-hidden />
-              <button type="button" className="text-sapphire" onClick={() => setFolderId(f.id)}>
+              <ChevronRight size={13} className="text-faint" aria-hidden />
+              <button type="button" className="text-accent" onClick={() => setFolderId(f.id)}>
                 {f.name}
               </button>
             </span>
@@ -238,20 +238,20 @@ export function Files() {
       <div className="card relative overflow-x-auto">
         <table className="w-full min-w-[46rem] border-collapse">
           <thead>
-            <tr className="border-b border-surface0 text-left">
-              <th scope="col" className="px-2ch py-halfline text-label font-bold text-subtext0">
+            <tr className="border-b border-border text-left">
+              <th scope="col" className="px-4 py-2 text-label font-semibold text-muted">
                 Name
               </th>
-              <th scope="col" className="w-28 px-2ch py-halfline text-right text-label font-bold text-subtext0">
+              <th scope="col" className="w-28 px-4 py-2 text-right text-label font-semibold text-muted">
                 Size
               </th>
-              <th scope="col" className="w-28 px-2ch py-halfline text-label font-bold text-subtext0">
+              <th scope="col" className="w-28 px-4 py-2 text-label font-semibold text-muted">
                 Stored
               </th>
-              <th scope="col" className="w-28 px-2ch py-halfline text-label font-bold text-subtext0">
+              <th scope="col" className="w-28 px-4 py-2 text-label font-semibold text-muted">
                 Added
               </th>
-              <th scope="col" className="w-24 px-2ch py-halfline">
+              <th scope="col" className="w-24 px-4 py-2">
                 <span className="sr-only">Actions</span>
               </th>
             </tr>
@@ -260,28 +260,28 @@ export function Files() {
             {children.map((folder) => (
               <tr
                 key={folder.id}
-                className="h-row border-b border-surface0/60 transition-colors duration-hover hover:bg-surface0"
+                className="h-row border-b border-border/60 transition-colors duration-hover hover:bg-raised"
               >
-                <td className="px-2ch">
+                <td className="px-4">
                   <button
                     type="button"
                     className="flex items-center gap-2 text-body text-text"
                     onClick={() => setFolderId(folder.id)}
                   >
-                    <FolderIcon size={15} className="text-mauve" aria-hidden />
+                    <FolderIcon size={15} className="text-accent" aria-hidden />
                     {folder.name}
                   </button>
                 </td>
-                <td className="px-2ch text-right text-data text-subtext0">—</td>
-                <td className="px-2ch" />
-                <td className="px-2ch text-data text-subtext0">
+                <td className="px-4 text-right text-data text-muted">—</td>
+                <td className="px-4" />
+                <td className="px-4 text-data text-muted">
                   {relativeTime(folder.created_at)}
                 </td>
-                <td className="px-2ch text-right">
+                <td className="px-4 text-right">
                   <button
                     type="button"
                     aria-label={`Delete folder ${folder.name}`}
-                    className="p-1 text-subtext0 transition-colors duration-hover hover:text-red"
+                    className="p-1 text-muted transition-colors duration-hover hover:text-danger"
                     onClick={() => setDeleting(folder)}
                   >
                     <Trash2 size={15} aria-hidden />
@@ -293,22 +293,22 @@ export function Files() {
             {files.map((file) => (
               <tr
                 key={file.id}
-                className="h-row border-b border-surface0/60 transition-colors duration-hover hover:bg-surface0"
+                className="h-row border-b border-border/60 transition-colors duration-hover hover:bg-raised"
               >
-                <td className="max-w-0 truncate px-2ch text-body">{file.name}</td>
-                <td className="tabular px-2ch text-right text-data text-subtext0">
+                <td className="max-w-0 truncate px-4 text-body">{file.name}</td>
+                <td className="tabular px-4 text-right text-data text-muted">
                   {bytes(file.size_bytes)}
                 </td>
-                <td className="px-2ch">
+                <td className="px-4">
                   <ShardMap file={file} drives={drives} />
                 </td>
-                <td className="px-2ch text-data text-subtext0">{relativeTime(file.created_at)}</td>
-                <td className="px-2ch">
+                <td className="px-4 text-data text-muted">{relativeTime(file.created_at)}</td>
+                <td className="px-4">
                   <div className="flex items-center justify-end gap-1">
                     <button
                       type="button"
                       aria-label={`Download ${file.name}`}
-                      className="p-1 text-subtext0 transition-colors duration-hover hover:text-text"
+                      className="p-1 text-muted transition-colors duration-hover hover:text-text"
                       onClick={() => void download(file)}
                     >
                       <Download size={15} aria-hidden />
@@ -316,7 +316,7 @@ export function Files() {
                     <button
                       type="button"
                       aria-label={`Move ${file.name} to trash`}
-                      className="p-1 text-subtext0 transition-colors duration-hover hover:text-red"
+                      className="p-1 text-muted transition-colors duration-hover hover:text-danger"
                       onClick={() => trash.mutate(file.id)}
                     >
                       <Trash2 size={15} aria-hidden />
@@ -329,16 +329,16 @@ export function Files() {
         </table>
 
         {!isLoading && files.length === 0 && children.length === 0 && (
-          <div className="px-2ch py-16 text-center">
-            <p className="font-display text-heading text-subtext0">Nothing here yet.</p>
-            <p className="mt-1 text-body text-subtext0">Drag a file in, or press U.</p>
+          <div className="px-4 py-16 text-center">
+            <p className="text-heading text-muted">Nothing here yet.</p>
+            <p className="mt-1 text-body text-muted">Drag a file in, or press U.</p>
           </div>
         )}
 
-        {isLoading && <div className="px-2ch py-16 text-center text-body text-subtext0">Loading…</div>}
+        {isLoading && <div className="px-4 py-16 text-center text-body text-muted">Loading…</div>}
 
         {listError && (
-          <div className="px-2ch py-16 text-center text-body text-red">
+          <div className="px-4 py-16 text-center text-body text-danger">
             {listError instanceof ApiError ? listError.message : 'Could not load your files.'}
           </div>
         )}

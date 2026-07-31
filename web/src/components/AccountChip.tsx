@@ -37,10 +37,10 @@ export function AccountChip({
       // `rounded` rather than a literal: it is 0 under the current tokens and
       // picks up the modest radius when the token set lands, with no edit here.
       className={clsx(
-        'inline-flex shrink-0 items-center justify-center rounded font-bold tabular-nums',
+        'inline-flex shrink-0 items-center justify-center rounded font-semibold tabular-nums',
         // Dark text on a light chip. Every ramp colour clears 4.5:1 against
         // --crust by construction, so this is legible on all six.
-        known ? 'text-crust' : 'text-subtext0',
+        known ? 'text-canvas' : 'text-muted',
         known ? DRIVE_BG[driveColor(ordinal)] : UNKNOWN_DRIVE_BG,
         size === 'sm' ? 'h-3.5 w-3.5 text-[9px]' : 'h-[18px] w-[18px] text-[11px]',
         className,

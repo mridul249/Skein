@@ -15,44 +15,55 @@ const url = (route) => `${BASE}?route=${encodeURIComponent(route)}`;
 
 const on = (opts, fn) => withChrome({ bin, ...opts }, fn);
 
-test('every glyph the character grid needs comes from the vendored subset', async () => {
+test('every glyph the interface draws comes from a vendored face', async () => {
   await on({}, async (p) => {
     await p.goto(url('/'));
-    const { cell, offGrid } = await p.eval(`(async () => {
+    const missing = await p.eval(`(async () => {
       await document.fonts.ready;
+      const loaded = [...document.fonts].map((f) => f.family + ' ' + f.weight + ' ' + f.status);
+      // A codepoint outside a subset falls back to another face at another
+      // advance width. For the data face that breaks column alignment, so it
+      // is measured rather than assumed — document.fonts.check() returns true
+      // for codepoints a face does not contain and cannot detect this.
       const cv = document.createElement('canvas').getContext('2d');
       cv.font = '32px "JetBrains Mono"';
       const cell = cv.measureText('M').width;
-      const wanted = [...'\\u203A\\u25B8\\u25BE\\u25CF\\u25CB\\u2713\\u2715\\u00B7\\u232B\\u2500\\u2502\\u2588\\u2593\\u2592\\u2591\\u2190\\u2192\\u2191\\u2193'];
+      const wanted = [...'0123456789.,%/-\u2014\u00b7\u2713\u2715\u203a'];
       const offGrid = wanted
         .filter((ch) => Math.abs(cv.measureText(ch).width - cell) > 0.01)
         .map((ch) => 'U+' + ch.codePointAt(0).toString(16).toUpperCase());
-      return { cell, offGrid };
+      return { loaded, offGrid };
     })()`);
-    assert.ok(cell > 0, 'the font should have a measurable advance');
-    // A codepoint outside the subset falls back to another face at another
-    // advance width, which breaks the grid and reads as a layout bug.
-    assert.deepEqual(offGrid, [], 'these codepoints fell back to another font');
+    assert.deepEqual(missing.offGrid, [], 'these codepoints fell back to another font');
+    // Only the weights actually vendored may be declared: anything else gets
+    // synthesised by the browser, which is a different and worse letterform.
+    assert.deepEqual(
+      missing.loaded.sort(),
+      ['IBM Plex Sans 400 loaded', 'IBM Plex Sans 600 loaded', 'JetBrains Mono 400 loaded'],
+    );
   });
 });
 
-test('no element renders with a corner radius', async () => {
-  for (const route of ['/', '/trash', '/settings', '/login']) {
-    await on({}, async (p) => {
-      await p.goto(url(route));
-      const rounded = await p.eval(`(() => {
-        const bad = [];
-        for (const el of document.querySelectorAll('*')) {
-          const s = getComputedStyle(el);
-          const r = [s.borderTopLeftRadius, s.borderTopRightRadius,
-                     s.borderBottomLeftRadius, s.borderBottomRightRadius];
-          if (r.some((v) => v !== '0px')) bad.push(el.tagName + '.' + String(el.className).slice(0, 40));
-        }
-        return bad;
-      })()`);
-      assert.deepEqual(rounded, [], `radius 0 everywhere (${route})`);
-    });
-  }
+test('prose is sans, data is mono, and no weight is synthesised', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    const r = await p.eval(`(() => {
+      const fam = (el) => getComputedStyle(el).fontFamily;
+      const body = fam(document.body);
+      // Anything marked as data must resolve to the mono face.
+      const data = [...document.querySelectorAll('.tabular')].map(fam);
+      // No element may ask for a weight that is not vendored (400 / 600).
+      const weights = new Set();
+      for (const el of document.querySelectorAll('body *')) {
+        if (el.textContent && !el.children.length) weights.add(getComputedStyle(el).fontWeight);
+      }
+      return { body, data: [...new Set(data)], weights: [...weights].sort() };
+    })()`);
+    assert.match(r.body, /IBM Plex Sans/, 'prose is the sans face');
+    for (const f of r.data) assert.match(f, /JetBrains Mono/, 'data is the mono face');
+    assert.ok(r.data.length > 0, 'the fixture should render some data');
+    assert.deepEqual(r.weights, ['400', '600'], 'only vendored weights may be used');
+  });
 });
 
 test('the page never scrolls horizontally at 375px', async () => {
@@ -88,7 +99,7 @@ test('quota bar packs used bytes left, then one remainder', async () => {
     assert.equal(segs.length, 3, 'two drives plus exactly one remainder');
     assert.equal(segs[0].bg, 'rgb(111, 226, 222)', 'first segment is drive 1');
     assert.equal(segs[1].bg, 'rgb(175, 215, 222)', 'second segment is drive 2');
-    assert.equal(segs[2].bg, 'rgb(49, 50, 68)', 'the last block is the free remainder');
+    assert.equal(segs[2].bg, 'rgb(28, 32, 39)', 'the last block is the free remainder');
     assert.ok(segs[0].w > segs[1].w, '277 GB used should be wider than 8.1 GB used');
     assert.match(segs[0].label, /277 GB of 400 GB used/);
   });
@@ -141,7 +152,7 @@ test('an orphaned shard never borrows a real drive colour', async () => {
     // Shard 2 is orphaned. It used to fall back to ordinal 1 and render in
     // drive 1's colour, claiming to live on a drive that does not hold it.
     assert.notEqual(chips[2].bg, chips[0].bg, 'an orphaned shard must not look like drive 1');
-    assert.equal(chips[2].bg, 'rgb(69, 71, 90)', 'an unidentifiable shard is neutral surface1');
+    assert.equal(chips[2].bg, 'rgb(60, 67, 80)', 'an unidentifiable shard is a neutral grey');
   });
 });
 

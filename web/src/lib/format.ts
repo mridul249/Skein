@@ -85,14 +85,14 @@ export const DRIVE_BG: Record<DriveColor, string> = {
  * Deliberately **not** a ramp colour. A shard orphaned by a disconnect carries
  * `account_id: null` (known issue #19), and this used to fall back to ordinal
  * 1 — so an orphaned shard rendered in the first drive's blue, visually
- * claiming to live on a drive that does not hold it. A neutral surface says
+ * claiming to live on a drive that does not hold it. A neutral grey says
  * "unknown", which is the true answer.
  *
  * Design.md §5 still applies: never colour alone. Callers pair this with the
  * ✕ glyph and a text label.
  */
-export const UNKNOWN_DRIVE_BG = 'bg-surface1';
-export const UNKNOWN_DRIVE_TEXT = 'text-subtext0';
+export const UNKNOWN_DRIVE_BG = 'bg-borderStrong';
+export const UNKNOWN_DRIVE_TEXT = 'text-muted';
 
 /** A drive as the colour system needs to see it. */
 interface Rampable {

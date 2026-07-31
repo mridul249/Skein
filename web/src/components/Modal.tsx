@@ -138,7 +138,7 @@ export function Modal({
     <div
       // Design.md §2: no shadows. The dim is what separates the dialog from
       // the page, and it is the only place a translucent layer is used.
-      className="fixed inset-0 z-50 flex items-center justify-center bg-crust/80 p-2ch"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 p-4"
       onMouseDown={(e) => {
         // Only a press that both starts and ends on the backdrop dismisses,
         // so a drag that ends outside a text selection does not.
@@ -159,7 +159,7 @@ export function Modal({
           // `break-words` alone does not fix this — `overflow-wrap: break-word`
           // wraps the text but does not reduce the intrinsic min-content width
           // the flex floor is computed from.
-          'w-full min-w-0 max-w-[64ch] border border-surface0 bg-base p-2ch',
+          'w-full min-w-0 max-w-[64ch] border border-border bg-surface p-4',
           // Design.md §6: 180ms on panel open, and nothing at all when the
           // viewer has asked for less motion.
           'motion-safe:animate-modal-in',
@@ -172,18 +172,18 @@ export function Modal({
           monospace face at 375px that runs straight out of the panel. Applies
           to the body too, which carries the same values.
         */}
-        <h2 id={titleId} className="break-words text-heading font-bold text-text">
+        <h2 id={titleId} className="break-words text-heading font-semibold text-text">
           {title}
         </h2>
 
         {children && (
-          <div id={bodyId} className="mt-1line break-words text-body text-subtext0">
+          <div id={bodyId} className="mt-3 break-words text-body text-muted">
             {children}
           </div>
         )}
 
         {prompt && (
-          <div className="mt-1line">
+          <div className="mt-3">
             <label htmlFor={`${titleId}-field`} className="label">
               {prompt.label}
             </label>
@@ -206,7 +206,7 @@ export function Modal({
           </div>
         )}
 
-        <div className="mt-1line flex justify-end gap-1ch">
+        <div className="mt-3 flex justify-end gap-2">
           <button type="button" ref={cancelRef} className="btn-ghost" onClick={onCancel}>
             {cancelLabel}
           </button>

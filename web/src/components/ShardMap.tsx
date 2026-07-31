@@ -57,7 +57,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
   };
 
   if (file.shards.length === 0) {
-    return <span className="text-data-sm text-subtext0">—</span>;
+    return <span className="text-data-sm text-muted">—</span>;
   }
 
   return (
@@ -66,15 +66,15 @@ export function ShardMap({ file, drives, activeShard }: Props) {
       // for. It flips above by itself near the bottom of the viewport.
       placement="bottom"
       className="inline-flex items-center gap-1 px-1 py-1"
-      panelClassName="w-[30rem] p-2ch"
+      panelClassName="w-[30rem] p-4"
       label={`${file.shards.length} ${
         file.shards.length === 1 ? 'shard' : 'shards'
       } across ${new Set(file.shards.map((s) => s.account_id)).size} drives`}
       content={
         <>
           <div className="mb-3 flex items-baseline justify-between gap-3">
-            <span className="truncate text-label font-bold text-text">{file.name}</span>
-            <span className="tabular shrink-0 text-data-sm text-subtext0">
+            <span className="truncate text-label font-semibold text-text">{file.name}</span>
+            <span className="tabular shrink-0 text-data-sm text-muted">
               {bytes(file.size_bytes)} · {file.shards.length}{' '}
               {file.shards.length === 1 ? 'shard' : 'shards'}
             </span>
@@ -82,7 +82,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
 
           {/* Proportional to real shard sizes, with a hairline crust gap at
               each boundary so the segmentation reads as structure. */}
-          <div className="mb-3 flex h-3 w-full gap-px overflow-hidden bg-crust">
+          <div className="mb-3 flex h-3 w-full gap-px overflow-hidden bg-canvas">
             {file.shards.map((shard) => {
               const share =
                 file.size_bytes > 0 ? (shard.plain_size_bytes / file.size_bytes) * 100 : 100;
@@ -108,13 +108,13 @@ export function ShardMap({ file, drives, activeShard }: Props) {
                   <span className={clsx('flex-1 truncate', textFor(shard.account_id))}>
                     {driveLabel(shard.account_id)}
                   </span>
-                  <span className="tabular shrink-0 text-subtext0">shard {shard.index}</span>
-                  <span className="tabular w-20 shrink-0 text-right text-subtext0">
+                  <span className="tabular shrink-0 text-muted">shard {shard.index}</span>
+                  <span className="tabular w-20 shrink-0 text-right text-muted">
                     {bytes(shard.plain_size_bytes)}
                   </span>
                   {/* Never colour alone: the glyph carries the state too. */}
                   <span
-                    className={clsx('w-4 shrink-0 text-center', missing ? 'text-red' : 'text-green')}
+                    className={clsx('w-4 shrink-0 text-center', missing ? 'text-danger' : 'text-success')}
                     title={missing ? 'Drive disconnected' : 'Recorded'}
                   >
                     {missing ? '✕' : '✓'}
@@ -124,17 +124,17 @@ export function ShardMap({ file, drives, activeShard }: Props) {
             })}
           </ul>
 
-          <div className="flex items-center justify-between border-t border-surface0 pt-2">
-            <span className="tabular truncate text-data-sm text-subtext0">
+          <div className="flex items-center justify-between border-t border-border pt-2">
+            <span className="tabular truncate text-data-sm text-muted">
               {file.sha256 ? `sha256 ${file.sha256.slice(0, 4)}…${file.sha256.slice(-4)}` : ''}
             </span>
-            <span className="flex items-center gap-1 text-data-sm text-subtext0">
+            <span className="flex items-center gap-1 text-data-sm text-muted">
               {file.is_encrypted ? (
                 <>
                   AES-256-GCM <Lock size={12} aria-hidden />
                 </>
               ) : (
-                <span className="text-yellow">not encrypted</span>
+                <span className="text-warning">not encrypted</span>
               )}
             </span>
           </div>

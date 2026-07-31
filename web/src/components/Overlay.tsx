@@ -223,8 +223,8 @@ export function Overlay({
               id={id}
               role="tooltip"
               className={clsx(
-                'w-max max-w-[min(90vw,32rem)] border border-surface0 bg-base',
-                'px-1ch py-halfline text-left shadow-none',
+                'w-max max-w-[min(90vw,32rem)] border border-border bg-surface',
+                'px-3 py-2 text-left shadow-none',
                 panelClassName,
               )}
             >

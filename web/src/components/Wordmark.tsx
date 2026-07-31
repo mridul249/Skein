@@ -24,12 +24,12 @@ export function Wordmark({
   chevron?: boolean;
 }) {
   return (
-    <span className={clsx('font-bold lowercase text-text', className)}>
+    <span className={clsx('font-semibold lowercase text-text', className)}>
       {chevron && (
         // Decorative: the accessible name comes from the word itself, and a
         // screen reader announcing "single right angle quotation mark skein"
         // would be worse than silence.
-        <span className="text-mauve" aria-hidden>
+        <span className="text-accent" aria-hidden>
           ›{' '}
         </span>
       )}

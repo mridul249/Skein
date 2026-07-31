@@ -65,14 +65,14 @@ export function Trash() {
       </Modal>
 
       <header className="mb-5">
-        <h1 className="font-display text-display-m font-bold">Trash</h1>
-        <p className="mt-1 text-body text-subtext0">
+        <h1 className="text-title font-semibold">Trash</h1>
+        <p className="mt-1 text-body text-muted">
           Nothing here has been removed from your drives yet.
         </p>
       </header>
 
       {banner && (
-        <p role="alert" className="mb-4 border border-red/40 bg-red/10 px-2ch py-halfline text-body text-red">
+        <p role="alert" className="mb-4 border border-danger/40 bg-danger/10 px-4 py-2 text-body text-danger">
           {banner}
         </p>
       )}
@@ -87,37 +87,37 @@ export function Trash() {
       <div className="card relative overflow-x-auto">
         <table className="w-full min-w-[42rem] border-collapse">
           <thead>
-            <tr className="border-b border-surface0 text-left">
-              <th scope="col" className="px-2ch py-halfline text-label font-bold text-subtext0">
+            <tr className="border-b border-border text-left">
+              <th scope="col" className="px-4 py-2 text-label font-semibold text-muted">
                 Name
               </th>
-              <th scope="col" className="w-28 px-2ch py-halfline text-right text-label font-bold text-subtext0">
+              <th scope="col" className="w-28 px-4 py-2 text-right text-label font-semibold text-muted">
                 Size
               </th>
-              <th scope="col" className="w-28 px-2ch py-halfline text-label font-bold text-subtext0">
+              <th scope="col" className="w-28 px-4 py-2 text-label font-semibold text-muted">
                 Trashed
               </th>
-              <th scope="col" className="w-28 px-2ch py-halfline">
+              <th scope="col" className="w-28 px-4 py-2">
                 <span className="sr-only">Actions</span>
               </th>
             </tr>
           </thead>
           <tbody>
             {files.map((file) => (
-              <tr key={file.id} className="h-row border-b border-surface0/60 hover:bg-surface0">
-                <td className="max-w-0 truncate px-2ch text-body">{file.name}</td>
-                <td className="tabular px-2ch text-right text-data text-subtext0">
+              <tr key={file.id} className="h-row border-b border-border/60 hover:bg-raised">
+                <td className="max-w-0 truncate px-4 text-body">{file.name}</td>
+                <td className="tabular px-4 text-right text-data text-muted">
                   {bytes(file.size_bytes)}
                 </td>
-                <td className="px-2ch text-data text-subtext0">
+                <td className="px-4 text-data text-muted">
                   {file.deleted_at ? relativeTime(file.deleted_at) : '—'}
                 </td>
-                <td className="px-2ch">
+                <td className="px-4">
                   <div className="flex items-center justify-end gap-1">
                     <button
                       type="button"
                       aria-label={`Restore ${file.name}`}
-                      className="p-1 text-subtext0 transition-colors duration-hover hover:text-green"
+                      className="p-1 text-muted transition-colors duration-hover hover:text-success"
                       onClick={() => restore.mutate(file.id)}
                     >
                       <RotateCcw size={15} aria-hidden />
@@ -125,7 +125,7 @@ export function Trash() {
                     <button
                       type="button"
                       aria-label={`Delete ${file.name} permanently`}
-                      className="p-1 text-subtext0 transition-colors duration-hover hover:text-red"
+                      className="p-1 text-muted transition-colors duration-hover hover:text-danger"
                       onClick={() => setErasing(file)}
                     >
                       <Trash2 size={15} aria-hidden />
@@ -137,11 +137,11 @@ export function Trash() {
           </tbody>
         </table>
 
-        {isLoading && <div className="px-2ch py-16 text-center text-body text-subtext0">Loading…</div>}
+        {isLoading && <div className="px-4 py-16 text-center text-body text-muted">Loading…</div>}
 
         {!isLoading && files.length === 0 && (
-          <div className="px-2ch py-16 text-center">
-            <p className="font-display text-heading text-subtext0">Trash is empty.</p>
+          <div className="px-4 py-16 text-center">
+            <p className="text-heading text-muted">Trash is empty.</p>
           </div>
         )}
       </div>
