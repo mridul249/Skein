@@ -85,7 +85,7 @@ export function Trash() {
         by 305px at 375px while the table looked correctly clipped.
       */}
       <div className="card relative md:overflow-x-auto">
-        <table className="hidden w-full min-w-[42rem] border-collapse md:table">
+        <table className="hidden w-full min-w-[32rem] border-collapse md:table">
           <thead>
             <tr className="border-b border-border text-left">
               <th scope="col" className="th">
