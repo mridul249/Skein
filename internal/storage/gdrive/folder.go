@@ -19,7 +19,7 @@ const readmeName = "README.txt"
 // readmeBody explains the folder to someone browsing Drive who has never heard
 // of Skein. It is the only thing standing between a tidy-minded user and
 // permanent data loss, so it says what happens rather than merely asking.
-const readmeBody = `Skein storage — do not delete
+const readmeBody = `Skein storage - do not delete
 
 These .bin files are encrypted shards. Each one is a fragment of a
 larger file. Deleting any of them permanently destroys the file it
