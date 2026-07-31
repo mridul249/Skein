@@ -172,8 +172,13 @@ export function Files() {
         Files inside this folder go to Trash, where you can still restore them.
       </Modal>
 
-      <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-title font-semibold">Files</h1>
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-title font-semibold text-text">Files</h1>
+          <p className="mt-1 text-body text-muted">
+            Encrypted here, then striped across your drives.
+          </p>
+        </div>
         <div className="flex gap-2">
           <button
             type="button"
@@ -207,7 +212,7 @@ export function Files() {
       )}
 
       {banner && (
-        <p role="alert" className="mb-4 border border-danger/40 bg-danger/10 px-4 py-2 text-body text-danger">
+        <p role="alert" className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-body text-danger">
           {banner}
         </p>
       )}
@@ -235,23 +240,23 @@ export function Files() {
         the *document's* scrollable width — the whole page scrolled sideways
         by 305px at 375px while the table looked correctly clipped.
       */}
-      <div className="card relative overflow-x-auto">
-        <table className="w-full min-w-[46rem] border-collapse">
+      <div className="card relative md:overflow-x-auto">
+        <table className="hidden w-full min-w-[46rem] border-collapse md:table">
           <thead>
             <tr className="border-b border-border text-left">
-              <th scope="col" className="px-4 py-2 text-label font-semibold text-muted">
+              <th scope="col" className="th ">
                 Name
               </th>
-              <th scope="col" className="w-28 px-4 py-2 text-right text-label font-semibold text-muted">
+              <th scope="col" className="th w-28 text-right">
                 Size
               </th>
-              <th scope="col" className="w-28 px-4 py-2 text-label font-semibold text-muted">
+              <th scope="col" className="th w-32">
                 Stored
               </th>
-              <th scope="col" className="w-28 px-4 py-2 text-label font-semibold text-muted">
+              <th scope="col" className="th w-28">
                 Added
               </th>
-              <th scope="col" className="w-24 px-4 py-2">
+              <th scope="col" className="th w-24">
                 <span className="sr-only">Actions</span>
               </th>
             </tr>
@@ -260,7 +265,7 @@ export function Files() {
             {children.map((folder) => (
               <tr
                 key={folder.id}
-                className="h-row border-b border-border/60 transition-colors duration-hover hover:bg-raised"
+                className="h-row border-b border-line transition-colors duration-hover last:border-0 hover:bg-raised"
               >
                 <td className="px-4">
                   <button
@@ -272,9 +277,9 @@ export function Files() {
                     {folder.name}
                   </button>
                 </td>
-                <td className="px-4 text-right text-data text-muted">—</td>
+                <td className="tabular px-4 text-right text-data text-faint">—</td>
                 <td className="px-4" />
-                <td className="px-4 text-data text-muted">
+                <td className="tabular px-4 text-data text-muted">
                   {relativeTime(folder.created_at)}
                 </td>
                 <td className="px-4 text-right">
@@ -293,16 +298,16 @@ export function Files() {
             {files.map((file) => (
               <tr
                 key={file.id}
-                className="h-row border-b border-border/60 transition-colors duration-hover hover:bg-raised"
+                className="h-row border-b border-line transition-colors duration-hover last:border-0 hover:bg-raised"
               >
-                <td className="max-w-0 truncate px-4 text-body">{file.name}</td>
+                <td className="max-w-0 truncate px-4 text-body text-text">{file.name}</td>
                 <td className="tabular px-4 text-right text-data text-muted">
                   {bytes(file.size_bytes)}
                 </td>
                 <td className="px-4">
                   <ShardMap file={file} drives={drives} />
                 </td>
-                <td className="px-4 text-data text-muted">{relativeTime(file.created_at)}</td>
+                <td className="tabular px-4 text-data text-muted">{relativeTime(file.created_at)}</td>
                 <td className="px-4">
                   <div className="flex items-center justify-end gap-1">
                     <button
@@ -328,18 +333,110 @@ export function Files() {
           </tbody>
         </table>
 
-        {!isLoading && files.length === 0 && children.length === 0 && (
-          <div className="px-4 py-16 text-center">
-            <p className="text-heading text-muted">Nothing here yet.</p>
-            <p className="mt-1 text-body text-muted">Drag a file in, or press U.</p>
+        {/*
+          Below 768px the table becomes a list of stacked rows.
+
+          A horizontally scrolling table is not an answer on a phone: the
+          columns that get pushed off are Size, Stored and Added, which is
+          every column except the one you already knew. Stacking keeps all of
+          them, and the shard chips stay on the first line because "which
+          drives is this on" is the question this product exists to answer.
+        */}
+        <ul className="divide-y divide-line md:hidden">
+          {children.map((folder) => (
+            <li key={folder.id} className="flex items-center gap-3 px-4 py-3">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                onClick={() => setFolderId(folder.id)}
+              >
+                <FolderIcon size={16} className="shrink-0 text-accent" aria-hidden />
+                <span className="truncate text-body text-text">{folder.name}</span>
+              </button>
+              <span className="tabular shrink-0 text-caption text-faint">
+                {relativeTime(folder.created_at)}
+              </span>
+              <button
+                type="button"
+                aria-label={`Delete folder ${folder.name}`}
+                className="shrink-0 rounded p-2 text-muted hover:text-danger"
+                onClick={() => setDeleting(folder)}
+              >
+                <Trash2 size={16} aria-hidden />
+              </button>
+            </li>
+          ))}
+
+          {files.map((file) => (
+            <li key={file.id} className="px-4 py-3">
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-body text-text">{file.name}</p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <ShardMap file={file} drives={drives} />
+                    <span className="tabular text-caption text-muted">
+                      {bytes(file.size_bytes)}
+                    </span>
+                    <span aria-hidden className="text-caption text-faint">·</span>
+                    <span className="tabular text-caption text-faint">
+                      {relativeTime(file.created_at)}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label={`Download ${file.name}`}
+                    className="rounded p-2 text-muted hover:text-text"
+                    onClick={() => void download(file)}
+                  >
+                    <Download size={16} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Move ${file.name} to trash`}
+                    className="rounded p-2 text-muted hover:text-danger"
+                    onClick={() => trash.mutate(file.id)}
+                  >
+                    <Trash2 size={16} aria-hidden />
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {/* Design.md §7: an empty state states the next action, not the
+            absence. The drop zone *is* the empty state rather than sitting
+            above it — one target instead of two. */}
+        {!isLoading && files.length === 0 && children.length === 0 && !listError && (
+          <div className="p-4">
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className="flex w-full flex-col items-center gap-2 rounded-lg border border-dashed
+                         border-border px-6 py-14 text-center transition-colors duration-hover
+                         hover:border-accent hover:bg-raised"
+            >
+              <Upload size={22} className="text-faint" aria-hidden />
+              <span className="text-body font-semibold text-text">
+                Drop files here to upload
+              </span>
+              <span className="text-body text-muted">
+                Or press <kbd className="tabular text-data text-text">U</kbd>. Everything is
+                encrypted before it leaves this machine.
+              </span>
+            </button>
           </div>
         )}
 
         {isLoading && <div className="px-4 py-16 text-center text-body text-muted">Loading…</div>}
 
         {listError && (
-          <div className="px-4 py-16 text-center text-body text-danger">
-            {listError instanceof ApiError ? listError.message : 'Could not load your files.'}
+          <div className="px-4 py-16 text-center">
+            <p className="text-body text-danger">
+              {listError instanceof ApiError ? listError.message : 'Could not load your files.'}
+            </p>
           </div>
         )}
       </div>

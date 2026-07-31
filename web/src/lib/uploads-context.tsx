@@ -10,7 +10,13 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 
 import { api } from './api';
-import { UploadStore, installUnloadGuard, isActive, type UploadJob } from './uploads';
+import {
+  UploadStore,
+  installUnloadGuard,
+  isActive,
+  type UploadJob,
+  type Uploader,
+} from './uploads';
 
 /**
  * Binds the upload store to React.
@@ -35,7 +41,23 @@ export function useUploads(): UploadsValue {
   return value;
 }
 
-export function UploadsProvider({ children }: { children: ReactNode }) {
+export function UploadsProvider({
+  children,
+  uploader,
+}: {
+  children: ReactNode;
+  /**
+   * Overrides how bytes actually get sent. Production leaves this unset and
+   * gets `api.upload`.
+   *
+   * `UploadStore` already takes an injected uploader; this only exposes that
+   * seam one level up so the browser fixture can drive real `sending` and
+   * `finishing` states without a network. Without it, the only reachable
+   * state in a fixture is `error`, and the honest-progress rule — a bar must
+   * never claim completion the server has not reported — would be untestable.
+   */
+  uploader?: Uploader;
+}) {
   const qc = useQueryClient();
 
   // The store is created once for the life of the app. A store rebuilt on
@@ -43,13 +65,14 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
   const storeRef = useRef<UploadStore | null>(null);
   if (!storeRef.current) {
     storeRef.current = new UploadStore(
-      (file, folderId, onProgress, signal) =>
+      uploader ??
+        ((file, folderId, onProgress, signal) =>
         api.upload(
           file as File,
           folderId,
           (sent, total) => onProgress(sent, total),
           signal,
-        ),
+        )),
       () => {
         // A settled upload changes the listing and the quota, wherever the
         // user happens to be standing.

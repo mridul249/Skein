@@ -9,6 +9,7 @@
  * `?route=` selects which page to mount.
  */
 import { StrictMode } from 'react';
+import { useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -19,7 +20,7 @@ import { Files } from '../../src/pages/Files';
 import { Trash } from '../../src/pages/Trash';
 import { Drives } from '../../src/pages/Drives';
 import { Login } from '../../src/pages/Login';
-import { UploadsProvider } from '../../src/lib/uploads-context';
+import { UploadsProvider, useUploads } from '../../src/lib/uploads-context';
 import type { Drive, FileItem, Folder, Quota } from '../../src/lib/api';
 
 const GB = 1024 ** 3;
@@ -112,12 +113,52 @@ client.setQueryData(['trash'], {
   files: files.map((f) => ({ ...f, deleted_at: ago(1) })),
 });
 
-const route = new URLSearchParams(window.location.search).get('route') ?? '/';
+const params = new URLSearchParams(window.location.search);
+const route = params.get('route') ?? '/';
+
+/**
+ * A stub uploader so the fixture can show real `sending` and `finishing`
+ * states without a network.
+ *
+ * `finishing` is the state that matters: every byte has left the machine and
+ * the server is still writing shards, so it is reached by reporting
+ * sent === total and then never resolving. With the real uploader the only
+ * state a fixture can reach is `error`.
+ */
+const stubUploader = (
+  file: { name: string; size: number },
+  _folderId: string | null,
+  onProgress: (sent: number, total: number) => void,
+) => {
+  if (file.name.startsWith('finishing')) {
+    onProgress(file.size, file.size);
+  } else {
+    onProgress(Math.round(file.size * 0.4), file.size);
+  }
+  // Never settles: both jobs stay on screen for the length of the test.
+  return new Promise<void>(() => {});
+};
+
+function SeedTransfers() {
+  const { start } = useUploads();
+  const seeded = useRef(false);
+  useEffect(() => {
+    // StrictMode invokes effects twice in development, which seeded every
+    // job twice and made the panel show four transfers instead of two.
+    if (seeded.current) return;
+    seeded.current = true;
+    start({ name: 'finishing-archive.tar.zst', size: 28 * GB } as never, null);
+    start({ name: 'sending-video.mkv', size: 4 * GB } as never, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={client}>
-      <UploadsProvider>
+      <UploadsProvider uploader={params.has('transfers') ? stubUploader : undefined}>
+        {params.has('transfers') && <SeedTransfers />}
         <MemoryRouter initialEntries={[route]}>
           <Routes>
             <Route path="/login" element={<Login />} />

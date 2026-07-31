@@ -120,9 +120,16 @@ export default {
 
       keyframes: {
         'modal-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        // For work whose remaining duration is genuinely unknown. A solid
+        // block sweeping a full-width track, not a gradient.
+        'sweep': {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(400%)' },
+        },
       },
       animation: {
         'modal-in': 'modal-in 180ms ease-out',
+        sweep: 'sweep 1.4s ease-in-out infinite',
       },
     },
   },
