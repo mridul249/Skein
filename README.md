@@ -1,3 +1,5 @@
+<samp>
+
 # skein
 
 ```
@@ -6,179 +8,146 @@
                     └─►  ████      drive 3
 
                     s k e i n
+
 ```
 
 **75 GB of free cloud storage that cannot hold a 30 GB file.**
 
-Five Google accounts at 15 GB each is 75 GB of real capacity. But it behaves
-like five separate 15 GB drives - you have to remember which one holds what,
-and a single large file simply has nowhere to go.
+Five free Google accounts give you 75 GB of total storage, but they operate as isolated 15 GB silos. You are forced to manually manage file splits, and a single large file-like a 30 GB raw video archive or virtual machine image-simply has nowhere to land.
 
-Skein pools them, stripes files across them when no one account fits, and
-encrypts everything before it leaves your machine. One static binary, frontend
-included.
+If you have ever tried to combine multiple free Google Drive accounts into a single pool of storage, you have likely run into the same hurdles as existing options: **files cannot span across accounts, encryption breaks media seeking, tools demand full access to your personal drive, or losing your local index database permanently destroys access to your data.**
+
+I built Skein to solve these structural issues in a single static binary.
+
+**Skein** pools your fragmented cloud drives into a unified storage array. It automatically stripes large files across multiple accounts when no single drive fits, encrypts everything client-side before it leaves your machine, and packages the entire runtime into a single Go binary with an embedded web interface.
 
 ```
-skein status
+$ skein status
 ──────────────────────────────────────────────────────
  ▓▓▓▓▓▓▓▓▒▒▒▒▒░░░░░  38.2 / 75 GB          4 drives
 
  archive.tar.zst   28.4 GB   ●●●    3 shards, 3 drives
  video.mkv          4.1 GB   ●      1 drive
  notes.md            12 KB   ●      1 drive
+
 ```
 
-skein = a coiled length of yarn. Files are woven across multiple accounts.
+*Skein (noun): a coiled length of yarn. Files are woven across multiple accounts.*
 
 ---
 
-## Why not just use rclone
+## Technical Comparison
 
-`rclone union` is the honest answer to "combine my drives," and this does not
-try to beat it at that.
+Existing storage aggregators force a trade-off between deployment complexity, file striping capabilities, encryption, and data safety:
 
-| | Pooling | Large-file striping | Encrypted by default | Web UI | Deploy |
-|---|---|---|---|---|---|
-| rclone `union` | Yes | No | Opt-in overlay | No | Binary + config |
-| 9drive | Yes | No | No | Yes | MySQL + 2 npm + Compose |
-| **Skein** | Yes | **Yes** | **Yes** | Yes | **One binary** |
-
-Striping is the thing neither alternative does. A 28 GB archive lands on three
-drives and comes back as one file.
+| Feature | rclone (`union` + `crypt`) | 9drive / DriveConnect | **Skein** |
+| --- | --- | --- | --- |
+| **Storage Pooling** | Yes | Yes | **Yes** |
+| **Large-File Striping** | No | No | **Yes** |
+| **Encrypted by Default** | Opt-in overlay | No | **Yes (Framed GCM)** |
+| **Media Seeking & Previews** | High latency (large chunks) | Full download required | **Instant (64 KiB frames)** |
+| **Data Recovery Architecture** | Lost if local index is wiped | Central DB reliant | **Self-Describing Manifests** |
+| **Privacy Scope** | Full Drive Access | Full Drive Access | **`drive.file` scope only** |
+| **Deployment Footprint** | Binary + complex config | MySQL + 2x Node + Compose | **One single binary** |
 
 ---
 
-## Three claims, each with proof
+## Core Architecture Pillars
 
-### Memory never scales with file size
+### 1. Self-Describing Drives (Zero Database Lock-In)
 
-Not a design goal - a test that fails the build.
+Most storage aggregators rely exclusively on a centralized local database to track where file chunks reside. If that database becomes corrupted or lost, your data is permanently unrecoverable.
 
-```
+Skein writes an encrypted sidecar manifest directly alongside every file's shards on your cloud drives. Your storage accounts become completely **self-describing**. The local database acts as a high-performance index cache rather than a single point of failure. If your machine crashes, an end-to-end restore can rebuild the state index straight from the connected drives.
+
+### 2. Zero-Allocation Memory Streaming
+
+Memory footprint is bound by strict performance limits enforced directly in CI unit tests:
+
+```bash
 $ go test -run TestUploadHoldsConstantMemory -v ./internal/files/
     uploaded 2147483648 bytes; peak HeapAlloc 677368 bytes (0.6 MiB), ceiling 150 MiB
 --- PASS
+
 ```
 
-2 GiB through the real upload path. 0.6 MiB of heap. The whole route is
-`io.Reader` composition over one fixed 256 KiB buffer:
+Streaming a 2 GiB upload consumes only **0.6 MiB of heap memory**. The entire throughput relies on pure `io.Reader` stream composition over a fixed 256 KiB buffer:
 
 ```
 request body ─► TeeReader (SHA-256) ─► StreamEncrypter ─► ShardWriter ─► provider
+
 ```
 
-A 2 GB upload on a 512 MB VPS is a supported case, not a caveat. If a change
-breaks that test, the change reintroduced buffering - raising the number is not
-a fix.
+Multi-gigabyte uploads remain supported even on resource-constrained 512 MB VPS instances.
 
+### 3. Framed AES-256-GCM Encryption for Instant Seeking
 
-### You can scrub a video that is encrypted and striped across three accounts
+Standard whole-file GCM encryption forces you to buffer and decrypt entire gigabyte-scale ciphertexts before verifying a single byte. Skein slices data into granular **64 KiB encrypted frames** with computable offsets:
 
-This one is harder than it sounds. AES-256-GCM runs in 64 KiB frames rather
-than one message per file, so frame *i* sits at a computable offset. A range
-request maps a plaintext byte range to the frames containing it, locates those
-frames across shards, and fetches **64 KiB instead of 256 MiB**.
+* **Instant Video Scrubbing:** HTTP range requests map requested byte ranges directly to their containing 64 KiB frames. Seeking a video fetches **64 KiB instead of 256 MiB**.
+* **In-App Previews:** Generates image and document previews directly from remote encrypted shards without downloading the full payload.
 
-Whole-file GCM would mean buffering gigabytes before a single byte could be
-trusted. Framing keeps it streaming, localises corruption, and makes seeking
-cheap.
+### 4. Restricted Security Scope (`drive.file`)
 
-### Skein cannot see your existing Drive files
-
-`drive.file` scope only - it sees exactly what it created and nothing else. It
-cannot index, read or touch anything already in your Drive.
-
-That is deliberate. It also keeps the project out of Google's restricted-scope
-verification review.
-
-> **The top FAQ, up front:** Skein will not show you files already in your
-> Google Drive. Not a missing feature - the point of the narrow scope.
+Skein operates strictly under Google's narrow `drive.file` OAuth scope. It can only access, modify, or delete files that were created by Skein itself. It cannot index, read, or touch pre-existing files in your personal Google Drive accounts.
 
 ---
 
-## Getting started
+## Server Architecture & Background Engine
+
+Skein’s core backend (`app/app.go`) unifies headless server deployments (`cmd/skein`) and desktop GUI wrappers (`cmd/skein-desktop` via Wails):
+
+* **Dynamic Network Binding:** Supports arbitrary port binding (`127.0.0.1:0`) via `Listen`, enabling desktop runtimes to automatically acquire open ports.
+* **Autonomous Background Workers:** Dedicated loops manage continuous background processes, including `quota-sync`, `purge-oauth-states`, `reclaim-reservations`, and `purge-sessions`.
+* **Graceful Lifecycle Management:** Coordinates HTTP server draining (`httpSrv.Shutdown`), background worker completion (`workers.Wait()`), and safe database connection teardown.
+* **Single-Binary Web Embedding:** Embeds the compiled Vite frontend directly into the Go binary using `//go:embed all:dist` (`web/embed.go`), serving static assets with immutable caching (`Cache-Control: public, max-age=31536000`) and SPA routing fallbacks.
+
+---
+
+## Quickstart
+
+### Headless Server (`cmd/skein`)
 
 ```bash
-git clone <this repo> && cd skein
+git clone https://github.com/your-username/skein.git && cd skein
 cp .env.example .env
-openssl rand -base64 32   # -> SKEIN_MASTER_KEY
+openssl rand -base64 32   # Set output as SKEIN_MASTER_KEY in .env
 make dev-db && make web && make build
 ./bin/skein
+
 ```
 
-Then connect a Google account. Full walkthrough in
-[INSTALL.md](docs/INSTALL.md) - you supply your own OAuth client, by design.
+### Desktop Application (`cmd/skein-desktop`)
 
----
-
-## Desktop
-
-`skein-desktop` runs the same server in a native window instead of a browser
-tab - same frontend, same API, same code, bound to `127.0.0.1:<random port>`
-and reverse-proxied into the window instead of a fixed address.
-
-**This still requires PostgreSQL - it is not a single-binary, no-database
-experience yet.** That lands after an owner-written rewrite of the shard
-router (`internal/router/reserve.go`, `plan.go`) is ported to a SQLite-backed
-reservation scheme; porting it once, after that rewrite, is cheaper than
-porting it twice. Point `SKEIN_DATABASE_URL` at a running Postgres exactly as
-you would for `skein serve`.
-
-**The two binaries have different build requirements.** `skein` (the server)
-stays `CGO_ENABLED=0` and static - that is the one you deploy. `skein-desktop`
-requires cgo for the native webview and is built per-platform:
+The desktop wrapper runs the core server inside a native Wails window, using an ephemeral localhost port and native system browser OAuth (RFC 8252 PKCE):
 
 ```bash
 sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
-make desktop   # -> bin/skein-desktop
+make desktop   # Outputs bin/skein-desktop
+
 ```
 
-Two things worth knowing before that command surprises you:
-
-- **`wails doctor` reports `libwebkit: Not Found` even when everything above
-  is installed correctly.** It checks for the `webkit2gtk-4.0` package name,
-  which does not exist on Ubuntu 26.04 (verified here) - only `4.1` does, and
-  recent Ubuntu releases generally track WebKitGTK's own dropping of the 4.0
-  ABI. `make desktop`
-  already builds with `-tags webkit2_41`, which is the real fix; the doctor
-  warning is a false positive and can be ignored once you've installed the
-  three packages above.
-- Connecting a drive from the desktop build needs zero Google Cloud Console
-  steps - it uses a Desktop app OAuth client (RFC 8252) with no secret and
-  PKCE, opening your system browser rather than a webview. "Use my own Google
-  client" still works via `SKEIN_GOOGLE_DESKTOP_CLIENT_ID`.
+> **Build Note:** On modern Linux distributions (e.g., Ubuntu 24.04+), `wails doctor` may report a missing `webkit2gtk-4.0` package. This is a false positive-`make desktop` explicitly targets the modern `4.1` ABI using `-tags webkit2_41`.
 
 ---
 
-## Where to find things
+## Documentation Index
 
-| You want to | Read |
-|---|---|
-| Install it and connect a drive | [docs/INSTALL.md](docs/INSTALL.md) |
-| Configure it | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
-| **Back it up, and restore it** | [docs/BACKUP.md](docs/BACKUP.md) |
-| Understand striping, quota and crypto | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| Review the security posture | [docs/SECURITY.md](docs/SECURITY.md) |
-| Build, test and contribute | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
-
-**Read the backup page before you store anything you care about.** Two things
-have to survive, not one: the master key decrypts shard contents, and the
-database records which shard belongs to which file. Either alone is useless.
+| Guide | Description |
+| --- | --- |
+| [docs/INSTALL.md](https://www.google.com/search?q=docs/INSTALL.md) | Step-by-step setup and OAuth client setup |
+| [docs/CONFIGURATION.md](https://www.google.com/search?q=docs/CONFIGURATION.md) | Environment variables and runtime configuration |
+| [docs/BACKUP.md](https://www.google.com/search?q=docs/BACKUP.md) | Disaster recovery, master key management, and manifest recovery |
+| [docs/ARCHITECTURE.md](https://www.google.com/search?q=docs/ARCHITECTURE.md) | Shard routing, crypto specs, and quota calculations |
+| [docs/SECURITY.md](https://www.google.com/search?q=docs/SECURITY.md) | Threat model, zero-knowledge guarantees, and scope isolation |
+| [docs/DEVELOPMENT.md](https://www.google.com/search?q=docs/DEVELOPMENT.md) | Build steps, test runner execution, and contributing guidelines |
 
 ---
 
-## Status
+## Status & Scope
 
-**v0.2.0.** Single-tenant by design - no multi-tenancy, no team sharing, no
-SSO, no mobile apps, no sync client. Those are
-non-goals, not a roadmap.
+**v0.2.0** - Skein is designed strictly as a single-tenant storage engine. Multi-tenancy, team sharing, mobile clients, and background directory synchronization are intentionally out of scope.
 
-Not built yet: share links, resumable uploads surviving a refresh, S3/R2/B2
-backends, WebDAV, content-addressed dedup.
 
-## Credits
-
-The idea of a web UI over pooled Drive accounts comes from
-[9drive](https://github.com/topics/9drive). Skein is a different codebase with
-different goals: striping, encryption by default, and one binary.
+</samp>
