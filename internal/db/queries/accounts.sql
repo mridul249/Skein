@@ -109,8 +109,8 @@ SELECT ca.id,
  ORDER BY ca.ordinal, ca.created_at;
 
 -- name: CreateOAuthState :exec
-INSERT INTO oauth_states (state_hash, user_id, kind, redirect_to, expires_at)
-VALUES ($1, $2, $3, $4, $5);
+INSERT INTO oauth_states (state_hash, user_id, kind, redirect_to, pkce_verifier, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6);
 
 -- ConsumeOAuthState is single use by construction: the row is deleted as it is
 -- read, so a replayed callback finds nothing. The expiry predicate is in SQL so

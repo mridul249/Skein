@@ -64,6 +64,11 @@ type Deps struct {
 	// Keyring signs content capability URLs. Without it the download
 	// endpoint still works for a bearer token; only minting is unavailable.
 	Keyring *skcrypto.Keyring
+	// DesktopConnect is nil on the server build. When set, the accounts
+	// handler runs the desktop OAuth flow (system browser, loopback
+	// listener, PKCE) instead of the web flow, and the server-hosted
+	// callback route is not mounted at all — see handlers.DesktopConnector.
+	DesktopConnect handlers.DesktopConnector
 }
 
 // Server owns the router and the middleware chain.
@@ -208,7 +213,12 @@ func (s *Server) mountAccounts(api chi.Router) {
 	if s.deps.Accounts == nil || s.deps.Auth == nil {
 		return
 	}
-	h := handlers.NewAccounts(s.deps.Accounts, s.deps.Config.PublicURL)
+	var h *handlers.Accounts
+	if s.deps.DesktopConnect != nil {
+		h = handlers.NewDesktopAccounts(s.deps.Accounts, s.deps.DesktopConnect)
+	} else {
+		h = handlers.NewAccounts(s.deps.Accounts, s.deps.Config.PublicURL)
+	}
 
 	api.Group(func(g chi.Router) {
 		g.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
@@ -304,8 +314,12 @@ func (s *Server) filesHandler() *handlers.Files {
 
 // mountOAuthCallback mounts the provider redirect target. It carries its own
 // rate limit because it is reachable without authentication.
+// mountOAuthCallback mounts the server-hosted callback the web flow's
+// redirect lands on. The desktop build has no use for it — the loopback
+// listener is its callback route, for the duration of one attempt — so it
+// is skipped whenever DesktopConnect is set.
 func (s *Server) mountOAuthCallback(r chi.Router) {
-	if s.deps.Accounts == nil {
+	if s.deps.Accounts == nil || s.deps.DesktopConnect != nil {
 		return
 	}
 	h := handlers.NewAccounts(s.deps.Accounts, s.deps.Config.PublicURL)

@@ -16,7 +16,7 @@ const consumeOAuthState = `-- name: ConsumeOAuthState :one
 DELETE FROM oauth_states
  WHERE state_hash = $1
    AND expires_at > now()
-RETURNING state_hash, user_id, kind, redirect_to, created_at, expires_at
+RETURNING state_hash, user_id, kind, redirect_to, created_at, expires_at, pkce_verifier
 `
 
 // ConsumeOAuthState is single use by construction: the row is deleted as it is
@@ -32,6 +32,7 @@ func (q *Queries) ConsumeOAuthState(ctx context.Context, stateHash []byte) (Oaut
 		&i.RedirectTo,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.PkceVerifier,
 	)
 	return i, err
 }
@@ -92,16 +93,17 @@ func (q *Queries) CreateConnectedAccount(ctx context.Context, arg CreateConnecte
 }
 
 const createOAuthState = `-- name: CreateOAuthState :exec
-INSERT INTO oauth_states (state_hash, user_id, kind, redirect_to, expires_at)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO oauth_states (state_hash, user_id, kind, redirect_to, pkce_verifier, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type CreateOAuthStateParams struct {
-	StateHash  []byte
-	UserID     uuid.UUID
-	Kind       string
-	RedirectTo string
-	ExpiresAt  pgtype.Timestamptz
+	StateHash    []byte
+	UserID       uuid.UUID
+	Kind         string
+	RedirectTo   string
+	PkceVerifier *string
+	ExpiresAt    pgtype.Timestamptz
 }
 
 func (q *Queries) CreateOAuthState(ctx context.Context, arg CreateOAuthStateParams) error {
@@ -110,6 +112,7 @@ func (q *Queries) CreateOAuthState(ctx context.Context, arg CreateOAuthStatePara
 		arg.UserID,
 		arg.Kind,
 		arg.RedirectTo,
+		arg.PkceVerifier,
 		arg.ExpiresAt,
 	)
 	return err

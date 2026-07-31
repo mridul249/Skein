@@ -69,12 +69,13 @@ type Folder struct {
 }
 
 type OauthState struct {
-	StateHash  []byte
-	UserID     uuid.UUID
-	Kind       string
-	RedirectTo string
-	CreatedAt  pgtype.Timestamptz
-	ExpiresAt  pgtype.Timestamptz
+	StateHash    []byte
+	UserID       uuid.UUID
+	Kind         string
+	RedirectTo   string
+	CreatedAt    pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
+	PkceVerifier *string
 }
 
 type QuotaReservation struct {
