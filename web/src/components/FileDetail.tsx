@@ -1,14 +1,43 @@
+import { useEffect, useRef } from 'react';
 import { Download, Lock, Trash2, X } from 'lucide-react';
 import clsx from 'clsx';
 
 import type { Drive, FileItem } from '../lib/api';
-import { DRIVE_BG, UNKNOWN_DRIVE_BG, bytes, shardColor, shardOrdinal } from '../lib/format';
+import {
+  DRIVE_BG,
+  UNKNOWN_DRIVE_BG,
+  bytes,
+  relativeTime,
+  shardColor,
+  shardOrdinal,
+} from '../lib/format';
 import { SHARD_STATE, integritySummary, shardState } from '../lib/shards';
 import { AccountChip } from './AccountChip';
+import { FilePreview } from './FilePreview';
 
 /**
- * What a selected file actually is: an ordered set of shards, each with an
- * address and a state.
+ * The file detail drawer: what a selected file actually is, an ordered set of
+ * shards each with an address and a state.
+ *
+ * **This is deliberately not a modal, and must not be made into one.** The
+ * modal in this codebase traps focus, dims the page and returns focus on close,
+ * and every one of those is correct there and wrong here:
+ *
+ *  - **No focus trap.** The listing behind the drawer stays live, and picking a
+ *    different file is the main thing someone does with it open. A trap would
+ *    make that impossible by keyboard.
+ *  - **No dim.** Dimming says "deal with me first". A drawer is a second pane,
+ *    not an interruption.
+ *  - **Selecting another row swaps the contents**, rather than closing and
+ *    reopening — the drawer stays mounted for as long as anything is selected,
+ *    so focus is moved in once on open and not stolen again on every swap.
+ *
+ * What it shares with the modal: `Esc` closes it, and focus returns to the row
+ * that opened it.
+ *
+ * Its shell is `fixed`, which is also what makes it immune to known issue #27.
+ * Nothing above it in the tree has an `overflow` that can clip it, because for
+ * layout purposes there is nothing above it.
  *
  * Design.md §5, "addresses, not fragments". This is the screen where that rule
  * has to hold hardest, because it is the one that could most easily make a
@@ -26,16 +55,30 @@ import { AccountChip } from './AccountChip';
 export function FileDetail({
   file,
   drives,
+  open,
   onClose,
   onDownload,
   onTrash,
 }: {
+  /** The selected file. Kept mounted while `open`, so contents can swap. */
   file: FileItem;
   drives: Drive[];
+  open: boolean;
   onClose: () => void;
   onDownload: (file: FileItem) => void;
   onTrash: (file: FileItem) => void;
 }) {
+  const panelRef = useRef<HTMLElement>(null);
+  const wasOpen = useRef(false);
+
+  // Focus moves in on open and is then left alone. Re-focusing on every
+  // contents swap would yank the caret away from someone arrowing down the
+  // listing with the drawer open, which is the main way it gets used.
+  useEffect(() => {
+    if (open && !wasOpen.current) panelRef.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
+
   const states = file.shards.map((s) => shardState(s.account_id, drives));
   const summary = integritySummary(states);
   const accounts = new Set(
@@ -50,8 +93,29 @@ export function FileDetail({
 
   return (
     <aside
+      ref={panelRef}
       aria-label={`Details for ${file.name}`}
-      className="card flex flex-col overflow-hidden"
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+      className={clsx(
+        // Fixed, so no ancestor overflow can clip it and so opening it never
+        // reflows the listing that triggered it.
+        'fixed inset-y-0 right-0 z-40 flex flex-col border-l border-border bg-surface',
+        'overflow-y-auto outline-none',
+        // Full width below lg. A 400px pane beside a listing needs the listing
+        // to stay readable: at lg (1024px) the content column is ~700px and a
+        // pane leaves ~300px, which is already the narrowest a file table can
+        // be and still show a name plus its shards. Below that the pane takes
+        // the screen and the listing waits.
+        'w-full lg:w-[26rem]',
+        'transition-transform duration-panel ease-out motion-reduce:transition-none',
+        open ? 'translate-x-0' : 'translate-x-full',
+      )}
     >
       <header className="flex items-start justify-between gap-3 border-b border-line p-4">
         <div className="min-w-0">
@@ -70,6 +134,8 @@ export function FileDetail({
                 </span>
               </>
             )}
+            <span aria-hidden className="text-faint">·</span>
+            <span className="tabular">added {relativeTime(file.created_at)}</span>
           </p>
         </div>
         <button
@@ -83,6 +149,8 @@ export function FileDetail({
       </header>
 
       <div className="flex-1 space-y-5 p-4">
+        <FilePreview file={file} />
+
         <section>
           <h3 className="mb-2 text-label font-semibold text-muted">Layout on your drives</h3>
 

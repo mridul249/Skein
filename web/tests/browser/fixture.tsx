@@ -21,7 +21,7 @@ import { Trash } from '../../src/pages/Trash';
 import { Drives } from '../../src/pages/Drives';
 import { Login } from '../../src/pages/Login';
 import { UploadsProvider, useUploads } from '../../src/lib/uploads-context';
-import type { Drive, FileItem, Folder, Quota } from '../../src/lib/api';
+import { api, type Drive, type FileItem, type Folder, type Quota } from '../../src/lib/api';
 
 const GB = 1024 ** 3;
 const now = new Date().toISOString();
@@ -102,18 +102,62 @@ const files: FileItem[] = [
 
 const folders: Folder[] = [{ id: 'fo1', parent_id: null, name: 'projects', created_at: ago(30) }];
 
+const params = new URLSearchParams(window.location.search);
+
+if (params.has('preview')) {
+  // Fixture-only patch. `contentURL` normally mints a signed capability URL
+  // from the server; here it returns a static asset so the preview element
+  // has something real to fetch. What is under test is the element and the
+  // request it issues, not the minting.
+  api.contentURL = async (id: string) =>
+    id === 'f-photo' ? './assets/photo.png' : './assets/clip.mp4';
+}
+
 const client = new QueryClient({
   defaultOptions: { queries: { staleTime: Infinity, retry: false, refetchOnMount: false } },
 });
 client.setQueryData(['quota'], quota);
 client.setQueryData(['drives'], { accounts: drives });
 client.setQueryData(['folders'], { folders });
-client.setQueryData(['files', null], { files });
+const previewFiles: FileItem[] = [
+  {
+    id: 'f-photo',
+    name: 'photo.png',
+    folder_id: null,
+    size_bytes: 344,
+    is_striped: false,
+    is_encrypted: true,
+    status: 'ready',
+    created_at: ago(1),
+    updated_at: ago(1),
+    shards: [
+      { index: 0, account_id: 'drive-1', size_bytes: 400, plain_size_bytes: 344, plain_offset: 0 },
+    ],
+  },
+  {
+    id: 'f-clip',
+    name: 'clip.mp4',
+    folder_id: null,
+    size_bytes: 2 * 1024 * 1024,
+    is_striped: true,
+    is_encrypted: true,
+    status: 'ready',
+    created_at: ago(2),
+    updated_at: ago(2),
+    shards: [
+      { index: 0, account_id: 'drive-1', size_bytes: 1050000, plain_size_bytes: 1048576, plain_offset: 0 },
+      { index: 1, account_id: 'drive-2', size_bytes: 1050000, plain_size_bytes: 1048576, plain_offset: 1048576 },
+    ],
+  },
+];
+
+client.setQueryData(['files', null], {
+  files: params.has('preview') ? previewFiles : files,
+});
 client.setQueryData(['trash'], {
   files: files.map((f) => ({ ...f, deleted_at: ago(1) })),
 });
 
-const params = new URLSearchParams(window.location.search);
 const route = params.get('route') ?? '/';
 
 /**

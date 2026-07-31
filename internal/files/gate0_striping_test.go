@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -127,6 +128,7 @@ func contentHandler(t *testing.T, f *stripedFixture) http.Handler {
 		})
 	})
 	r.Get("/api/files/{id}/content", h.Content)
+	r.Head("/api/files/{id}/content", h.Content)
 	return r
 }
 
@@ -450,5 +452,88 @@ func TestGate0RoundRobinPolicyStringMatchesTheConstant(t *testing.T) {
 	if router.Policy("round-robin") != router.PolicyRoundRobin {
 		t.Errorf("router.PolicyRoundRobin = %q, want %q as accepted by SKEIN_ROUTING_POLICY",
 			router.PolicyRoundRobin, "round-robin")
+	}
+}
+
+// A media element does not fetch a file; it probes it and then seeks around
+// inside it. This is that sequence, against a file that is encrypted and
+// striped across two drives.
+//
+// The pieces were each covered already — ranged reads cross shard boundaries
+// correctly, and the capability URL authenticates HEAD as well as GET — but
+// nothing asserted the shape a <video> actually produces: a HEAD for metadata,
+// then ranges that land wherever the user drags the scrubber. Frontend preview
+// (known issue #16) makes that sequence reachable for the first time, so it is
+// worth pinning.
+func TestGate0MediaElementRequestSequenceCrossesAShardBoundary(t *testing.T) {
+	f := newRoundRobinStriped(t, 2, 8<<20, gate0ShardSize)
+
+	data := make([]byte, gate0FileSize)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	file := f.upload(t, "clip.bin", data)
+	srv := contentHandler(t, f)
+
+	// 1. The probe. A media element issues this before deciding whether it can
+	//    seek at all: without Accept-Ranges it downloads the whole file, which
+	//    for a striped 4 MiB clip means pulling every shard off every drive.
+	head := httptest.NewRequest(http.MethodHead,
+		"/api/files/"+file.ID.String()+"/content", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, head)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HEAD status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Accept-Ranges"); got != "bytes" {
+		t.Errorf("Accept-Ranges = %q, want %q — a player will not seek without it", got, "bytes")
+	}
+	if got := rec.Header().Get("Content-Length"); got != strconv.FormatInt(gate0FileSize, 10) {
+		t.Errorf("Content-Length = %q, want %d", got, gate0FileSize)
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("HEAD returned %d bytes of body, want 0", rec.Body.Len())
+	}
+
+	// 2. The seeks. Each is a plaintext range the player asks for; the reader
+	//    has to map it through the shard layout and the AEAD frame stride and
+	//    come back with the right bytes. The first deliberately spans the
+	//    boundary between shard 0 on drive 1 and shard 1 on drive 2.
+	seeks := []struct {
+		name       string
+		start, end int64
+	}{
+		{"across the shard 0 to shard 1 boundary", gate0ShardSize - 512, gate0ShardSize + 511},
+		{"back to the start, as a scrub to zero would", 0, 4095},
+		{"into the final partial shard", gate0FileSize - 2048, gate0FileSize - 1},
+	}
+
+	for _, sk := range seeks {
+		t.Run(sk.name, func(t *testing.T) {
+			length := sk.end - sk.start + 1
+			req := httptest.NewRequest(http.MethodGet,
+				"/api/files/"+file.ID.String()+"/content", nil)
+			req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", sk.start, sk.end))
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusPartialContent {
+				t.Fatalf("status = %d, want 206", rec.Code)
+			}
+			wantCR := fmt.Sprintf("bytes %d-%d/%d", sk.start, sk.end, gate0FileSize)
+			if got := rec.Header().Get("Content-Range"); got != wantCR {
+				t.Errorf("Content-Range = %q, want %q", got, wantCR)
+			}
+
+			got := rec.Body.Bytes()
+			want := data[sk.start : sk.start+length]
+			if !bytes.Equal(got, want) {
+				shard, frame, off, _ := framePosition(file.Shards, sk.start)
+				t.Fatalf("bytes differ for %s\n  range = %d-%d (%d bytes)\n"+
+					"  start lands on shard %d, frame %d, offset %d within that frame",
+					sk.name, sk.start, sk.end, length, shard, frame, off)
+			}
+		})
 	}
 }

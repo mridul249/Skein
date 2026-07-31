@@ -155,7 +155,7 @@ test('an orphaned shard never borrows a real drive colour', async () => {
   await on({}, async (p) => {
     await p.goto(url('/'));
     const chips = await p.eval(`(() => {
-      const btn = [...document.querySelectorAll('button[aria-label*="shard"]')][0];
+      const btn = [...document.querySelectorAll('[role="img"][aria-label*="shard"]')][0];
       return [...btn.children].map((el) => ({
         bg: getComputedStyle(el).backgroundColor,
         label: el.textContent.trim(),
@@ -175,7 +175,7 @@ test('every shard carries its account number, and an unknown one says so', async
   await on({}, async (p) => {
     await p.goto(url('/'));
     const labels = await p.eval(`(() => {
-      const btn = [...document.querySelectorAll('button[aria-label*="shard"]')][0];
+      const btn = [...document.querySelectorAll('[role="img"][aria-label*="shard"]')][0];
       return [...btn.children].map((el) => el.textContent.trim());
     })()`);
     // Design.md §5: the number is the identity, colour is reinforcement.
@@ -319,23 +319,97 @@ test('no shard claims to be verified, because nothing has verified it', async ()
   });
 });
 
-test('an overlay panel is never clipped by an ancestor', async () => {
+test('an image preview renders, and a media element issues a Range request', async () => {
+  await on({}, async (p) => {
+    // Watch every request the page makes, so the Range claim is read off the
+    // wire rather than inferred from the markup.
+    const ranged = [];
+    await p.send('Network.enable');
+    p.on('Network.requestWillBeSent', (ev) => {
+      const h = ev.request.headers || {};
+      const range = h.Range ?? h.range;
+      if (range) ranged.push({ url: ev.request.url, range });
+    });
+
+    await p.goto(url('/') + '&preview=1');
+
+    // The image: a real 64x64 PNG, so a decoded width proves it loaded.
+    const img = await p.eval(`(async () => {
+      const rows = [...document.querySelectorAll('tbody tr')];
+      rows.find((tr) => /photo.png/.test(tr.textContent)).querySelector('button').click();
+      await new Promise((r) => setTimeout(r, 600));
+      const el = document.querySelector('aside[aria-label^="Details for"] img');
+      return el ? { src: el.getAttribute('src'), w: el.naturalWidth, h: el.naturalHeight } : null;
+    })()`);
+    assert.ok(img, 'an image file must render an <img> preview');
+    assert.equal(img.w, 64, 'the image actually decoded');
+    assert.equal(img.h, 64);
+
+    // The video: recorded as it appears rather than queried afterwards. The
+    // fixture's clip.mp4 is deliberately not decodable — it only has to be
+    // large enough for a media element to fetch it — so the element removes
+    // itself once onError fires, and a later query would race that.
+    const vid = await p.eval(`(async () => {
+      window.__seen = null;
+      const obs = new MutationObserver(() => {
+        const el = document.querySelector('aside[aria-label^="Details for"] video');
+        if (el && !window.__seen) {
+          window.__seen = {
+            preload: el.getAttribute('preload'),
+            autoplay: el.autoplay,
+            controls: el.controls,
+            src: el.getAttribute('src'),
+          };
+        }
+      });
+      obs.observe(document.body, { childList: true, subtree: true });
+
+      document.querySelector('aside[aria-label^="Details for"] button[aria-label="Close details"]').click();
+      await new Promise((r) => setTimeout(r, 200));
+      const rows = [...document.querySelectorAll('tbody tr')];
+      rows.find((tr) => /clip.mp4/.test(tr.textContent)).querySelector('button').click();
+      await new Promise((r) => setTimeout(r, 1500));
+      obs.disconnect();
+
+      const fallback = document.querySelector('aside[aria-label^="Details for"]').textContent;
+      return { seen: window.__seen, fallback };
+    })()`);
+    assert.ok(vid.seen, 'a video file must render a <video> preview');
+    // An undecodable file must degrade to a clear instruction, not a blank box.
+    assert.match(vid.fallback, /cannot be played here/);
+    assert.equal(vid.seen.preload, 'metadata', 'must not preload the whole file');
+    assert.equal(vid.seen.autoplay, false, 'a file manager never autoplays');
+    assert.equal(vid.seen.controls, true);
+
+    // Known issue #16: the server's ranged read has been correct since Gate 0
+    // but no element in the UI could reach it. This is that element.
+    const clip = ranged.filter((r) => /clip\.mp4/.test(r.url));
+    assert.ok(
+      clip.length > 0,
+      `the media element must issue a Range request; saw ${JSON.stringify(ranged)}`,
+    );
+  });
+});
+
+test('nothing in the drawer is clipped by an ancestor', async () => {
   await on({}, async (p) => {
     await p.goto(url('/'));
     const r = await p.eval(`(async () => {
-      const btn = [...document.querySelectorAll('button[aria-label*="shard"]')][0];
-      btn.click();
-      await new Promise((r) => setTimeout(r, 400));
-      const panel = document.querySelector('[role="tooltip"]');
-      const box = panel.getBoundingClientRect();
+      const rows = [...document.querySelectorAll('tbody tr')];
+      rows.find((tr) => /archive.tar.zst/.test(tr.textContent)).querySelector('button').click();
+      await new Promise((r) => setTimeout(r, 450));
 
-      // Walk every ancestor and check none of them clips the panel. A portal
-      // means the chain is body/html only; anything else here would mean the
-      // panel had drifted back inside a scroll container.
+      const drawer = document.querySelector('aside[aria-label^="Details for"]');
+      if (!drawer) return { error: 'drawer did not open' };
+      const box = drawer.getBoundingClientRect();
+
+      // Known issue #27 in its new shape. The old popover was clipped by the
+      // file card's overflow; a fixed drawer has no ancestor that can clip it,
+      // and this walks the chain to prove that rather than assume it.
       const clippers = [];
-      for (let el = panel.parentElement; el && el !== document.documentElement; el = el.parentElement) {
-        const s = getComputedStyle(el);
-        if (s.overflowX !== 'visible' || s.overflowY !== 'visible') {
+      for (let el = drawer.parentElement; el && el !== document.documentElement; el = el.parentElement) {
+        const st = getComputedStyle(el);
+        if (st.overflowX !== 'visible' || st.overflowY !== 'visible') {
           const b = el.getBoundingClientRect();
           if (box.bottom > b.bottom + 1 || box.right > b.right + 1 ||
               box.top < b.top - 1 || box.left < b.left - 1) {
@@ -344,89 +418,209 @@ test('an overlay panel is never clipped by an ancestor', async () => {
         }
       }
 
+      // The shard map inside it must be fully visible too, not cut off by the
+      // drawer's own scroll box.
+      const map = drawer.querySelector('[role="img"][aria-label*="shards in order"]');
+      const m = map.getBoundingClientRect();
       const de = document.documentElement;
-      const root = panel.closest('[data-overlay-root]');
+
       return {
-        parent: root?.parentElement?.tagName,
-        position: getComputedStyle(root).position,
+        position: getComputedStyle(drawer).position,
         clippers,
-        inViewport: box.top >= -1 && box.left >= -1 &&
-                    box.bottom <= de.clientHeight + 1 && box.right <= de.clientWidth + 1,
-        box: { t: Math.round(box.top), b: Math.round(box.bottom),
-               l: Math.round(box.left), r: Math.round(box.right) },
+        drawerInViewport: box.top >= -1 && box.right <= de.clientWidth + 1,
+        mapVisible: m.width > 0 && m.left >= box.left - 1 && m.right <= box.right + 1,
       };
     })()`);
-    assert.equal(r.parent, 'BODY', 'the panel must be portalled to document.body');
-    assert.equal(r.position, 'fixed', 'positioned from the viewport, not from an ancestor');
-    assert.deepEqual(r.clippers, [], 'no ancestor may clip the panel');
-    assert.ok(r.inViewport, `panel must sit inside the viewport: ${JSON.stringify(r.box)}`);
+    assert.ok(!r.error, r.error);
+    assert.equal(r.position, 'fixed', 'the drawer is positioned outside the listing');
+    assert.deepEqual(r.clippers, [], 'no ancestor may clip the drawer');
+    assert.ok(r.drawerInViewport, 'the drawer must sit inside the viewport');
+    assert.ok(r.mapVisible, 'the shard map must be fully inside the drawer');
   });
 });
 
-test('opening an overlay does not move its own trigger', async () => {
+test('the quota tooltip is still never clipped by an ancestor', async () => {
   await on({}, async (p) => {
     await p.goto(url('/'));
-    // The old panel was a child of the scrolling card, so opening it grew the
-    // card's scrollHeight, raised a scrollbar, narrowed the content box and
-    // shifted the trigger 10px left — out from under the cursor that had just
-    // opened it. That is the flicker.
+    // The overlay primitive survives the drawer, for the quota bar. Its
+    // clipping guarantee is the original #27 fix and is still load-bearing.
+    // Driven with a real pointer rather than a programmatic .focus(): a
+    // headless page has no system focus, so el.focus() moves activeElement
+    // without dispatching the focus event React listens for. Verified —
+    // activeElement became the button and no tooltip appeared.
+    const at = JSON.parse(
+      await p.eval(`(() => {
+        const b = document.querySelector('[role="group"][aria-label^="Pooled storage"] button');
+        const r = b.getBoundingClientRect();
+        return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
+      })()`),
+    );
+    await p.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y, buttons: 0 });
+    await sleep(400);
+
     const r = await p.eval(`(async () => {
-      const btn = [...document.querySelectorAll('button[aria-label*="shard"]')][0];
-      const card = btn.closest('.card');
-      const before = { x: btn.getBoundingClientRect().x, w: card.clientWidth, sh: card.scrollHeight };
-      btn.click();
-      await new Promise((r) => setTimeout(r, 400));
-      const after = { x: btn.getBoundingClientRect().x, w: card.clientWidth, sh: card.scrollHeight };
-      return { before, after };
+      const panel = document.querySelector('[role="tooltip"]');
+      if (!panel) return { error: 'tooltip did not open on hover' };
+      const root = panel.closest('[data-overlay-root]');
+      const box = panel.getBoundingClientRect();
+      const de = document.documentElement;
+      return {
+        parent: root?.parentElement?.tagName,
+        inViewport: box.top >= -1 && box.left >= -1 &&
+                    box.bottom <= de.clientHeight + 1 && box.right <= de.clientWidth + 1,
+      };
     })()`);
-    assert.equal(r.after.x, r.before.x, 'the trigger must not move when the panel opens');
-    assert.equal(r.after.w, r.before.w, 'no ancestor may gain a scrollbar');
-    assert.equal(r.after.sh, r.before.sh, "the panel must not add to an ancestor's scroll height");
+    assert.ok(!r.error, r.error);
+    assert.equal(r.parent, 'BODY', 'the tooltip is portalled out of the listing');
+    assert.ok(r.inViewport, 'the tooltip must sit inside the viewport');
   });
 });
 
-test('moving the pointer from trigger onto the panel keeps it open', async () => {
+test('opening the drawer does not shift the row that opened it', async () => {
   await on({}, async (p) => {
     await p.goto(url('/'));
-    const rects = await p.eval(`(async () => {
-      const btn = [...document.querySelectorAll('button[aria-label*="shard"]')][0];
-      const b = btn.getBoundingClientRect();
-      btn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-      btn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
-      return JSON.stringify({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
+    // Re-aimed from the popover. The failure it guards is unchanged: opening a
+    // panel must not reflow the thing that opened it out from under the
+    // pointer. The old panel did it via a scrollbar; a drawer would do it by
+    // giving the listing a right padding, which is why it overlays instead.
+    const r = await p.eval(`(async () => {
+      const rows = [...document.querySelectorAll('tbody tr')];
+      const row = rows.find((tr) => /archive.tar.zst/.test(tr.textContent));
+      const card = row.closest('.card');
+      const before = row.getBoundingClientRect();
+      const beforeCard = { w: card.clientWidth, sh: card.scrollHeight };
+      row.querySelector('button').click();
+      await new Promise((r) => setTimeout(r, 450));
+      const after = row.getBoundingClientRect();
+      return {
+        dx: Math.round(after.x - before.x),
+        dy: Math.round(after.y - before.y),
+        dw: Math.round(after.width - before.width),
+        cardW: card.clientWidth - beforeCard.w,
+        cardSh: card.scrollHeight - beforeCard.sh,
+      };
     })()`);
-    const { x, y } = JSON.parse(rects);
+    assert.equal(r.dx, 0, 'the row must not move horizontally');
+    assert.equal(r.dy, 0, 'the row must not move vertically');
+    assert.equal(r.dw, 0, 'the row must not be resized');
+    assert.equal(r.cardW, 0, 'the listing must not gain or lose width');
+    assert.equal(r.cardSh, 0, "the drawer must not add to the listing's scroll height");
+  });
+});
 
-    // Real pointer, real gap crossing.
-    await p.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 });
-    await sleep(250);
-    assert.equal(
-      await p.eval(`!!document.querySelector('[role="tooltip"]')`),
-      true,
-      'hovering the trigger opens the panel',
-    );
+test('clicking a second row swaps the drawer contents without reopening', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    // Replaces the hover-bridge test, which has no drawer equivalent: a drawer
+    // opens on click, so there is no gap between trigger and panel to cross.
+    // The equivalent risk is tearing the panel down and rebuilding it on every
+    // selection, which would throw away scroll position and focus.
+    const r = await p.eval(`(async () => {
+      const pick = async (name) => {
+        const rows = [...document.querySelectorAll('tbody tr')];
+        rows.find((tr) => tr.textContent.includes(name)).querySelector('button').click();
+        await new Promise((r) => setTimeout(r, 400));
+      };
 
-    const panel = JSON.parse(
-      await p.eval(`(() => { const r = document.querySelector('[role="tooltip"]').getBoundingClientRect();
-        return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2, top: r.top, bottom: r.bottom }); })()`),
-    );
+      await pick('archive.tar.zst');
+      const first = document.querySelector('aside[aria-label^="Details for"]');
+      first.dataset.probe = 'same-node';
+      const firstLabel = first.getAttribute('aria-label');
 
-    // Step across the gap between the two boxes, then onto the panel itself.
-    const from = Math.min(y, panel.bottom);
-    const to = Math.max(y, panel.top);
-    for (let step = 0; step <= 6; step++) {
-      const py = from + ((to - from) * step) / 6;
-      await p.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y: py, buttons: 0 });
-      await sleep(40);
+      await pick('truncation-behaviour');
+      const second = document.querySelector('aside[aria-label^="Details for"]');
+      return {
+        stayedMounted: second?.dataset.probe === 'same-node',
+        firstLabel,
+        secondLabel: second?.getAttribute('aria-label'),
+      };
+    })()`);
+    assert.ok(r.stayedMounted, 'the drawer must swap contents, not remount');
+    assert.match(r.firstLabel, /archive\.tar\.zst/);
+    assert.match(r.secondLabel, /truncation-behaviour/);
+    assert.notEqual(r.firstLabel, r.secondLabel, 'the contents must actually change');
+  });
+});
+
+test('the drawer does not trap focus and does not dim the page', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    const r = await p.eval(`(async () => {
+      const rows = [...document.querySelectorAll('tbody tr')];
+      rows.find((tr) => /archive.tar.zst/.test(tr.textContent)).querySelector('button').click();
+      await new Promise((r) => setTimeout(r, 450));
+
+      const drawer = document.querySelector('aside[aria-label^="Details for"]');
+      return {
+        // A drawer is a second pane, not an interruption. Both of these would
+        // make picking a different file impossible, which is the main thing
+        // someone does with it open.
+        ariaModal: drawer.getAttribute('aria-modal'),
+        role: drawer.getAttribute('role'),
+        // No dimming backdrop anywhere over the listing.
+        backdrops: [...document.querySelectorAll('div')].filter((el) => {
+          const st = getComputedStyle(el);
+          if (st.position !== 'fixed') return false;
+          const b = el.getBoundingClientRect();
+          const covers = b.width >= window.innerWidth - 1 && b.height >= window.innerHeight - 1;
+          return covers && st.backgroundColor !== 'rgba(0, 0, 0, 0)';
+        }).length,
+        // The listing behind it is still clickable and still hit-testable.
+        rowStillOnTop: (() => {
+          const row = rows.find((tr) => /notes|truncation/.test(tr.textContent))
+            ?? rows[rows.length - 1];
+          const b = row.getBoundingClientRect();
+          const hit = document.elementFromPoint(b.left + 40, b.top + b.height / 2);
+          return row.contains(hit);
+        })(),
+      };
+    })()`);
+    assert.notEqual(r.ariaModal, 'true', 'the drawer must not be aria-modal');
+    assert.notEqual(r.role, 'dialog', 'the drawer is not a dialog');
+    assert.equal(r.backdrops, 0, 'the drawer must not dim the page');
+    assert.ok(r.rowStillOnTop, 'the listing must stay clickable behind the drawer');
+
+    // Tab must be able to leave the drawer. The modal traps on purpose; this
+    // must not, or a keyboard user cannot get back to the file list.
+    const escaped = await p.eval(`document.activeElement.closest('aside[aria-label^="Details for"]') !== null`);
+    assert.ok(escaped, 'focus should start inside the drawer');
+    let left = false;
+    for (let i = 0; i < 30 && !left; i++) {
+      await p.tab();
+      left = await p.eval(
+        `document.activeElement.closest('aside[aria-label^="Details for"]') === null`,
+      );
     }
-    await p.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: panel.x, y: panel.y, buttons: 0 });
-    await sleep(250);
+    assert.ok(left, 'tabbing must be able to leave the drawer');
+  });
+});
 
+test('Escape closes the drawer and returns focus to the row that opened it', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    await p.eval(`(async () => {
+      const rows = [...document.querySelectorAll('tbody tr')];
+      rows.find((tr) => /archive.tar.zst/.test(tr.textContent)).querySelector('button').click();
+      await new Promise((r) => setTimeout(r, 450));
+    })()`);
     assert.equal(
-      await p.eval(`!!document.querySelector('[role="tooltip"]')`),
+      await p.eval(`!!document.querySelector('aside[aria-label^="Details for"]')`),
       true,
-      'the panel must survive the pointer travelling onto it',
     );
+
+    await p.press('Escape', 'Escape', 27);
+    await sleep(400);
+
+    const r = await p.eval(`(() => {
+      const row = [...document.querySelectorAll('tbody tr')]
+        .find((tr) => /archive.tar.zst/.test(tr.textContent));
+      return {
+        closed: !document.querySelector('aside[aria-label^="Details for"]'),
+        focusedTrigger: document.activeElement === row.querySelector('button'),
+      };
+    })()`);
+    assert.ok(r.closed, 'Escape must close the drawer');
+    assert.ok(r.focusedTrigger, 'focus must return to the row that opened it');
   });
 });
 

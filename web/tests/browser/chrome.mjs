@@ -89,9 +89,17 @@ export async function withChrome({ bin, width = 1280, height = 900, mobile = fal
 
   let seq = 0;
   const pending = new Map();
+  // CDP events, as opposed to command replies. Subscribed to by `page.on`,
+  // which is how a test can read what actually went over the wire — request
+  // headers, for instance — rather than inferring it from the DOM.
+  const handlers = new Map();
   ws.addEventListener('message', (ev) => {
     const msg = JSON.parse(ev.data);
-    if (!msg.id || !pending.has(msg.id)) return;
+    if (!msg.id) {
+      for (const fn of handlers.get(msg.method) ?? []) fn(msg.params);
+      return;
+    }
+    if (!pending.has(msg.id)) return;
     const { resolve, reject } = pending.get(msg.id);
     pending.delete(msg.id);
     if (msg.error) reject(new Error(JSON.stringify(msg.error)));
@@ -107,6 +115,11 @@ export async function withChrome({ bin, width = 1280, height = 900, mobile = fal
 
   const page = {
     send,
+    /** Subscribes to a CDP event, e.g. 'Network.requestWillBeSent'. */
+    on(method, fn) {
+      if (!handlers.has(method)) handlers.set(method, []);
+      handlers.get(method).push(fn);
+    },
     async goto(url) {
       await send('Page.enable');
       await send('Emulation.setDeviceMetricsOverride', {
