@@ -21,9 +21,10 @@ const readmeName = "README.txt"
 // permanent data loss, so it says what happens rather than merely asking.
 const readmeBody = `Skein storage - do not delete
 
-These .bin files are encrypted shards. Each one is a fragment of a
-larger file. Deleting any of them permanently destroys the file it
-belongs to. Manage your files through Skein, not here.
+These .bin files are encrypted shards. Each is one part of a larger
+file that Skein striped across your drives. Deleting any of them
+permanently destroys the file it belongs to. Manage your files
+through Skein, not here.
 `
 
 // FindFolder returns the id of the newest-safe app folder, or "" if none
