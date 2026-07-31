@@ -39,26 +39,26 @@ export function UploadList() {
         const live = isActive(job);
         const fraction = job.size > 0 ? Math.min(1, job.sent / job.size) : 0;
         return (
-          <li key={job.id} className="card px-2ch py-1line">
+          <li key={job.id} className="card px-4 py-3">
             <div className="mb-1.5 flex items-baseline justify-between gap-3">
               <span className="truncate text-label text-text">{job.name}</span>
               <span
                 className={clsx(
                   'tabular shrink-0 text-data-sm',
-                  job.status === 'error' ? 'text-red' : 'text-subtext0',
+                  job.status === 'error' ? 'text-danger' : 'text-muted',
                 )}
               >
                 {label(job)}
               </span>
             </div>
-            <div className="h-1 w-full overflow-hidden bg-surface0">
+            <div className="h-1 w-full overflow-hidden bg-raised">
               <div
                 className={clsx(
                   'h-full transition-[width] duration-hover',
-                  job.status === 'error' && 'bg-red',
+                  job.status === 'error' && 'bg-danger',
                   job.status === 'cancelled' && 'bg-overlay0',
-                  job.status === 'done' && 'bg-green',
-                  live && 'bg-mauve',
+                  job.status === 'done' && 'bg-success',
+                  live && 'bg-accent',
                 )}
                 style={{ width: `${(job.status === 'done' ? 1 : fraction) * 100}%` }}
               />
@@ -66,7 +66,7 @@ export function UploadList() {
             <div className="mt-1.5 text-right">
               <button
                 type="button"
-                className="text-caption text-subtext0 hover:text-red"
+                className="text-caption text-muted hover:text-danger"
                 onClick={() => (live ? cancel(job.id) : dismiss(job.id))}
               >
                 {live ? 'Cancel' : 'Dismiss'}

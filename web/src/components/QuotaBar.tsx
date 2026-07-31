@@ -30,10 +30,10 @@ export function QuotaBar({ quota }: { quota: Quota }) {
 
   if (drives.length === 0) {
     return (
-      <div className="card px-2ch py-1line">
-        <p className="text-body text-subtext0">
+      <div className="card px-4 py-3">
+        <p className="text-body text-muted">
           No drives connected.{' '}
-          <a href="/settings" className="text-sapphire underline underline-offset-2">
+          <a href="/settings" className="text-accent underline underline-offset-2">
             Connect one
           </a>{' '}
           to start storing files.
@@ -48,9 +48,9 @@ export function QuotaBar({ quota }: { quota: Quota }) {
         <PackedBar drives={drives} total={quota.total_bytes} height="h-2.5" />
       </div>
 
-      <p className="tabular shrink-0 text-data text-subtext0">
+      <p className="tabular shrink-0 text-data text-muted">
         {bytes(quota.used_bytes)} / {bytes(quota.total_bytes)}
-        <span className="mx-2 text-overlay0">·</span>
+        <span className="mx-2 text-faint">·</span>
         {drives.length} {drives.length === 1 ? 'drive' : 'drives'}
       </p>
     </div>
@@ -84,7 +84,7 @@ function PackedBar({
 
   return (
     <div
-      className={clsx('flex w-full overflow-hidden bg-surface0', height)}
+      className={clsx('flex w-full overflow-hidden bg-raised', height)}
       {...(decorative
         ? { 'aria-hidden': true }
         : {
@@ -118,18 +118,18 @@ function PackedBar({
               disabled={!showTooltips}
               label={label}
               className={clsx(
-                'block h-full w-full cursor-default border-r border-crust',
+                'block h-full w-full cursor-default border-r border-canvas',
                 'hover:brightness-125 focus-visible:brightness-125',
                 DRIVE_BG[driveColor(drive.ordinal)],
               )}
               content={
                 <div className="space-y-0.5">
-                  <div className="text-label font-bold text-text">{drive.email}</div>
-                  <div className="tabular text-data-sm text-subtext0">
+                  <div className="text-label font-semibold text-text">{drive.email}</div>
+                  <div className="tabular text-data-sm text-muted">
                     {bytes(drive.used_bytes)} of {bytes(drive.total_bytes)} ·{' '}
                     {percent(drive.used_bytes, drive.total_bytes)}%
                   </div>
-                  <div className="tabular text-data-sm text-subtext0">{bytes(free)} free</div>
+                  <div className="tabular text-data-sm text-muted">{bytes(free)} free</div>
                 </div>
               }
             />
@@ -152,7 +152,7 @@ function PackedBar({
         and must stay true; the remainder is already whatever is left over.
       */}
       <div
-        className="h-full bg-surface0 motion-safe:transition-[width] motion-safe:duration-300"
+        className="h-full bg-raised motion-safe:transition-[width] motion-safe:duration-300"
         style={{ width: `${freeShare}%`, flexShrink: 1, minWidth: 0 }}
       />
     </div>
@@ -169,7 +169,7 @@ export function QuotaRail({ quota }: { quota: Quota | undefined }) {
   const active = quota.drives.filter((d) => d.status !== 'disabled');
 
   return (
-    <div className="space-y-3 border-t border-surface0 px-2ch py-1line">
+    <div className="space-y-3 border-t border-border px-4 py-3">
       {active.length > 0 && (
         // The same packed bar, compact, tooltips off — the per-drive rows
         // below already carry the numbers.
@@ -184,23 +184,23 @@ export function QuotaRail({ quota }: { quota: Quota | undefined }) {
             <div className="flex items-baseline justify-between gap-2">
               <span className="flex min-w-0 items-center gap-1.5">
                 <AccountChip ordinal={drive.ordinal} size="sm" />
-                <span className="truncate text-data-sm text-subtext0" title={drive.email}>
+                <span className="truncate text-data-sm text-muted" title={drive.email}>
                   {drive.email}
                 </span>
               </span>
               <span
                 className={clsx(
                   'tabular shrink-0 text-data-sm',
-                  tone === 'red' && 'text-red',
-                  tone === 'yellow' && 'text-yellow',
-                  tone === 'green' && 'text-subtext0',
+                  tone === 'red' && 'text-danger',
+                  tone === 'yellow' && 'text-warning',
+                  tone === 'green' && 'text-muted',
                 )}
               >
                 {pct}%
               </span>
             </div>
             {drive.status !== 'active' && (
-              <p className="text-data-sm text-yellow">
+              <p className="text-data-sm text-warning">
                 {drive.status === 'needs_reauth' ? 'Reconnect this drive' : drive.status}
               </p>
             )}

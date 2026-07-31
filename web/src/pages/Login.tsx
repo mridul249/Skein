@@ -49,16 +49,16 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center px-5">
       <div className="w-full max-w-sm">
         <div className="mb-8">
-          <h1 className="flex items-center gap-1ch">
+          <h1 className="flex items-center gap-2">
             <img src="/mark.svg" width="28" height="28" alt="" aria-hidden />
-            <Wordmark className="text-display-m" />
+            <Wordmark className="text-title" />
           </h1>
-          <p className="mt-1 text-body text-subtext0">
+          <p className="mt-1 text-body text-muted">
             Your free cloud accounts, pooled, striped and encrypted.
           </p>
         </div>
 
-        <form onSubmit={(e) => void submit(e)} className="card space-y-1line p-2ch" noValidate>
+        <form onSubmit={(e) => void submit(e)} className="card space-y-4 p-4" noValidate>
           <div>
             <label htmlFor="email" className="label">
               Email
@@ -75,7 +75,7 @@ export function Login() {
               aria-describedby={fields.email ? 'email-error' : undefined}
             />
             {fields.email && (
-              <p id="email-error" className="mt-1 text-caption text-red">
+              <p id="email-error" className="mt-1 text-caption text-danger">
                 {fields.email}
               </p>
             )}
@@ -97,12 +97,12 @@ export function Login() {
               aria-describedby={fields.password ? 'password-error' : 'password-hint'}
             />
             {fields.password ? (
-              <p id="password-error" className="mt-1 text-caption text-red">
+              <p id="password-error" className="mt-1 text-caption text-danger">
                 {fields.password}
               </p>
             ) : (
               mode === 'register' && (
-                <p id="password-hint" className="mt-1 text-caption text-subtext0">
+                <p id="password-hint" className="mt-1 text-caption text-muted">
                   At least 12 characters. Length is what matters, not symbols.
                 </p>
               )
@@ -110,7 +110,7 @@ export function Login() {
           </div>
 
           {error && !Object.keys(fields).length && (
-            <p role="alert" className="text-caption text-red">
+            <p role="alert" className="text-caption text-danger">
               {error}
             </p>
           )}
@@ -120,11 +120,11 @@ export function Login() {
           </button>
         </form>
 
-        <p className="mt-4 text-center text-caption text-subtext0">
+        <p className="mt-4 text-center text-caption text-muted">
           {mode === 'login' ? 'No account yet?' : 'Already have an account?'}{' '}
           <button
             type="button"
-            className="text-sapphire underline underline-offset-2"
+            className="text-accent underline underline-offset-2"
             onClick={() => {
               setMode(mode === 'login' ? 'register' : 'login');
               setError('');

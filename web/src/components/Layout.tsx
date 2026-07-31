@@ -32,22 +32,22 @@ export function Layout() {
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     clsx(
-      'flex items-center gap-1ch px-1ch py-halfline text-body transition-colors duration-hover',
-      isActive ? 'bg-surface0 text-text' : 'text-subtext0 hover:bg-surface0 hover:text-text',
+      'flex items-center gap-2 px-3 py-2 text-body transition-colors duration-hover',
+      isActive ? 'bg-raised text-text' : 'text-muted hover:bg-raised hover:text-text',
     );
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside
-        className="flex shrink-0 flex-col border-surface0 bg-mantle
+        className="flex shrink-0 flex-col border-border bg-surface
                    max-md:order-2 max-md:border-t md:h-screen md:w-sidebar md:border-r"
       >
-        <div className="hidden items-center gap-1ch px-2ch py-1line md:flex">
+        <div className="hidden items-center gap-2 px-4 py-3 md:flex">
           <img src="/mark.svg" width="18" height="18" alt="" aria-hidden />
           <Wordmark className="text-heading" />
         </div>
 
-        <nav className="flex gap-1 px-1ch max-md:justify-around max-md:py-halfline md:flex-col md:py-0">
+        <nav className="flex gap-1 px-3 max-md:justify-around max-md:py-2 md:flex-col md:py-0">
           <NavLink to="/" end className={navClass}>
             <Files size={16} aria-hidden />
             <span className="max-md:sr-only">Files</span>
@@ -68,17 +68,17 @@ export function Layout() {
           <QuotaRail quota={quota} />
         </div>
 
-        <div className="hidden items-center justify-between gap-1ch border-t border-surface0 px-2ch py-halfline md:flex">
+        <div className="hidden items-center justify-between gap-2 border-t border-border px-4 py-2 md:flex">
           {/* Was --overlay0. Design.md §8 reserves that for placeholders and
               forbids it for anything a user must read; a signed-in identity
               is exactly that. */}
-          <span className="truncate text-data-sm text-subtext0" title={user?.email}>
+          <span className="truncate text-data-sm text-muted" title={user?.email}>
             {user?.email}
           </span>
           <button
             type="button"
             onClick={() => void signOut()}
-            className="p-1 text-subtext0 transition-colors duration-hover hover:text-red"
+            className="p-1 text-muted transition-colors duration-hover hover:text-danger"
             aria-label="Sign out"
           >
             <LogOut size={14} aria-hidden />
@@ -88,8 +88,8 @@ export function Layout() {
         <button
           type="button"
           onClick={() => void signOut()}
-          className="flex items-center justify-center gap-2 border-t border-surface0 py-halfline
-                     text-label text-subtext0 md:hidden"
+          className="flex items-center justify-center gap-2 border-t border-border py-2
+                     text-label text-muted md:hidden"
         >
           <LogOut size={14} aria-hidden />
           Sign out
