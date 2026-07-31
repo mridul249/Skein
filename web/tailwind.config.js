@@ -28,17 +28,20 @@ export default {
         red: '#f38ba8',
         sapphire: '#74c7ec',
 
-        // The account colour ramp, assigned in connection order. These are
-        // an information system, not decoration: the same colour means the
-        // same drive in the sidebar, the quota bar and every shard dot.
-        drive1: '#89b4fa',
-        drive2: '#a6e3a1',
-        drive3: '#f9e2af',
-        drive4: '#cba6f7',
-        drive5: '#fab387',
-        drive6: '#f5c2e7',
-        drive7: '#94e2d5',
-        drive8: '#eba0ac',
+        // The account colour ramp, assigned by the persisted `ordinal`.
+        // Six, not eight: see Design.md §5 and known issue #29. Identity is
+        // carried by the NUMBER in the chip; hue is reinforcement, so six
+        // well-separated calm colours beat eight crowded ones, and a seventh
+        // account reusing colour 1 is harmless because the number differs.
+        //
+        // Every one is >= 20 dE2000 from success green, warning amber and
+        // error red in normal vision, and outside the violet accent band.
+        drive1: '#6fe2de',
+        drive2: '#afd7de',
+        drive3: '#a6c5e7',
+        drive4: '#6f9de2',
+        drive5: '#807dd4',
+        drive6: '#b2afde',
       },
       fontFamily: {
         // Design.md §3, after the Phase 7 Task 4.2 option A decision: one

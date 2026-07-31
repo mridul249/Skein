@@ -6,6 +6,7 @@ import clsx from 'clsx';
 import { ApiError, api, type Drive } from '../lib/api';
 import { DRIVE_BG, bytes, driveColor, percent, usageTone } from '../lib/format';
 import { Modal } from '../components/Modal';
+import { AccountChip } from '../components/AccountChip';
 
 /** Drives: connect, sync and disconnect the accounts that hold the bytes. */
 export function Drives() {
@@ -166,10 +167,7 @@ export function Drives() {
             <li key={drive.id} className="card p-2ch">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
-                  <span
-                    className={clsx('h-3 w-3 shrink-0', DRIVE_BG[driveColor(drive.ordinal)])}
-                    aria-hidden
-                  />
+                  <AccountChip ordinal={drive.ordinal} />
                   <div className="min-w-0">
                     <p className="truncate text-body text-text">{drive.email}</p>
                     <p className="tabular text-data-sm text-subtext0">

@@ -14,7 +14,7 @@ Five Google accounts at 15 GB each is 75 GB of real capacity. But it behaves
 like five separate 15 GB drives - you have to remember which one holds what,
 and a single large file simply has nowhere to go.
 
-Skein pools them, splits files across them when no one account fits, and
+Skein pools them, stripes files across them when no one account fits, and
 encrypts everything before it leaves your machine. One static binary, frontend
 included.
 
@@ -72,7 +72,7 @@ breaks that test, the change reintroduced buffering - raising the number is not
 a fix.
 
 
-### You can scrub a video that is encrypted and split across three accounts
+### You can scrub a video that is encrypted and striped across three accounts
 
 This one is harder than it sounds. AES-256-GCM runs in 64 KiB frames rather
 than one message per file, so frame *i* sits at a computable offset. A range

@@ -9,8 +9,10 @@ import {
   UNKNOWN_DRIVE_TEXT,
   bytes,
   shardColor,
+  shardOrdinal,
 } from '../lib/format';
 import { Overlay } from './Overlay';
+import { AccountChip } from './AccountChip';
 
 /**
  * The shard map. Design.md §5.
@@ -102,7 +104,7 @@ export function ShardMap({ file, drives, activeShard }: Props) {
               const missing = shardColor(shard.account_id, drives) === null;
               return (
                 <li key={shard.index} className="flex items-center gap-2 text-data">
-                  <span className={clsx('h-2 w-2 shrink-0', bgFor(shard.account_id))} />
+                  <AccountChip ordinal={shardOrdinal(shard.account_id, drives)} size="sm" />
                   <span className={clsx('flex-1 truncate', textFor(shard.account_id))}>
                     {driveLabel(shard.account_id)}
                   </span>
@@ -139,14 +141,13 @@ export function ShardMap({ file, drives, activeShard }: Props) {
         </>
       }
     >
+      {/* Ordered, contiguous, one chip per shard: an inventory, not confetti. */}
       {file.shards.map((shard) => (
-        <span
+        <AccountChip
           key={shard.index}
-          className={clsx(
-            'h-2 w-2',
-            bgFor(shard.account_id),
-            activeShard === shard.index && 'shard-active',
-          )}
+          ordinal={shardOrdinal(shard.account_id, drives)}
+          size="sm"
+          className={clsx(activeShard === shard.index && 'shard-active')}
         />
       ))}
     </Overlay>

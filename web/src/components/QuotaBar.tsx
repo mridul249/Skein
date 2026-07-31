@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import type { Drive, Quota } from '../lib/api';
 import { DRIVE_BG, bytes, driveColor, percent, usageTone } from '../lib/format';
 import { Overlay } from './Overlay';
+import { AccountChip } from './AccountChip';
 
 /**
  * The pooled quota bar. Design.md §4.
@@ -182,13 +183,7 @@ export function QuotaRail({ quota }: { quota: Quota | undefined }) {
           <div key={drive.id} className="space-y-1">
             <div className="flex items-baseline justify-between gap-2">
               <span className="flex min-w-0 items-center gap-1.5">
-                <span
-                  className={clsx(
-                    'h-2 w-2 shrink-0',
-                    DRIVE_BG[driveColor(drive.ordinal)],
-                  )}
-                  aria-hidden
-                />
+                <AccountChip ordinal={drive.ordinal} size="sm" />
                 <span className="truncate text-data-sm text-subtext0" title={drive.email}>
                   {drive.email}
                 </span>

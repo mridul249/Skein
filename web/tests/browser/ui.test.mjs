@@ -84,10 +84,10 @@ test('quota bar packs used bytes left, then one remainder', async () => {
       });
     })()`);
 
-    // drive1 blue, drive2 green, then the grey remainder — no interleaving.
+    // drive1, drive2, then the grey remainder — no interleaving.
     assert.equal(segs.length, 3, 'two drives plus exactly one remainder');
-    assert.equal(segs[0].bg, 'rgb(137, 180, 250)', 'first segment is drive 1 blue');
-    assert.equal(segs[1].bg, 'rgb(166, 227, 161)', 'second segment is drive 2 green');
+    assert.equal(segs[0].bg, 'rgb(111, 226, 222)', 'first segment is drive 1');
+    assert.equal(segs[1].bg, 'rgb(175, 215, 222)', 'second segment is drive 2');
     assert.equal(segs[2].bg, 'rgb(49, 50, 68)', 'the last block is the free remainder');
     assert.ok(segs[0].w > segs[1].w, '277 GB used should be wider than 8.1 GB used');
     assert.match(segs[0].label, /277 GB of 400 GB used/);
@@ -128,17 +128,56 @@ test('every quota segment is reachable by keyboard and describes itself', async 
 test('an orphaned shard never borrows a real drive colour', async () => {
   await on({}, async (p) => {
     await p.goto(url('/'));
-    const dots = await p.eval(`(() => {
+    const chips = await p.eval(`(() => {
       const btn = [...document.querySelectorAll('button[aria-label*="shard"]')][0];
-      return [...btn.children].map((el) => getComputedStyle(el).backgroundColor);
+      return [...btn.children].map((el) => ({
+        bg: getComputedStyle(el).backgroundColor,
+        label: el.textContent.trim(),
+      }));
     })()`);
-    assert.equal(dots.length, 3, 'the striped file has three shards');
-    assert.equal(dots[0], 'rgb(137, 180, 250)', 'shard 0 lives on drive 1');
-    assert.equal(dots[1], 'rgb(166, 227, 161)', 'shard 1 lives on drive 2');
+    assert.equal(chips.length, 3, 'the striped file has three shards');
+    assert.equal(chips[0].bg, 'rgb(111, 226, 222)', 'shard 0 lives on drive 1');
+    assert.equal(chips[1].bg, 'rgb(175, 215, 222)', 'shard 1 lives on drive 2');
     // Shard 2 is orphaned. It used to fall back to ordinal 1 and render in
-    // drive 1's blue, claiming to live on a drive that does not hold it.
-    assert.notEqual(dots[2], dots[0], 'an orphaned shard must not look like drive 1');
-    assert.equal(dots[2], 'rgb(69, 71, 90)', 'an unidentifiable shard is neutral surface1');
+    // drive 1's colour, claiming to live on a drive that does not hold it.
+    assert.notEqual(chips[2].bg, chips[0].bg, 'an orphaned shard must not look like drive 1');
+    assert.equal(chips[2].bg, 'rgb(69, 71, 90)', 'an unidentifiable shard is neutral surface1');
+  });
+});
+
+test('every shard carries its account number, and an unknown one says so', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    const labels = await p.eval(`(() => {
+      const btn = [...document.querySelectorAll('button[aria-label*="shard"]')][0];
+      return [...btn.children].map((el) => el.textContent.trim());
+    })()`);
+    // Design.md §5: the number is the identity, colour is reinforcement.
+    // Measured — no hue-only ramp survives dichromacy (known issue #29).
+    assert.deepEqual(labels, ['1', '2', '?'],
+      'shards read as an ordered inventory; an unresolvable one is "?", not a number');
+  });
+});
+
+test('no account colour can be mistaken for a semantic colour', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/settings'));
+    const { ramp, semantic } = await p.eval(`(() => {
+      const probe = (cls) => {
+        const el = document.createElement('div');
+        el.className = cls; document.body.appendChild(el);
+        const c = getComputedStyle(el).backgroundColor; el.remove(); return c;
+      };
+      return {
+        ramp: [1,2,3,4,5,6].map((n) => probe('bg-drive' + n)),
+        semantic: ['bg-green','bg-yellow','bg-red'].map(probe),
+      };
+    })()`);
+    assert.equal(new Set(ramp).size, 6, 'six distinct account colours');
+    for (const c of ramp) {
+      assert.ok(!semantic.includes(c),
+        `account colour ${c} is identical to a semantic colour — that shipped (#29)`);
+    }
   });
 });
 

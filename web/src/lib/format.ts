@@ -60,16 +60,7 @@ export function relativeTime(iso: string): string {
  * map would quietly start naming the wrong drives. Reconnecting the same
  * Google identity reuses the same row and therefore the same colour.
  */
-const RAMP = [
-  'drive1',
-  'drive2',
-  'drive3',
-  'drive4',
-  'drive5',
-  'drive6',
-  'drive7',
-  'drive8',
-] as const;
+const RAMP = ['drive1', 'drive2', 'drive3', 'drive4', 'drive5', 'drive6'] as const;
 
 export type DriveColor = (typeof RAMP)[number];
 
@@ -86,8 +77,6 @@ export const DRIVE_BG: Record<DriveColor, string> = {
   drive4: 'bg-drive4',
   drive5: 'bg-drive5',
   drive6: 'bg-drive6',
-  drive7: 'bg-drive7',
-  drive8: 'bg-drive8',
 };
 
 /**
@@ -123,6 +112,20 @@ export function shardColor(accountId: string | null, drives: Rampable[]): DriveC
   return drive ? driveColor(drive.ordinal) : null;
 }
 
+/**
+ * shardOrdinal resolves a shard's account id to the account's number, or null
+ * when the drive is unknown.
+ *
+ * The number is what actually carries account identity — see Design.md §5.
+ * Colour alone cannot: measured, six is the most colours that stay clear of
+ * the semantic colours and of each other, and no ramp survives colour-vision
+ * deficiency by hue alone (known issue #29).
+ */
+export function shardOrdinal(accountId: string | null, drives: Rampable[]): number | null {
+  if (accountId === null) return null;
+  return drives.find((d) => d.id === accountId)?.ordinal ?? null;
+}
+
 export const DRIVE_TEXT: Record<DriveColor, string> = {
   drive1: 'text-drive1',
   drive2: 'text-drive2',
@@ -130,8 +133,6 @@ export const DRIVE_TEXT: Record<DriveColor, string> = {
   drive4: 'text-drive4',
   drive5: 'text-drive5',
   drive6: 'text-drive6',
-  drive7: 'text-drive7',
-  drive8: 'text-drive8',
 };
 
 /** usageTone colours a quota bar by how full it is. */
