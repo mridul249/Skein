@@ -43,6 +43,13 @@ type Config struct {
 	GoogleClientSecret string `env:"SKEIN_GOOGLE_CLIENT_SECRET"`
 	GoogleRedirectURL  string `env:"SKEIN_GOOGLE_REDIRECT_URL"`
 
+	// GoogleDesktopClientID is a Desktop app (RFC 8252) OAuth client id, used
+	// only by cmd/skein-desktop. It has no matching secret field on purpose —
+	// desktop clients do not use one — and it overrides the id compiled into
+	// the desktop binary via -ldflags, for anyone who wants their own API
+	// quota instead of Skein's shared one (Phase7 Task 4.4 point 6).
+	GoogleDesktopClientID string `env:"SKEIN_GOOGLE_DESKTOP_CLIENT_ID"`
+
 	// PublicURL is the externally reachable base URL. Used to build share
 	// links and to decide whether cookies may be marked Secure.
 	PublicURL string `env:"SKEIN_PUBLIC_URL" envDefault:"http://localhost:8080"`

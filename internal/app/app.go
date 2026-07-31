@@ -21,10 +21,33 @@ import (
 	"github.com/mridul60214/skein/internal/db"
 	"github.com/mridul60214/skein/internal/files"
 	"github.com/mridul60214/skein/internal/httpapi"
+	"github.com/mridul60214/skein/internal/httpapi/handlers"
 	"github.com/mridul60214/skein/internal/logging"
 	"github.com/mridul60214/skein/internal/router"
 	"github.com/mridul60214/skein/internal/worker"
 )
+
+// Option customises Build. The only caller today is cmd/skein-desktop,
+// wiring in its desktop OAuth connector — internal/app itself stays ignorant
+// of what a "desktop connector" is beyond the interface handlers.Accounts
+// already declares for it.
+type Option func(*options)
+
+type options struct {
+	// desktopConnect is a factory rather than a built value: the connector
+	// needs the *accounts.Service and *slog.Logger Build constructs
+	// internally, which do not exist yet at the point a caller supplies
+	// options, so Build calls this once they do.
+	desktopConnect func(*accounts.Service, *slog.Logger) handlers.DesktopConnector
+}
+
+// WithDesktopConnect makes the accounts handler run the desktop OAuth flow
+// (system browser, loopback listener, PKCE) instead of the web flow, and
+// skips mounting the server-hosted OAuth callback route. Only
+// cmd/skein-desktop passes this.
+func WithDesktopConnect(newConnector func(*accounts.Service, *slog.Logger) handlers.DesktopConnector) Option {
+	return func(o *options) { o.desktopConnect = newConnector }
+}
 
 // App is a fully wired Skein server bound to a listener. The caller owns
 // process lifecycle — signals for the headless build, window-close for the
@@ -44,7 +67,12 @@ type App struct {
 // listener or start serving — that is Addr/Serve's job, so the caller
 // chooses the bind address (a fixed one for the headless server, 127.0.0.1:0
 // for the desktop build) before anything is listening.
-func Build(ctx context.Context) (*App, error) {
+func Build(ctx context.Context, opts ...Option) (*App, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("configuration: %w", err)
@@ -146,14 +174,20 @@ func Build(ctx context.Context) (*App, error) {
 		lg.With(slog.String("component", "files")),
 	)
 
+	var desktopConnect handlers.DesktopConnector
+	if o.desktopConnect != nil {
+		desktopConnect = o.desktopConnect(accountsSvc, lg.With(slog.String("component", "desktopoauth")))
+	}
+
 	srv, err := httpapi.New(httpapi.Deps{
-		Config:   cfg,
-		Logger:   lg,
-		Health:   pool,
-		Auth:     authSvc,
-		Accounts: accountsSvc,
-		Files:    filesSvc,
-		Keyring:  keyring,
+		Config:         cfg,
+		Logger:         lg,
+		Health:         pool,
+		Auth:           authSvc,
+		Accounts:       accountsSvc,
+		Files:          filesSvc,
+		Keyring:        keyring,
+		DesktopConnect: desktopConnect,
 	})
 	if err != nil {
 		pool.Close()

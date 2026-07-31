@@ -216,12 +216,17 @@ func (s *PGStore) ListCapacity(ctx context.Context, userID uuid.UUID) ([]Capacit
 
 // CreateOAuthState stores the hash of a pending authorisation.
 func (s *PGStore) CreateOAuthState(ctx context.Context, stateHash []byte, p PendingOAuth, expiresAt time.Time) error {
+	var verifier *string
+	if p.PKCEVerifier != "" {
+		verifier = &p.PKCEVerifier
+	}
 	if err := s.q.CreateOAuthState(ctx, gen.CreateOAuthStateParams{
-		StateHash:  stateHash,
-		UserID:     p.UserID,
-		Kind:       string(p.Kind),
-		RedirectTo: p.RedirectTo,
-		ExpiresAt:  pgtype.Timestamptz{Time: expiresAt, Valid: true},
+		StateHash:    stateHash,
+		UserID:       p.UserID,
+		Kind:         string(p.Kind),
+		RedirectTo:   p.RedirectTo,
+		PkceVerifier: verifier,
+		ExpiresAt:    pgtype.Timestamptz{Time: expiresAt, Valid: true},
 	}); err != nil {
 		return fmt.Errorf("insert oauth state: %w", err)
 	}
@@ -235,10 +240,15 @@ func (s *PGStore) ConsumeOAuthState(ctx context.Context, stateHash []byte) (Pend
 	if err != nil {
 		return PendingOAuth{}, mapNoRows(err, "consume oauth state")
 	}
+	var verifier string
+	if row.PkceVerifier != nil {
+		verifier = *row.PkceVerifier
+	}
 	return PendingOAuth{
-		UserID:     row.UserID,
-		Kind:       storage.Kind(row.Kind),
-		RedirectTo: row.RedirectTo,
+		UserID:       row.UserID,
+		Kind:         storage.Kind(row.Kind),
+		RedirectTo:   row.RedirectTo,
+		PKCEVerifier: verifier,
 	}, nil
 }
 

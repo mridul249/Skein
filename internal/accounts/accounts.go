@@ -114,6 +114,12 @@ type PendingOAuth struct {
 	UserID     uuid.UUID
 	Kind       storage.Kind
 	RedirectTo string
+
+	// PKCEVerifier is set only for a desktop connect attempt. It is read
+	// back from server-side state at the callback and never accepted from
+	// the caller: trusting a client-supplied verifier would let anyone
+	// complete anyone else's pending exchange.
+	PKCEVerifier string
 }
 
 // Store is the persistence this package needs.
