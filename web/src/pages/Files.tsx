@@ -14,6 +14,7 @@ import { ApiError, api, type FileItem, type Folder } from '../lib/api';
 import { QuotaBar } from '../components/QuotaBar';
 import { ShardMap } from '../components/ShardMap';
 import { Modal } from '../components/Modal';
+import { FileDetail } from '../components/FileDetail';
 import { bytes, relativeTime } from '../lib/format';
 import { useUploads } from '../lib/uploads-context';
 
@@ -25,6 +26,8 @@ export function Files() {
   /** Open dialogs. Only one can be open at a time by construction. */
   const [naming, setNaming] = useState(false);
   const [deleting, setDeleting] = useState<Folder | null>(null);
+  /** The file whose detail pane is open, by id. */
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { start: startUploadJob } = useUploads();
 
@@ -58,6 +61,11 @@ export function Files() {
     [folderId, startUploadJob],
   );
 
+  // The key handler is registered once, so it must not close over a stale
+  // listing. A ref keeps it reading the current one without re-binding.
+  const filesRef = useRef<FileItem[]>([]);
+  filesRef.current = files;
+
   // Design.md §8: U uploads, Del trashes, / searches. Shortcuts are ignored
   // while a text field has focus, or typing a filename triggers them.
   useEffect(() => {
@@ -69,6 +77,26 @@ export function Files() {
       if (e.key === 'u' || e.key === 'U') {
         e.preventDefault();
         inputRef.current?.click();
+        return;
+      }
+      if (e.key === 'Escape') {
+        setSelectedId(null);
+        return;
+      }
+      // Arrow keys walk the listing whether or not anything is selected yet,
+      // so the detail pane is reachable without touching the mouse.
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (filesRef.current.length === 0) return;
+        e.preventDefault();
+        setSelectedId((current) => {
+          const list = filesRef.current;
+          const at = list.findIndex((f) => f.id === current);
+          const next =
+            e.key === 'ArrowDown'
+              ? Math.min(list.length - 1, at + 1)
+              : Math.max(0, at <= 0 ? 0 : at - 1);
+          return list[next]?.id ?? current;
+        });
       }
     }
     window.addEventListener('keydown', onKey);
@@ -120,6 +148,11 @@ export function Files() {
       setBanner(err instanceof ApiError ? err.message : 'Could not download that file.');
     }
   }
+
+  // Resolved against the live listing rather than held as an object, so a
+  // file that is trashed or navigated away from closes the pane instead of
+  // leaving a stale copy on screen.
+  const selected = files.find((f) => f.id === selectedId) ?? null;
 
   const breadcrumb = buildBreadcrumb(folders, folderId);
 
@@ -233,6 +266,7 @@ export function Files() {
         </nav>
       )}
 
+      <div className="flex items-start gap-5">
       {/*
         `relative` is load-bearing. Without it the card is not the containing
         block for its absolutely-positioned descendants, so the `sr-only`
@@ -240,8 +274,11 @@ export function Files() {
         the *document's* scrollable width — the whole page scrolled sideways
         by 305px at 375px while the table looked correctly clipped.
       */}
-      <div className="card relative md:overflow-x-auto">
-        <table className="hidden w-full min-w-[46rem] border-collapse md:table">
+      <div className={clsx(
+        'card relative min-w-0 flex-1 md:overflow-x-auto',
+        selected && 'max-lg:hidden',
+      )}>
+        <table className="hidden w-full min-w-[34rem] border-collapse md:table">
           <thead>
             <tr className="border-b border-border text-left">
               <th scope="col" className="th ">
@@ -298,17 +335,35 @@ export function Files() {
             {files.map((file) => (
               <tr
                 key={file.id}
-                className="h-row border-b border-line transition-colors duration-hover last:border-0 hover:bg-raised"
+                aria-selected={file.id === selectedId}
+                onClick={() => setSelectedId(file.id)}
+                className={clsx(
+                  'h-row cursor-pointer border-b border-line transition-colors duration-hover last:border-0 hover:bg-raised',
+                  file.id === selectedId && 'bg-raised',
+                )}
               >
-                <td className="max-w-0 truncate px-4 text-body text-text">{file.name}</td>
+                <td className="max-w-0 truncate px-4 text-body text-text">
+                  {/* A real button, so the row is reachable and activatable by
+                      keyboard rather than click-only. */}
+                  <button
+                    type="button"
+                    className="block w-full truncate text-left"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedId(file.id);
+                    }}
+                  >
+                    {file.name}
+                  </button>
+                </td>
                 <td className="tabular px-4 text-right text-data text-muted">
                   {bytes(file.size_bytes)}
                 </td>
-                <td className="px-4">
+                <td className="px-4" onClick={(e) => e.stopPropagation()}>
                   <ShardMap file={file} drives={drives} />
                 </td>
                 <td className="tabular px-4 text-data text-muted">{relativeTime(file.created_at)}</td>
-                <td className="px-4">
+                <td className="px-4" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-end gap-1">
                     <button
                       type="button"
@@ -371,7 +426,16 @@ export function Files() {
             <li key={file.id} className="px-4 py-3">
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-body text-text">{file.name}</p>
+                  {/* Only the name is the button: the metadata row below holds
+                      the shard map, whose trigger is itself a button, and
+                      nesting one inside another is invalid. */}
+                  <button
+                    type="button"
+                    className="block w-full truncate text-left text-body text-text"
+                    onClick={() => setSelectedId(file.id)}
+                  >
+                    {file.name}
+                  </button>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                     <ShardMap file={file} drives={drives} />
                     <span className="tabular text-caption text-muted">
@@ -439,6 +503,28 @@ export function Files() {
             </p>
           </div>
         )}
+      </div>
+
+      {/*
+        Master-detail. At lg and up the pane sits beside the listing and
+        sticks while the list scrolls. Below that the listing hides and the
+        pane takes the column — a phone has room for one of the two, and
+        putting them side by side is what forces a horizontal scroll.
+      */}
+      {selected && (
+        <div className="w-full shrink-0 lg:sticky lg:top-8 lg:w-[22rem]">
+          <FileDetail
+            file={selected}
+            drives={drives}
+            onClose={() => setSelectedId(null)}
+            onDownload={(f) => void download(f)}
+            onTrash={(f) => {
+              trash.mutate(f.id);
+              setSelectedId(null);
+            }}
+          />
+        </div>
+      )}
       </div>
     </div>
   );

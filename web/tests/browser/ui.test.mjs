@@ -234,6 +234,91 @@ test('a transfer bar never claims completion the server has not reported', async
   });
 });
 
+test('the shard map tiles the file exactly, in index order', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    const r = await p.eval(`(async () => {
+      // Select the striped file.
+      const rows = [...document.querySelectorAll('tbody tr')];
+      const striped = rows.find((tr) => /archive.tar.zst/.test(tr.textContent));
+      striped.querySelector('button').click();
+      await new Promise((r) => setTimeout(r, 350));
+
+      const pane = document.querySelector('aside[aria-label^="Details for"]');
+      if (!pane) return { error: 'detail pane did not open' };
+      const map = pane.querySelector('[role="img"]');
+      const track = map.getBoundingClientRect();
+      const segs = [...map.children].map((el) => el.getBoundingClientRect());
+
+      // Gaps between consecutive segments: a hairline is 1px of background
+      // showing through, anything wider is a gutter and reads as pieces.
+      const gaps = [];
+      for (let i = 1; i < segs.length; i++) gaps.push(segs[i].left - segs[i - 1].right);
+
+      return {
+        order: [...pane.querySelectorAll('ul li')].map((li) =>
+          (li.textContent.match(/#(\\d+)/) || [])[1],
+        ),
+        covered: segs.reduce((a, b) => a + b.width, 0) + gaps.reduce((a, b) => a + b, 0),
+        trackWidth: track.width,
+        maxGap: gaps.length ? Math.max(...gaps) : 0,
+        segCount: segs.length,
+      };
+    })()`);
+    assert.ok(!r.error, r.error);
+    assert.equal(r.segCount, 3, 'one segment per shard');
+    // Tiles exactly: segments plus their hairlines cover the whole track.
+    assert.ok(
+      Math.abs(r.covered - r.trackWidth) < 1.5,
+      `segments must tile the track (covered ${r.covered} of ${r.trackWidth})`,
+    );
+    assert.ok(r.maxGap <= 1.5, `boundaries must be hairlines, not gutters (max ${r.maxGap}px)`);
+    assert.deepEqual(r.order, ['0', '1', '2'], 'shards are listed in index order');
+
+    // Opening the pane narrows the listing column. The table must absorb that
+    // rather than start scrolling sideways underneath it.
+    const scrollers = await p.eval(`(() => [...document.querySelectorAll('*')]
+      .filter((e) => {
+        if (e.scrollWidth <= e.clientWidth + 1) return false;
+        const ox = getComputedStyle(e).overflowX;
+        return ox === 'auto' || ox === 'scroll';
+      })
+      .map((e) => e.tagName + '.' + String(e.className).slice(0, 40)))()`);
+    assert.deepEqual(scrollers, [], 'the detail pane must not force the listing to scroll');
+  });
+});
+
+test('no shard claims to be verified, because nothing has verified it', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    const r = await p.eval(`(async () => {
+      const rows = [...document.querySelectorAll('tbody tr')];
+      rows.find((tr) => /archive.tar.zst/.test(tr.textContent)).querySelector('button').click();
+      await new Promise((r) => setTimeout(r, 350));
+      const pane = document.querySelector('aside[aria-label^="Details for"]');
+      const states = [...pane.querySelectorAll('ul li .sr-only')].map((e) => e.textContent.trim());
+      const striped = { states, text: pane.textContent };
+
+      // Now a file whose shards all resolve, to check the other summary.
+      document.querySelector('aside[aria-label^="Details for"] button[aria-label="Close details"]').click();
+      await new Promise((r) => setTimeout(r, 200));
+      const rows2 = [...document.querySelectorAll('tbody tr')];
+      rows2.find((tr) => /truncation-behaviour/.test(tr.textContent)).querySelector('button').click();
+      await new Promise((r) => setTimeout(r, 350));
+      const pane2 = document.querySelector('aside[aria-label^="Details for"]');
+
+      return { striped, intact: { states: [...pane2.querySelectorAll('ul li .sr-only')].map((e) => e.textContent.trim()), text: pane2.textContent } };
+    })()`);
+    // The API reports no integrity field at all, so "Verified" would be a
+    // claim nothing supports.
+    assert.deepEqual(r.striped.states, ['Unverified', 'Unverified', 'Missing']);
+    assert.match(r.striped.text, /1 of 3 shards unreachable/);
+    assert.deepEqual(r.intact.states, ['Unverified']);
+    assert.match(r.intact.text, /none verified yet/);
+    assert.ok(!/\bVerified\b/.test(r.intact.text), 'nothing may read as verified');
+  });
+});
+
 test('an overlay panel is never clipped by an ancestor', async () => {
   await on({}, async (p) => {
     await p.goto(url('/'));
