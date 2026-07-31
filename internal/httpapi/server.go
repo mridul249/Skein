@@ -32,6 +32,18 @@ const (
 	authRatePerMin   = 5
 	apiRatePerMin    = 300
 	publicRatePerMin = 30
+
+	// contentRatePerMin governs the byte-serving routes only, and is separate
+	// from apiRatePerMin because the traffic shape is different (known issue
+	// #25). A download is one request; a <video> being scrubbed is many range
+	// requests, and a page of image previews opens one per thumbnail.
+	//
+	// Note the limiter's burst equals its per-minute figure, so a full bucket
+	// already absorbs a scrub burst outright — the value below is really the
+	// *sustained* floor, 10 requests per second. That is what a preview needs
+	// and it is still a real bound: the route is scoped to one file per
+	// capability grant, and a grant lives 15 minutes.
+	contentRatePerMin = 600
 )
 
 // Health reports process and dependency liveness.
@@ -257,9 +269,9 @@ func (s *Server) mountStreaming(r chi.Router) {
 		g.Use(middleware.ContentAuth(s.deps.Auth, s.capVerifier(), contentFileID, httpx.WriteError))
 		// Rate limited, unlike before: a capability URL makes this route
 		// reachable without a session, and the limiter keys on the user
-		// the grant resolves to. Range requests are cheap against a
-		// 300/min budget.
-		g.Use(middleware.RateLimit(middleware.NewLimiter(apiRatePerMin)))
+		// the grant resolves to. Sized for range traffic rather than for
+		// JSON calls — see contentRatePerMin.
+		g.Use(middleware.RateLimit(middleware.NewLimiter(contentRatePerMin)))
 		g.Get("/api/files/{id}/content", h.Content)
 		g.Head("/api/files/{id}/content", h.Content)
 	})
