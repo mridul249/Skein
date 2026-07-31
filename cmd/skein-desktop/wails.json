@@ -1,0 +1,14 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "skein-desktop",
+  "outputfilename": "skein-desktop",
+  "frontend:dir": "../../web",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:serverUrl": "",
+  "wailsjsdir": "./wailsjs",
+  "build:tags": "webkit2_41",
+  "author": {
+    "name": "Skein"
+  }
+}

@@ -1,5 +1,7 @@
 /PLAN
 /bin
+/cmd/skein-desktop/build
+/cmd/skein-desktop/wailsjs
 /.env
 /internal/web/dist/*
 !/internal/web/dist/.gitkeep

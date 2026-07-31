@@ -59,6 +59,25 @@ build-go:
 	@mkdir -p bin $(WEB_DIST)
 	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/skein
 
+## desktop: build the native desktop binary via wails build (requires cgo;
+## make web first, or ErrNoUI surfaces at launch instead of at build time)
+##
+## webkit2_41 is pinned here on purpose: Wails defaults to webkit2gtk-4.0,
+## which Ubuntu 26.04 does not ship in any form, so an untagged build fails
+## at cgo. wails.json lives in cmd/skein-desktop, not the repo root: the
+## Wails CLI always compiles "." in the directory holding wails.json (no
+## flag redirects it), and that directory must contain package main.
+## frontend:dir there points back at ../../web, and frontend:build/:install
+## are empty so Wails does not run a second, competing Vite build — `make
+## web` already produced internal/web/dist, which cmd/skein-desktop embeds
+## the same way cmd/skein does.
+desktop: web
+	@mkdir -p bin
+	cd cmd/skein-desktop && $(GOBIN)/wails build -tags webkit2_41 -skipbindings \
+		-trimpath -ldflags '-X main.version=$(VERSION)' -clean -f
+	cp cmd/skein-desktop/build/bin/skein-desktop bin/skein-desktop
+	@ls -lh bin/skein-desktop
+
 ## test: run the full Go test suite with the race detector
 test:
 	go test -race -count=1 $(PKG)
@@ -143,5 +162,5 @@ backup:
 clean:
 	rm -rf bin $(WEB_DIST)/* web/node_modules
 
-.PHONY: help run build build-go test test-short bench lint sqlc migrate \
+.PHONY: help run build build-go desktop test test-short bench lint sqlc migrate \
         migrate-down migrate-status web web-dev dev-db dev-db-down tools backup clean
