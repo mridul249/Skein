@@ -111,6 +111,46 @@ Then connect a Google account. Full walkthrough in
 
 ---
 
+## Desktop
+
+`skein-desktop` runs the same server in a native window instead of a browser
+tab - same frontend, same API, same code, bound to `127.0.0.1:<random port>`
+and reverse-proxied into the window instead of a fixed address.
+
+**This still requires PostgreSQL - it is not a single-binary, no-database
+experience yet.** That lands after an owner-written rewrite of the shard
+router (`internal/router/reserve.go`, `plan.go`) is ported to a SQLite-backed
+reservation scheme; porting it once, after that rewrite, is cheaper than
+porting it twice. Point `SKEIN_DATABASE_URL` at a running Postgres exactly as
+you would for `skein serve`.
+
+**The two binaries have different build requirements.** `skein` (the server)
+stays `CGO_ENABLED=0` and static - that is the one you deploy. `skein-desktop`
+requires cgo for the native webview and is built per-platform:
+
+```bash
+sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+make desktop   # -> bin/skein-desktop
+```
+
+Two things worth knowing before that command surprises you:
+
+- **`wails doctor` reports `libwebkit: Not Found` even when everything above
+  is installed correctly.** It checks for the `webkit2gtk-4.0` package name,
+  which does not exist on Ubuntu 26.04 (verified here) - only `4.1` does, and
+  recent Ubuntu releases generally track WebKitGTK's own dropping of the 4.0
+  ABI. `make desktop`
+  already builds with `-tags webkit2_41`, which is the real fix; the doctor
+  warning is a false positive and can be ignored once you've installed the
+  three packages above.
+- Connecting a drive from the desktop build needs zero Google Cloud Console
+  steps - it uses a Desktop app OAuth client (RFC 8252) with no secret and
+  PKCE, opening your system browser rather than a webview. "Use my own Google
+  client" still works via `SKEIN_GOOGLE_DESKTOP_CLIENT_ID`.
+
+---
+
 ## Where to find things
 
 | You want to | Read |
