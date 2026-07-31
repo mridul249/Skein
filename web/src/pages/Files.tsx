@@ -26,8 +26,20 @@ export function Files() {
   /** Open dialogs. Only one can be open at a time by construction. */
   const [naming, setNaming] = useState(false);
   const [deleting, setDeleting] = useState<Folder | null>(null);
-  /** The file whose detail pane is open, by id. */
+  /** The file whose detail drawer is open, by id. */
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Focus returns to the row that opened the drawer. The row is found by id
+  // rather than held as a node, because the listing re-renders underneath and
+  // a captured element can be detached by the time it is needed — focusing a
+  // detached node throws focus away entirely.
+  const closeDrawer = useCallback(() => {
+    const id = selectedId;
+    setSelectedId(null);
+    if (!id) return;
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`[data-row="${id}"] button`)?.focus();
+    });
+  }, [selectedId]);
   const inputRef = useRef<HTMLInputElement>(null);
   const { start: startUploadJob } = useUploads();
 
@@ -80,7 +92,7 @@ export function Files() {
         return;
       }
       if (e.key === 'Escape') {
-        setSelectedId(null);
+        closeDrawer();
         return;
       }
       // Arrow keys walk the listing whether or not anything is selected yet,
@@ -101,7 +113,7 @@ export function Files() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [closeDrawer]);
 
   const trash = useMutation({
     mutationFn: (id: string) => api.trashFile(id),
@@ -150,9 +162,10 @@ export function Files() {
   }
 
   // Resolved against the live listing rather than held as an object, so a
-  // file that is trashed or navigated away from closes the pane instead of
+  // file that is trashed or navigated away from closes the drawer instead of
   // leaving a stale copy on screen.
   const selected = files.find((f) => f.id === selectedId) ?? null;
+
 
   const breadcrumb = buildBreadcrumb(folders, folderId);
 
@@ -266,7 +279,6 @@ export function Files() {
         </nav>
       )}
 
-      <div className="flex items-start gap-5">
       {/*
         `relative` is load-bearing. Without it the card is not the containing
         block for its absolutely-positioned descendants, so the `sr-only`
@@ -274,10 +286,7 @@ export function Files() {
         the *document's* scrollable width — the whole page scrolled sideways
         by 305px at 375px while the table looked correctly clipped.
       */}
-      <div className={clsx(
-        'card relative min-w-0 flex-1 md:overflow-x-auto',
-        selected && 'max-lg:hidden',
-      )}>
+      <div className="card relative md:overflow-x-auto">
         <table className="hidden w-full min-w-[34rem] border-collapse md:table">
           <thead>
             <tr className="border-b border-border text-left">
@@ -335,6 +344,7 @@ export function Files() {
             {files.map((file) => (
               <tr
                 key={file.id}
+                data-row={file.id}
                 aria-selected={file.id === selectedId}
                 onClick={() => setSelectedId(file.id)}
                 className={clsx(
@@ -423,7 +433,7 @@ export function Files() {
           ))}
 
           {files.map((file) => (
-            <li key={file.id} className="px-4 py-3">
+            <li key={file.id} data-row={file.id} className="px-4 py-3">
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
                   {/* Only the name is the button: the metadata row below holds
@@ -506,26 +516,27 @@ export function Files() {
       </div>
 
       {/*
-        Master-detail. At lg and up the pane sits beside the listing and
-        sticks while the list scrolls. Below that the listing hides and the
-        pane takes the column — a phone has room for one of the two, and
-        putting them side by side is what forces a horizontal scroll.
+        The drawer overlays rather than reflowing. Giving the listing a right
+        padding would move every row sideways the instant one was clicked —
+        the same displacement that made the old popover flicker (#27), just
+        with a bigger box.
+
+        Kept mounted while anything is selected so that picking another row
+        swaps its contents instead of tearing it down and rebuilding it.
       */}
       {selected && (
-        <div className="w-full shrink-0 lg:sticky lg:top-8 lg:w-[22rem]">
-          <FileDetail
-            file={selected}
-            drives={drives}
-            onClose={() => setSelectedId(null)}
-            onDownload={(f) => void download(f)}
-            onTrash={(f) => {
-              trash.mutate(f.id);
-              setSelectedId(null);
-            }}
-          />
-        </div>
+        <FileDetail
+          file={selected}
+          drives={drives}
+          open={selectedId !== null}
+          onClose={closeDrawer}
+          onDownload={(f) => void download(f)}
+          onTrash={(f) => {
+            trash.mutate(f.id);
+            closeDrawer();
+          }}
+        />
       )}
-      </div>
     </div>
   );
 }
