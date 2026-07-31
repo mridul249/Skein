@@ -169,44 +169,73 @@ export function QuotaRail({ quota }: { quota: Quota | undefined }) {
   const active = quota.drives.filter((d) => d.status !== 'disabled');
 
   return (
-    <div className="space-y-3 border-t border-border px-4 py-3">
+    <div className="border-t border-border px-5 py-4">
+      <p className="text-label font-semibold text-muted">Storage</p>
+
+      <p className="mt-2 flex items-baseline gap-1.5">
+        <span className="tabular text-heading text-text">{bytes(quota.used_bytes)}</span>
+        <span className="tabular text-caption text-muted">of {bytes(quota.total_bytes)}</span>
+      </p>
+
       {active.length > 0 && (
-        // The same packed bar, compact, tooltips off — the per-drive rows
-        // below already carry the numbers.
-        <PackedBar drives={active} total={quota.total_bytes} height="h-1.5" showTooltips={false} />
+        // The same packed bar as the page header, compact and inert here: the
+        // per-account rows below carry the same numbers as real text, so a
+        // second keyboard stop per account would be noise rather than access.
+        <div className="mt-2.5">
+          <PackedBar drives={active} total={quota.total_bytes} height="h-1.5" showTooltips={false} />
+        </div>
       )}
 
-      {quota.drives.map((drive) => {
-        const pct = percent(drive.used_bytes, drive.total_bytes);
-        const tone = usageTone(drive.used_bytes, drive.total_bytes);
-        return (
-          <div key={drive.id} className="space-y-1">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-1.5">
-                <AccountChip ordinal={drive.ordinal} size="sm" />
-                <span className="truncate text-data-sm text-muted" title={drive.email}>
-                  {drive.email}
+      <ul className="mt-4 space-y-3">
+        {quota.drives.map((drive) => {
+          const pct = percent(drive.used_bytes, drive.total_bytes);
+          const tone = usageTone(drive.used_bytes, drive.total_bytes);
+          return (
+            <li key={drive.id}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-2">
+                  <AccountChip ordinal={drive.ordinal} size="sm" />
+                  <span className="truncate text-caption text-muted" title={drive.email}>
+                    {drive.email}
+                  </span>
                 </span>
-              </span>
-              <span
-                className={clsx(
-                  'tabular shrink-0 text-data-sm',
-                  tone === 'red' && 'text-danger',
-                  tone === 'yellow' && 'text-warning',
-                  tone === 'green' && 'text-muted',
+                <span
+                  className={clsx(
+                    'tabular shrink-0 text-data-sm',
+                    tone === 'red' && 'text-danger',
+                    tone === 'yellow' && 'text-warning',
+                    tone === 'green' && 'text-muted',
+                  )}
+                >
+                  {pct}%
+                </span>
+              </div>
+
+              {/* Per-account fill, in that account's own colour. The pooled bar
+                  above answers "how full is the pool"; this answers "which
+                  account is about to run out", which is a different question
+                  and the one that decides whether to connect another. */}
+              <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-raised">
+                <div
+                  className={clsx('h-full rounded-full', DRIVE_BG[driveColor(drive.ordinal)])}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+
+              <p className="mt-1 flex items-baseline justify-between gap-2">
+                <span className="tabular text-caption text-faint">
+                  {bytes(drive.used_bytes)} / {bytes(drive.total_bytes)}
+                </span>
+                {drive.status !== 'active' && (
+                  <span className="text-caption text-warning">
+                    {drive.status === 'needs_reauth' ? 'Reconnect' : drive.status}
+                  </span>
                 )}
-              >
-                {pct}%
-              </span>
-            </div>
-            {drive.status !== 'active' && (
-              <p className="text-data-sm text-warning">
-                {drive.status === 'needs_reauth' ? 'Reconnect this drive' : drive.status}
               </p>
-            )}
-          </div>
-        );
-      })}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

@@ -66,18 +66,33 @@ test('prose is sans, data is mono, and no weight is synthesised', async () => {
   });
 });
 
-test('the page never scrolls horizontally at 375px', async () => {
+test('nothing scrolls horizontally at 375px, including the file list', async () => {
   for (const route of ['/', '/trash', '/settings', '/login']) {
     await on({ width: 375, height: 800 }, async (p) => {
       await p.goto(url(route));
-      const scrolled = await p.eval(`(() => {
+      const r = await p.eval(`(() => {
         const de = document.documentElement;
         de.scrollLeft = 9999;
         const moved = de.scrollLeft;
         de.scrollLeft = 0;
-        return moved;
+        // A horizontally scrolling table is not an acceptable phone layout:
+        // the columns it pushes off are Size, Stored and Added, i.e. every
+        // column except the one you already knew. Below md the table is
+        // replaced by a stacked list, so nothing may scroll sideways.
+        // Only elements that can actually be scrolled count: sr-only and
+        // truncate both overflow by design and clip with overflow hidden,
+        // which is not a scroller.
+        const scrollers = [...document.querySelectorAll('*')]
+          .filter((e) => {
+            if (e.scrollWidth <= e.clientWidth + 1) return false;
+            const ox = getComputedStyle(e).overflowX;
+            return ox === 'auto' || ox === 'scroll';
+          })
+          .map((e) => e.tagName + '.' + String(e.className).slice(0, 40));
+        return { moved, scrollers };
       })()`);
-      assert.equal(scrolled, 0, `${route} must not scroll sideways`);
+      assert.equal(r.moved, 0, `${route} must not scroll sideways`);
+      assert.deepEqual(r.scrollers, [], `${route} has a horizontally scrolling element`);
     });
   }
 });
@@ -189,6 +204,33 @@ test('no account colour can be mistaken for a semantic colour', async () => {
       assert.ok(!semantic.includes(c),
         `account colour ${c} is identical to a semantic colour — that shipped (#29)`);
     }
+  });
+});
+
+test('a transfer bar never claims completion the server has not reported', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/') + '&transfers=1');
+    const r = await p.eval(`(() => {
+      const rows = [...document.querySelectorAll('[aria-label="Transfers"] li')];
+      return rows.map((li) => {
+        const track = li.querySelector('.rounded-full.bg-raised');
+        const fill = track?.firstElementChild;
+        const t = track?.getBoundingClientRect();
+        const f = fill?.getBoundingClientRect();
+        return {
+          label: li.querySelector('span:last-of-type')?.textContent?.trim() ?? '',
+          fillFraction: t && f ? f.width / t.width : null,
+        };
+      });
+    })()`);
+    const finishing = r.find((x) => /Finishing/.test(x.label));
+    assert.ok(finishing, 'the fixture should include a job in the finishing state');
+    // Every byte has left the machine, but the server is still writing shards.
+    // A full bar here is the lie this whole state exists to avoid.
+    assert.ok(
+      finishing.fillFraction < 0.9,
+      `finishing must not render a full bar (was ${finishing.fillFraction})`,
+    );
   });
 });
 

@@ -111,7 +111,7 @@ export function Drives() {
             own row at 1280px; wrapping the prose instead keeps the action
             where Design.md §4 puts it. */}
         <div className="max-w-prose">
-          <h1 className="text-title font-semibold">Drives</h1>
+          <h1 className="text-title font-semibold text-text">Drives</h1>
           <p className="mt-1 text-body text-muted">
             Skein sees only the files it created. It cannot read anything already in your Drive.
           </p>
@@ -131,7 +131,7 @@ export function Drives() {
         <p
           role="status"
           className={clsx(
-            'mb-4 border px-4 py-2 text-body',
+            'mb-4 rounded-md border px-4 py-3 text-body',
             tone === 'error' ? 'border-danger/40 bg-danger/10 text-danger' : 'border-success/40 bg-success/10 text-success',
           )}
         >
@@ -140,7 +140,7 @@ export function Drives() {
       )}
 
       {data && drives.length > 0 && (
-        <div className="card mb-5 px-4 py-3">
+        <div className="card mb-5 px-4 py-3.5">
           <p className="tabular text-data text-muted">
             {bytes(data.used_bytes)} used of {bytes(data.total_bytes)} pooled ·{' '}
             {bytes(data.free_bytes)} free
@@ -152,7 +152,7 @@ export function Drives() {
 
       {!isLoading && drives.length === 0 && (
         <div className="card px-4 py-16 text-center">
-          <p className="text-heading text-muted">No drives yet.</p>
+          <p className="text-body font-semibold text-text">No drives connected yet.</p>
           <p className="mt-1 text-body text-muted">
             Connect a Google account to give Skein somewhere to put your files.
           </p>
@@ -164,7 +164,7 @@ export function Drives() {
           const pct = percent(drive.used_bytes, drive.total_bytes);
           const usage = usageTone(drive.used_bytes, drive.total_bytes);
           return (
-            <li key={drive.id} className="card p-4">
+            <li key={drive.id} className="card p-4 transition-colors duration-hover hover:border-borderStrong">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
                   <AccountChip ordinal={drive.ordinal} />
@@ -215,9 +215,9 @@ export function Drives() {
                     {pct}%
                   </span>
                 </div>
-                <div className="h-1.5 w-full overflow-hidden bg-raised">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-raised">
                   <div
-                    className={clsx('h-full', DRIVE_BG[driveColor(drive.ordinal)])}
+                    className={clsx('h-full rounded-full', DRIVE_BG[driveColor(drive.ordinal)])}
                     style={{ width: `${pct}%` }}
                   />
                 </div>

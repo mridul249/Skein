@@ -5,7 +5,7 @@ import { useUploads } from '../lib/uploads-context';
 import { isActive, type UploadJob } from '../lib/uploads';
 
 /**
- * The state of every upload, rendered wherever the user happens to be.
+ * Transfers in progress, rendered wherever the user happens to be.
  *
  * Mounted in Layout rather than on the Files page, because an upload started
  * on Files and then navigated away from used to vanish from the UI while it
@@ -33,48 +33,77 @@ export function UploadList() {
   const { jobs, cancel, dismiss } = useUploads();
   if (jobs.length === 0) return null;
 
+  const live = jobs.filter(isActive).length;
+
   return (
-    <ul className="mb-4 space-y-2">
-      {jobs.map((job) => {
-        const live = isActive(job);
-        const fraction = job.size > 0 ? Math.min(1, job.sent / job.size) : 0;
-        return (
-          <li key={job.id} className="card px-4 py-3">
-            <div className="mb-1.5 flex items-baseline justify-between gap-3">
-              <span className="truncate text-label text-text">{job.name}</span>
-              <span
-                className={clsx(
-                  'tabular shrink-0 text-data-sm',
-                  job.status === 'error' ? 'text-danger' : 'text-muted',
-                )}
-              >
-                {label(job)}
-              </span>
-            </div>
-            <div className="h-1 w-full overflow-hidden bg-raised">
-              <div
-                className={clsx(
-                  'h-full transition-[width] duration-hover',
-                  job.status === 'error' && 'bg-danger',
-                  job.status === 'cancelled' && 'bg-overlay0',
-                  job.status === 'done' && 'bg-success',
-                  live && 'bg-accent',
-                )}
-                style={{ width: `${(job.status === 'done' ? 1 : fraction) * 100}%` }}
-              />
-            </div>
-            <div className="mt-1.5 text-right">
-              <button
-                type="button"
-                className="text-caption text-muted hover:text-danger"
-                onClick={() => (live ? cancel(job.id) : dismiss(job.id))}
-              >
-                {live ? 'Cancel' : 'Dismiss'}
-              </button>
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+    <section className="card mb-6 p-4" aria-label="Transfers">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 className="text-label font-semibold text-text">Transfers</h2>
+        {live > 0 && (
+          <span className="tabular text-data-sm text-muted">
+            {live} in progress
+          </span>
+        )}
+      </div>
+
+      <ul className="space-y-3">
+        {jobs.map((job) => {
+          const active = isActive(job);
+          const fraction = job.size > 0 ? Math.min(1, job.sent / job.size) : 0;
+          // The bar must not claim completion the server has not reported.
+          // `finishing` means every byte has left this machine and the server
+          // is still writing shards to a drive, so its duration is unknown —
+          // an indeterminate sweep, not a full bar.
+          const indeterminate = job.status === 'finishing';
+
+          return (
+            <li key={job.id}>
+              <div className="mb-1.5 flex items-baseline justify-between gap-3">
+                <span className="truncate text-body text-text">{job.name}</span>
+                <span
+                  className={clsx(
+                    'tabular shrink-0 text-data-sm',
+                    job.status === 'error' ? 'text-danger' : 'text-muted',
+                  )}
+                >
+                  {label(job)}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-raised">
+                  {indeterminate ? (
+                    // Under prefers-reduced-motion the sweep does not run, so
+                    // the track shows a static partial bar and the label
+                    // carries the meaning. Never a full bar.
+                    <div className="h-full w-1/4 rounded-full bg-accent motion-safe:animate-sweep" />
+                  ) : (
+                    <div
+                      className={clsx(
+                        'h-full rounded-full transition-[width] duration-hover',
+                        job.status === 'error' && 'bg-danger',
+                        job.status === 'cancelled' && 'bg-borderStrong',
+                        job.status === 'done' && 'bg-success',
+                        job.status === 'sending' && 'bg-accent',
+                      )}
+                      style={{ width: `${(job.status === 'done' ? 1 : fraction) * 100}%` }}
+                    />
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-2 py-1 text-caption text-muted
+                             transition-colors duration-hover hover:bg-raised hover:text-text"
+                  onClick={() => (active ? cancel(job.id) : dismiss(job.id))}
+                >
+                  {active ? 'Cancel' : 'Dismiss'}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
