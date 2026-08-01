@@ -149,5 +149,9 @@ make desktop   # Outputs bin/skein-desktop
 
 **v0.2.0** - Skein is designed strictly as a single-tenant storage engine. Multi-tenancy, team sharing, mobile clients, and background directory synchronization are intentionally out of scope.
 
+## License
+
+This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
+
 
 </samp>
