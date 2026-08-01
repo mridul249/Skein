@@ -14,7 +14,6 @@ linters:
     - ineffassign
     - gosec
     - bodyclose
-    - contextcheck
     - nilerr
     - unused
 

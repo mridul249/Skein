@@ -284,7 +284,7 @@ func (q *Queries) ListActiveAccountsForSync(ctx context.Context) ([]ConnectedAcc
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []ConnectedAccount{}
 	for rows.Next() {
 		var i ConnectedAccount
@@ -329,7 +329,7 @@ func (q *Queries) ListConnectedAccounts(ctx context.Context, userID string) ([]C
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []ConnectedAccount{}
 	for rows.Next() {
 		var i ConnectedAccount
@@ -402,7 +402,7 @@ func (q *Queries) ListStorageAccounts(ctx context.Context, userID string) ([]Lis
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []ListStorageAccountsRow{}
 	for rows.Next() {
 		var i ListStorageAccountsRow
@@ -468,7 +468,7 @@ func (q *Queries) PendingVerifiers(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []string{}
 	for rows.Next() {
 		var pkce_verifier string

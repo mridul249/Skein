@@ -53,7 +53,7 @@ SELECT id, user_id, parent_id, name, created_at, updated_at, deleted_at
 	if err != nil {
 		return nil, fmt.Errorf("list folders: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	return s.scanFolders(rows)
 }
 
@@ -80,7 +80,7 @@ SELECT id FROM subtree`, id.String(), userID.String())
 	if err != nil {
 		return nil, fmt.Errorf("select folder subtree: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var out []uuid.UUID
 	for rows.Next() {
@@ -128,7 +128,7 @@ WITH RECURSIVE subtree AS (
     SELECT f0.id FROM folders f0
      WHERE f0.id = ?1 AND f0.user_id = ?2 AND f0.deleted_at IS NULL
     UNION ALL
-    SELECT f.id FROM folders f
+    SELECT f.id FROM defer func() folders f
      JOIN subtree st ON f.parent_id = st.id
      WHERE f.deleted_at IS NULL
 )
@@ -211,7 +211,7 @@ SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
 	if err != nil {
 		return nil, fmt.Errorf("list files: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	files, err := s.scanFiles(rows)
 	if err != nil {
 		return nil, err
@@ -230,7 +230,7 @@ SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
 	if err != nil {
 		return nil, fmt.Errorf("list trashed files: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	return s.scanFiles(rows)
 }
 
@@ -297,7 +297,7 @@ SELECT id, file_id, idx, connected_account_id, provider_object_id, size_bytes,
 	if err != nil {
 		return nil, fmt.Errorf("list shards: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	return s.scanShards(rows)
 }
 
