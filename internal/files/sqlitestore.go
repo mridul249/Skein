@@ -197,6 +197,7 @@ func (s *SQLiteStore) ListFiles(ctx context.Context, userID uuid.UUID, p ListPar
 		args = append(args, c, c, p.CursorID.String())
 	}
 	args = append(args, p.Limit)
+	// #nosec G202 -- cursorSQL is selected from fixed SQL fragments, never user input.
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
        is_striped, is_encrypted, status, created_at, updated_at, deleted_at
