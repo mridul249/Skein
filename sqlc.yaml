@@ -24,3 +24,28 @@ sql:
               pointer: true
           - db_type: citext
             go_type: string
+
+  # SQLite, for the desktop build (Phase 7 Task 3). Deliberately a separate
+  # entry rather than a shared one: the dialects differ enough — no now(), no
+  # native UUID/timestamp/inet types — that a single set of queries would have
+  # to be written to the intersection of both, which is worse than two honest
+  # sets. Only the auth tables are ported so far; see PROGRESS.md.
+  #
+  # No type overrides here on purpose. Every column is TEXT, BLOB or INTEGER,
+  # so sqlc emits string/[]byte/int64 and internal/auth/sqlitestore.go does the
+  # parsing into uuid.UUID / time.Time explicitly. That keeps the conversion —
+  # and its error handling — visible in Go rather than hidden in codegen
+  # config, which matters because a malformed timestamp read out of a user's
+  # own database file should be a handled error, not a panic.
+  - engine: sqlite
+    schema: internal/db/migrations/sqlite
+    queries: internal/db/queries/sqlite
+    gen:
+      go:
+        package: gensqlite
+        out: internal/db/gensqlite
+        emit_pointers_for_null_types: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_empty_slices: true
+        emit_json_tags: false
