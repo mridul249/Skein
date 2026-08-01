@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mridul60214/skein/internal/storage"
-	"github.com/mridul60214/skein/internal/storage/local"
+	"github.com/mridul249/Skein/internal/storage"
+	"github.com/mridul249/Skein/internal/storage/local"
 )
 
 func newBackend(t *testing.T, opts ...local.Option) *local.Backend {

@@ -15,17 +15,17 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/mridul60214/skein/internal/accounts"
-	"github.com/mridul60214/skein/internal/auth"
-	"github.com/mridul60214/skein/internal/config"
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
-	"github.com/mridul60214/skein/internal/db"
-	"github.com/mridul60214/skein/internal/files"
-	"github.com/mridul60214/skein/internal/httpapi"
-	"github.com/mridul60214/skein/internal/httpapi/handlers"
-	"github.com/mridul60214/skein/internal/logging"
-	"github.com/mridul60214/skein/internal/router"
-	"github.com/mridul60214/skein/internal/worker"
+	"github.com/mridul249/Skein/internal/accounts"
+	"github.com/mridul249/Skein/internal/auth"
+	"github.com/mridul249/Skein/internal/config"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
+	"github.com/mridul249/Skein/internal/db"
+	"github.com/mridul249/Skein/internal/files"
+	"github.com/mridul249/Skein/internal/httpapi"
+	"github.com/mridul249/Skein/internal/httpapi/handlers"
+	"github.com/mridul249/Skein/internal/logging"
+	"github.com/mridul249/Skein/internal/router"
+	"github.com/mridul249/Skein/internal/worker"
 )
 
 // Option customises Build. The only caller today is cmd/skein-desktop,

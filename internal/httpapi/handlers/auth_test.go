@@ -12,10 +12,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mridul60214/skein/internal/auth"
-	"github.com/mridul60214/skein/internal/httpapi/handlers"
-	"github.com/mridul60214/skein/internal/httpapi/httpx"
-	"github.com/mridul60214/skein/internal/httpapi/middleware"
+	"github.com/mridul249/Skein/internal/auth"
+	"github.com/mridul249/Skein/internal/httpapi/handlers"
+	"github.com/mridul249/Skein/internal/httpapi/httpx"
+	"github.com/mridul249/Skein/internal/httpapi/middleware"
 )
 
 // The handler tests exercise the real service against the package's in-memory

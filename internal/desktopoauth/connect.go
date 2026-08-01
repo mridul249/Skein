@@ -9,8 +9,8 @@ import (
 	"github.com/pkg/browser"
 	"golang.org/x/oauth2"
 
-	"github.com/mridul60214/skein/internal/accounts"
-	"github.com/mridul60214/skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/accounts"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 // Connector runs the whole desktop OAuth round trip in one call: open a

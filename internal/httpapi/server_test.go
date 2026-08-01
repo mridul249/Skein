@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mridul60214/skein/internal/config"
-	"github.com/mridul60214/skein/internal/httpapi"
-	"github.com/mridul60214/skein/internal/web"
+	"github.com/mridul249/Skein/internal/config"
+	"github.com/mridul249/Skein/internal/httpapi"
+	"github.com/mridul249/Skein/internal/web"
 )
 
 func testConfig(t *testing.T) *config.Config {

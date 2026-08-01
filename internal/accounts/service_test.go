@@ -16,9 +16,9 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
-	"github.com/mridul60214/skein/internal/skerr"
-	"github.com/mridul60214/skein/internal/storage"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
+	"github.com/mridul249/Skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 func newTestService(t *testing.T, withOAuth bool) (*Service, *MemoryStore, *skcrypto.Keyring) {

@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mridul60214/skein/internal/storage"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 // Scope is the only OAuth scope Skein ever asks for.

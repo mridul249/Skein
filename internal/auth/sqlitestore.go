@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/db/gensqlite"
-	"github.com/mridul60214/skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/db/gensqlite"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 // timeLayout is how every timestamp is stored. RFC 3339 with nanoseconds, in

@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/mridul60214/skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 const userinfoEndpoint = "https://openidconnect.googleapis.com/v1/userinfo"

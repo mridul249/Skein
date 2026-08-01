@@ -1,4 +1,4 @@
-module github.com/mridul60214/skein
+module github.com/mridul249/Skein
 
 go 1.25.7
 

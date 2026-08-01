@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/mridul60214/skein/internal/accounts"
-	"github.com/mridul60214/skein/internal/config"
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
-	"github.com/mridul60214/skein/internal/db"
-	"github.com/mridul60214/skein/internal/logging"
+	"github.com/mridul249/Skein/internal/accounts"
+	"github.com/mridul249/Skein/internal/config"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
+	"github.com/mridul249/Skein/internal/db"
+	"github.com/mridul249/Skein/internal/logging"
 )
 
 // runMigrateFolders moves shards that predate the app folder out of Drive root.

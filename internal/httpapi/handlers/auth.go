@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mridul60214/skein/internal/auth"
-	"github.com/mridul60214/skein/internal/httpapi/httpx"
-	"github.com/mridul60214/skein/internal/httpapi/middleware"
-	"github.com/mridul60214/skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/auth"
+	"github.com/mridul249/Skein/internal/httpapi/httpx"
+	"github.com/mridul249/Skein/internal/httpapi/middleware"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 // RefreshCookieName is the httpOnly cookie the refresh token lives in.

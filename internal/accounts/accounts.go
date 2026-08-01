@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/storage"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 // Status values for a connected account.

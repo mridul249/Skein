@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mridul60214/skein/internal/storage"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 // Rules.md §2.3 and the reference project's stored-XSS bug: a Content-Type

@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 const sqliteTimeLayout = "2006-01-02T15:04:05.000000000Z"
