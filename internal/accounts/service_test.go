@@ -374,6 +374,164 @@ func TestDisconnect(t *testing.T) {
 	}
 }
 
+// Known issue #19: Disconnect soft deletes so file_shards.connected_account_id
+// survives (ON DELETE SET NULL would otherwise orphan every shard on the drive,
+// unrecoverably). The row therefore outlives the disconnect, and these are the
+// consequences that must hold for that to be safe.
+func TestDisconnectDisablesTheRowWithoutDeletingIt(t *testing.T) {
+	svc, store, _ := newTestService(t, true)
+	userID := uuid.New()
+	ctx := context.Background()
+
+	acct, err := svc.linkGoogleAccount(ctx, userID,
+		&oauth2.Token{AccessToken: "tok", RefreshToken: "refresh"},
+		googleProfile{Sub: "sub", Email: "a@example.com"})
+	if err != nil {
+		t.Fatalf("link = %v", err)
+	}
+
+	if derr := svc.Disconnect(ctx, userID, acct.ID); derr != nil {
+		t.Fatalf("Disconnect() = %v", derr)
+	}
+
+	// The row — and with it the id every shard points at — must still exist.
+	stored, gerr := store.GetAccount(ctx, userID, acct.ID)
+	if gerr != nil {
+		t.Fatalf("account row is gone after Disconnect: %v; shard links would be orphaned", gerr)
+	}
+	if stored.Status != StatusDisabled {
+		t.Errorf("status = %q, want %q", stored.Status, StatusDisabled)
+	}
+	// A surviving row must not keep working credentials.
+	if len(stored.AccessTokenEnc) != 0 || len(stored.RefreshTokenEnc) != 0 {
+		t.Error("disconnected account still holds OAuth tokens")
+	}
+	// And must not resolve to a usable backend. Without this the row's
+	// survival would mean a disconnected drive still served files.
+	if _, berr := svc.Backend(ctx, userID, acct.ID); berr == nil {
+		t.Error("Backend() succeeded for a disconnected drive")
+	} else if !errors.Is(berr, skerr.ErrUnavailable) {
+		t.Errorf("Backend() = %v, want ErrUnavailable", berr)
+	}
+}
+
+// The payoff for the soft delete: reconnecting the same Google identity must
+// land on the SAME row id, because that id is what every shard still points at.
+// A new row would leave the files unreadable forever.
+func TestReconnectReusesTheSameAccountRow(t *testing.T) {
+	svc, store, _ := newTestService(t, true)
+	userID := uuid.New()
+	ctx := context.Background()
+	profile := googleProfile{Sub: "sub", Email: "a@example.com"}
+
+	acct, err := svc.linkGoogleAccount(ctx, userID, &oauth2.Token{AccessToken: "tok"}, profile)
+	if err != nil {
+		t.Fatalf("link = %v", err)
+	}
+	if derr := svc.Disconnect(ctx, userID, acct.ID); derr != nil {
+		t.Fatalf("Disconnect() = %v", derr)
+	}
+
+	again, rerr := svc.linkGoogleAccount(ctx, userID, &oauth2.Token{AccessToken: "tok2"}, profile)
+	if rerr != nil {
+		t.Fatalf("reconnect = %v", rerr)
+	}
+	if again.ID != acct.ID {
+		t.Errorf("reconnect produced a new row %s, want the original %s; every shard link would be dead",
+			again.ID, acct.ID)
+	}
+
+	// Reconnecting has to restore usability, not just the row.
+	stored, gerr := store.GetAccount(ctx, userID, acct.ID)
+	if gerr != nil {
+		t.Fatalf("GetAccount after reconnect = %v", gerr)
+	}
+	if stored.Status != StatusActive {
+		t.Errorf("status after reconnect = %q, want %q", stored.Status, StatusActive)
+	}
+	if _, berr := svc.Backend(ctx, userID, acct.ID); berr != nil {
+		t.Errorf("Backend() after reconnect = %v, want a usable backend", berr)
+	}
+}
+
+// The soft-deleted row must not read as a connected drive. List is what the
+// drives page renders, so a disabled row left in it would show a drive the
+// user disconnected as though it were still there.
+//
+// PoolFor is deliberately different — it keeps disabled rows so the quota UI
+// can explain a drive that is not contributing (see
+// TestDisabledAccountsAreExcludedFromThePool) — but their bytes must still be
+// out of the totals, which is what this also pins down.
+func TestDisconnectedDrivesDisappearFromListings(t *testing.T) {
+	svc, store, _ := newTestService(t, true)
+	userID := uuid.New()
+	ctx := context.Background()
+
+	keep, err := svc.linkGoogleAccount(ctx, userID,
+		&oauth2.Token{AccessToken: "tok"}, googleProfile{Sub: "keep", Email: "keep@example.com"})
+	if err != nil {
+		t.Fatalf("link keep = %v", err)
+	}
+	drop, err := svc.linkGoogleAccount(ctx, userID,
+		&oauth2.Token{AccessToken: "tok"}, googleProfile{Sub: "drop", Email: "drop@example.com"})
+	if err != nil {
+		t.Fatalf("link drop = %v", err)
+	}
+	for _, id := range []uuid.UUID{keep.ID, drop.ID} {
+		if uerr := store.UpsertCapacity(ctx, id, 100, 10); uerr != nil {
+			t.Fatalf("UpsertCapacity() = %v", uerr)
+		}
+	}
+
+	if derr := svc.Disconnect(ctx, userID, drop.ID); derr != nil {
+		t.Fatalf("Disconnect() = %v", derr)
+	}
+
+	listed, err := svc.List(ctx, userID)
+	if err != nil {
+		t.Fatalf("List() = %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != keep.ID {
+		t.Errorf("List() returned %d account(s), want only %s", len(listed), keep.ID)
+	}
+
+	// PoolFor still reports the row, but the disconnected drive's bytes must
+	// not count toward the pool.
+	pool, err := svc.PoolFor(ctx, userID)
+	if err != nil {
+		t.Fatalf("PoolFor() = %v", err)
+	}
+	if pool.TotalBytes != 100 {
+		t.Errorf("pool total = %d, want 100 (only the connected drive)", pool.TotalBytes)
+	}
+}
+
+// Resolver caches backends and consults that cache before re-reading the
+// account, so a disconnect that only changes the row would go unnoticed there.
+// Disconnect must actively invalidate it.
+func TestDisconnectInvalidatesCachedBackends(t *testing.T) {
+	svc, _, _ := newTestService(t, true)
+	userID := uuid.New()
+	ctx := context.Background()
+
+	acct, err := svc.linkGoogleAccount(ctx, userID,
+		&oauth2.Token{AccessToken: "tok"}, googleProfile{Sub: "sub", Email: "a@example.com"})
+	if err != nil {
+		t.Fatalf("link = %v", err)
+	}
+
+	var forgotten []uuid.UUID
+	svc.OnAccountInvalidated(func(id uuid.UUID) { forgotten = append(forgotten, id) })
+
+	if derr := svc.Disconnect(ctx, userID, acct.ID); derr != nil {
+		t.Fatalf("Disconnect() = %v", derr)
+	}
+	if len(forgotten) != 1 || forgotten[0] != acct.ID {
+		t.Errorf("invalidated = %v, want exactly [%s]; a stale cached backend would keep serving the drive",
+			forgotten, acct.ID)
+	}
+}
+
 func TestPoolAggregatesCapacity(t *testing.T) {
 	svc, store, _ := newTestService(t, true)
 	userID := uuid.New()

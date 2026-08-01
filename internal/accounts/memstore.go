@@ -200,6 +200,22 @@ func (m *MemoryStore) SetAppFolderID(_ context.Context, id uuid.UUID, folderID s
 	return folderID, nil
 }
 
+// ClearAccountTokens wipes stored credentials, leaving the row and its id in
+// place. See the Store interface, and Service.Disconnect for why the row has
+// to survive.
+func (m *MemoryStore) ClearAccountTokens(_ context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	acct, ok := m.accounts[id]
+	if !ok {
+		return skerr.ErrNotFound
+	}
+	acct.AccessTokenEnc = nil
+	acct.RefreshTokenEnc = nil
+	m.accounts[id] = acct
+	return nil
+}
+
 // DeleteAccount unlinks an account the user owns.
 func (m *MemoryStore) DeleteAccount(_ context.Context, userID, id uuid.UUID) (int64, error) {
 	m.mu.Lock()

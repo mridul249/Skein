@@ -132,6 +132,10 @@ type Store interface {
 	ListAccountsForSync(ctx context.Context) ([]StoredAccount, error)
 	NextOrdinal(ctx context.Context, userID uuid.UUID) (int32, error)
 	SetAccountStatus(ctx context.Context, id uuid.UUID, status, lastErr string) error
+	// ClearAccountTokens wipes the stored OAuth credentials, leaving the row
+	// and its id intact. Disconnect uses it: the account must stop being
+	// usable without the row disappearing and nulling every shard link.
+	ClearAccountTokens(ctx context.Context, id uuid.UUID) error
 
 	// GetAppFolderID returns "" when no folder has been established.
 	GetAppFolderID(ctx context.Context, id uuid.UUID) (string, error)

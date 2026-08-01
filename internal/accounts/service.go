@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,6 +53,11 @@ type Service struct {
 	// single provider call. Ten uploads starting at once must not become ten
 	// About requests.
 	flight singleflight.Group
+
+	// mu guards invalidators, which are registered during wiring but fired
+	// from request goroutines.
+	mu           sync.RWMutex
+	invalidators []func(accountID uuid.UUID)
 
 	now func() time.Time
 }
@@ -404,6 +410,15 @@ func (s *Service) Backend(ctx context.Context, userID, accountID uuid.UUID) (sto
 }
 
 func (s *Service) backendFor(ctx context.Context, acct StoredAccount) (storage.Backend, error) {
+	// A disconnected account keeps its row so shard links survive (see
+	// Disconnect), which means "the row exists" no longer implies "the drive
+	// is usable". Its credentials are wiped, so without this check the
+	// failure would surface as an opaque token error from the provider
+	// instead of a message the user can act on.
+	if acct.Status == StatusDisabled {
+		return nil, skerr.Public(skerr.ErrUnavailable,
+			"That drive is disconnected. Reconnect it in Settings to reach these files.")
+	}
 	if acct.Kind != storage.KindGoogleDrive {
 		return nil, fmt.Errorf("accounts: no backend for kind %q", acct.Kind)
 	}
@@ -568,7 +583,12 @@ func (s *Service) recordSyncFailure(ctx context.Context, acct StoredAccount, cau
 	return fmt.Errorf("sync account %s: %w", acct.ID, cause)
 }
 
-// List returns the caller's accounts.
+// List returns the caller's connected accounts.
+//
+// Disabled rows are filtered out. Disconnect keeps them so shard links survive
+// (see Disconnect), but to the user that drive is gone — listing it would show
+// a disconnected drive as connected, and the row is an implementation detail
+// they never asked to see.
 func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]Account, error) {
 	stored, err := s.store.ListAccounts(ctx, userID)
 	if err != nil {
@@ -576,12 +596,20 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]Account, error)
 	}
 	out := make([]Account, 0, len(stored))
 	for _, a := range stored {
+		if a.Status == StatusDisabled {
+			continue
+		}
 		out = append(out, a.Account)
 	}
 	return out, nil
 }
 
 // PoolFor returns per-account and aggregate capacity for the caller.
+//
+// Disabled accounts stay in Accounts but contribute nothing to the totals, so
+// the UI can show a drive and explain why it is not counting (QuotaBar.tsx
+// filters them out of the bar itself). Unlike List, this deliberately does not
+// hide them — asserted by TestDisabledAccountsAreExcludedFromThePool.
 func (s *Service) PoolFor(ctx context.Context, userID uuid.UUID) (Pool, error) {
 	caps, err := s.store.ListCapacity(ctx, userID)
 	if err != nil {
@@ -600,21 +628,70 @@ func (s *Service) PoolFor(ctx context.Context, userID uuid.UUID) (Pool, error) {
 	return pool, nil
 }
 
-// Disconnect removes an account.
+// Disconnect unlinks an account, marking it disabled rather than deleting the
+// row (known issue #19).
 //
 // The objects it holds are deliberately left alone: Skein has no way to know
 // whether the user wants the provider-side data gone, and deleting somebody's
 // files as a side effect of unlinking is not a decision this code gets to make.
 // Files that depended on the account become unreadable and report so.
+//
+// The row itself must survive for the same reason. file_shards.
+// connected_account_id is ON DELETE SET NULL (00004_files.sql:64), so deleting
+// it nulled the link on every shard the drive held — and because nothing else
+// records which drive a shard lived on, that link was unrecoverable. Re-adding
+// the same Google account inserted a fresh row with a new uuid and re-linked
+// nothing, leaving those files permanently unreadable even though every byte
+// was still sitting in the user's Drive. Keeping the id stable is what makes
+// reconnecting restore access: linkGoogleAccount finds the existing row by
+// provider account id and updates it in place, resetting status to 'active'.
+//
+// Credentials are cleared here. A disabled account must not keep usable
+// tokens: the user asked for it to stop having access, and reconnecting
+// supplies new ones anyway.
 func (s *Service) Disconnect(ctx context.Context, userID, accountID uuid.UUID) error {
-	n, err := s.store.DeleteAccount(ctx, userID, accountID)
+	// Scoped by userID so one user cannot disable another's account — the
+	// delete this replaced got that from its own WHERE clause.
+	acct, err := s.store.GetAccount(ctx, userID, accountID)
 	if err != nil {
-		return fmt.Errorf("delete account: %w", err)
+		return err
 	}
-	if n == 0 {
+	// Disconnecting an already-disconnected drive is ErrNotFound, as it was
+	// when the row was deleted outright. The row surviving is an
+	// implementation detail of keeping shard links intact; it must not turn
+	// a repeat disconnect into a silent success.
+	if acct.Status == StatusDisabled {
 		return skerr.ErrNotFound
 	}
+	if err := s.store.ClearAccountTokens(ctx, accountID); err != nil {
+		return fmt.Errorf("clear account tokens: %w", err)
+	}
+	if err := s.store.SetAccountStatus(ctx, accountID, StatusDisabled, ""); err != nil {
+		return fmt.Errorf("disable account: %w", err)
+	}
+	s.invalidate(accountID)
 	return nil
+}
+
+// OnAccountInvalidated registers a callback fired when an account's
+// credentials stop being valid. Resolver uses it to drop its cached backend:
+// that cache is checked before the account is ever re-read, so without this a
+// disconnected drive keeps serving from a backend built on the old grant for
+// the life of the process.
+func (s *Service) OnAccountInvalidated(fn func(accountID uuid.UUID)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.invalidators = append(s.invalidators, fn)
+}
+
+func (s *Service) invalidate(accountID uuid.UUID) {
+	s.mu.RLock()
+	fns := make([]func(uuid.UUID), len(s.invalidators))
+	copy(fns, s.invalidators)
+	s.mu.RUnlock()
+	for _, fn := range fns {
+		fn(accountID)
+	}
 }
 
 // PurgeExpiredOAuthStates removes abandoned authorisations.

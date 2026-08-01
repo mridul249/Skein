@@ -21,17 +21,20 @@ import (
 	"github.com/mridul60214/skein/internal/storage/local"
 )
 
-// Known issue #19. Disconnecting a drive deletes its connected_accounts row;
-// file_shards.connected_account_id is ON DELETE SET NULL (00004_files.sql:64),
-// so every shard on that drive loses its link. Reconnecting inserts a row with a
-// new uuid and re-links nothing, so the files stay unreadable permanently.
+// Issue #19, now fixed and guarded here. Disconnecting a drive used to delete
+// its connected_accounts row; file_shards.connected_account_id is ON DELETE SET
+// NULL (00004_files.sql:64), so every shard on that drive lost its link.
+// Reconnecting inserted a row with a new uuid and re-linked nothing, leaving the
+// files unreadable permanently.
 //
-// Nothing is deleted at the provider — verified separately — so this is
-// inaccessibility, not loss, and every re-link key survives on the shard row.
+// Nothing is deleted at the provider — verified separately — so this was
+// inaccessibility, not loss, and every re-link key survived on the shard row.
+// That is what made a fix possible after the fact.
 //
-// These tests are expected to FAIL until the fix lands. The fix is a soft
-// delete: status 'disabled' instead of DELETE, keeping the row id stable so the
-// shard link is never nulled.
+// The fix is a soft delete: Service.Disconnect sets status 'disabled' and
+// clears the credentials instead of deleting, so the row id stays stable and
+// the shard link is never nulled. These tests assert the whole round trip —
+// disconnect, stay unreadable while disconnected, reconnect, read again.
 
 // fkFilesStore models the one thing an in-memory double cannot otherwise show:
 // ON DELETE SET NULL. The nulling is a database action, so a memstore test would
@@ -62,10 +65,16 @@ func (s fkFilesStore) applyAccountDeletion(t *testing.T, gone uuid.UUID) int {
 }
 
 // acctResolver resolves a shard's backend the way production does, and no
-// better. Resolver.For (resolver.go:40-69) calls Service.Backend, which is
-// GetAccount followed by backendFor (service.go:282-288) — there is NO status
-// predicate on that path. Modelling a status check here would manufacture a pass
-// for behaviour the code does not have.
+// better. Resolver.For (resolver.go:40-75) calls Service.Backend, which is
+// GetAccount followed by backendFor — so this mirrors both steps, including
+// backendFor's disabled-status check.
+//
+// That status check is load-bearing rather than decorative. Disconnect no
+// longer deletes the row (known issue #19), so "the account row exists" stopped
+// implying "the drive is reachable", and refusing a disabled account is the
+// only thing left that makes a disconnected drive fail closed. Dropping this
+// branch here would let the test pass while production served files from a
+// drive the user had disconnected.
 type acctResolver struct {
 	store    *accounts.MemoryStore
 	backends map[uuid.UUID]*local.Backend
@@ -79,8 +88,15 @@ func (r acctResolver) For(ctx context.Context, userID uuid.UUID, accountID *uuid
 		return nil, skerr.Public(skerr.ErrUnavailable,
 			"No drive is connected. Connect one in Settings.")
 	}
-	if _, err := r.store.GetAccount(ctx, userID, *accountID); err != nil {
+	acct, err := r.store.GetAccount(ctx, userID, *accountID)
+	if err != nil {
 		return nil, err
+	}
+	// service.go backendFor: a disconnected drive keeps its row but must not
+	// resolve to a usable backend.
+	if acct.Status == accounts.StatusDisabled {
+		return nil, skerr.Public(skerr.ErrUnavailable,
+			"That drive is disconnected. Reconnect it in Settings to reach these files.")
 	}
 	b, ok := r.backends[*accountID]
 	if !ok {

@@ -12,6 +12,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearAccountTokens = `-- name: ClearAccountTokens :exec
+UPDATE connected_accounts
+   SET access_token_enc  = ''::bytea,
+       refresh_token_enc = NULL,
+       token_expires_at  = NULL,
+       updated_at        = now()
+ WHERE id = $1
+`
+
+// ClearAccountTokens wipes stored credentials without touching the row, so a
+// disconnected account stops being usable while its id — and therefore every
+// file_shards.connected_account_id pointing at it — survives. access_token_enc
+// is NOT NULL, hence the empty blob rather than NULL.
+func (q *Queries) ClearAccountTokens(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearAccountTokens, id)
+	return err
+}
+
 const consumeOAuthState = `-- name: ConsumeOAuthState :one
 DELETE FROM oauth_states
  WHERE state_hash = $1
@@ -127,6 +145,11 @@ type DeleteConnectedAccountParams struct {
 	UserID uuid.UUID
 }
 
+// DeleteConnectedAccount is deliberately NOT used to disconnect a drive: the
+// ON DELETE SET NULL on file_shards.connected_account_id would orphan every
+// shard the drive held, unrecoverably (known issue #19). Disconnect soft
+// deletes via SetAccountStatus + ClearAccountTokens instead. This remains for
+// true row removal, e.g. hard-deleting a user's data.
 func (q *Queries) DeleteConnectedAccount(ctx context.Context, arg DeleteConnectedAccountParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteConnectedAccount, arg.ID, arg.UserID)
 	if err != nil {
