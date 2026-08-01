@@ -326,3 +326,25 @@ func (m *MemoryStore) PendingStateCount() int {
 
 // Compile-time check that the double still satisfies the interface.
 var _ Store = (*MemoryStore)(nil)
+
+// HasStateHash reports whether a state is stored under exactly these bytes.
+// Test support; mirrors SQLiteStore.HasStateHash so both stores can be driven
+// by the same assertions.
+func (m *MemoryStore) HasStateHash(hash []byte) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.states[string(hash)]
+	return ok
+}
+
+// PendingVerifiers returns the PKCE verifier of every outstanding state. Test
+// support.
+func (m *MemoryStore) PendingVerifiers() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.states))
+	for _, st := range m.states {
+		out = append(out, st.pending.PKCEVerifier)
+	}
+	return out
+}

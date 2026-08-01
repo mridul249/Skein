@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net"
@@ -39,6 +40,8 @@ type options struct {
 	// internally, which do not exist yet at the point a caller supplies
 	// options, so Build calls this once they do.
 	desktopConnect func(*accounts.Service, *slog.Logger) handlers.DesktopConnector
+	useSQLite      bool
+	sqlitePath     string
 }
 
 // WithDesktopConnect makes the accounts handler run the desktop OAuth flow
@@ -49,6 +52,15 @@ func WithDesktopConnect(newConnector func(*accounts.Service, *slog.Logger) handl
 	return func(o *options) { o.desktopConnect = newConnector }
 }
 
+// WithSQLiteDatabase makes Build use the local SQLite desktop database instead
+// of Postgres. Passing an empty path selects db.DesktopSQLitePath().
+func WithSQLiteDatabase(path string) Option {
+	return func(o *options) {
+		o.useSQLite = true
+		o.sqlitePath = path
+	}
+}
+
 // App is a fully wired Skein server bound to a listener. The caller owns
 // process lifecycle — signals for the headless build, window-close for the
 // desktop build — and drives it through Serve and Shutdown.
@@ -56,7 +68,7 @@ type App struct {
 	Config *config.Config
 	Logger *slog.Logger
 
-	pool     *db.Pool
+	closeDB  func()
 	listener net.Listener
 	httpSrv  *http.Server
 	workers  *worker.Runner
@@ -73,7 +85,7 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 		opt(&o)
 	}
 
-	cfg, err := config.Load()
+	cfg, err := loadConfig(o)
 	if err != nil {
 		return nil, fmt.Errorf("configuration: %w", err)
 	}
@@ -86,30 +98,25 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 		lg.Warn("encryption at rest is DISABLED; file content will be stored in plaintext")
 	}
 
-	if err := db.Migrate(ctx, cfg.DatabaseURL); err != nil {
-		return nil, err
-	}
-	lg.Info("migrations applied")
-
-	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	wired, err := selectPersistence(ctx, cfg, o, lg)
 	if err != nil {
 		return nil, err
 	}
 
 	masterKey, err := cfg.MasterKey()
 	if err != nil {
-		pool.Close()
+		wired.close()
 		return nil, err
 	}
 	keyring, err := skcrypto.NewKeyring(masterKey)
 	if err != nil {
-		pool.Close()
+		wired.close()
 		return nil, err
 	}
 	lg.Info("keyring ready", slog.String("key_id", keyring.KeyIDString()))
 
 	authSvc := auth.NewService(
-		auth.NewPGStore(pool),
+		wired.authStore,
 		auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTokenTTL),
 		cfg.RefreshTokenTTL,
 		lg.With(slog.String("component", "auth")),
@@ -125,7 +132,7 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	}
 
 	accountsSvc := accounts.NewService(
-		accounts.NewPGStore(pool),
+		wired.accountsStore,
 		keyring,
 		oauthCfg,
 		lg.With(slog.String("component", "accounts")),
@@ -140,7 +147,7 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	// Architecture.md §5, never through a Go map. The reserver also owns the
 	// janitor that reclaims what a crashed upload left behind.
 	reserver := router.NewReserver(
-		router.NewPGStore(pool),
+		wired.routerStore,
 		lg.With(slog.String("component", "router")),
 	)
 
@@ -163,7 +170,7 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 		slog.Int64("frames_per_shard", cfg.ShardSizeBytes/skcrypto.FrameSize))
 
 	filesSvc := files.NewService(
-		files.NewPGStore(pool),
+		wired.filesStore,
 		files.NewStripingPlanner(planner, reserver),
 		resolver,
 		keyring,
@@ -182,7 +189,7 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	srv, err := httpapi.New(httpapi.Deps{
 		Config:         cfg,
 		Logger:         lg,
-		Health:         pool,
+		Health:         wired.health,
 		Auth:           authSvc,
 		Accounts:       accountsSvc,
 		Files:          filesSvc,
@@ -190,7 +197,7 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 		DesktopConnect: desktopConnect,
 	})
 	if err != nil {
-		pool.Close()
+		wired.close()
 		return nil, fmt.Errorf("build server: %w", err)
 	}
 
@@ -246,7 +253,7 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	return &App{
 		Config:  cfg,
 		Logger:  lg,
-		pool:    pool,
+		closeDB: wired.close,
 		httpSrv: httpSrv,
 		workers: workers,
 	}, nil
@@ -303,10 +310,91 @@ func (a *App) Shutdown(ctx context.Context) error {
 	// context Serve/Start ran under before calling Shutdown.
 	a.workers.Wait()
 
-	a.pool.Close()
+	a.closeDB()
 
 	if err != nil {
 		return fmt.Errorf("shutdown: %w", err)
+	}
+	return nil
+}
+
+type persistence struct {
+	authStore     auth.Store
+	accountsStore accounts.Store
+	routerStore   router.Store
+	filesStore    files.Store
+	health        httpapi.Health
+	close         func()
+}
+
+func loadConfig(o options) (*config.Config, error) {
+	if o.useSQLite {
+		return config.LoadDesktop()
+	}
+	return config.Load()
+}
+
+func openSQLitePersistence(ctx context.Context, sqlitePath string, lg *slog.Logger) (persistence, error) {
+	path := sqlitePath
+	if path == "" {
+		var err error
+		path, err = db.DesktopSQLitePath()
+		if err != nil {
+			return persistence{}, err
+		}
+	}
+	sqlDB, err := db.OpenSQLite(ctx, path)
+	if err != nil {
+		return persistence{}, err
+	}
+	lg.Info("sqlite migrations applied", slog.String("path", path))
+	return persistence{
+		authStore:     auth.NewSQLiteStore(sqlDB),
+		accountsStore: accounts.NewSQLiteStore(sqlDB),
+		routerStore:   router.NewSQLiteStore(sqlDB),
+		filesStore:    files.NewSQLiteStore(sqlDB),
+		health:        sqliteHealth{db: sqlDB},
+		close:         func() { _ = sqlDB.Close() },
+	}, nil
+}
+
+func openPostgresPersistence(ctx context.Context, cfg *config.Config, lg *slog.Logger) (persistence, error) {
+	if cfg == nil {
+		return persistence{}, fmt.Errorf("internal error: nil config")
+	}
+	if err := db.Migrate(ctx, cfg.DatabaseURL); err != nil {
+		return persistence{}, err
+	}
+	lg.Info("migrations applied")
+
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return persistence{}, err
+	}
+	return persistence{
+		authStore:     auth.NewPGStore(pool),
+		accountsStore: accounts.NewPGStore(pool),
+		routerStore:   router.NewPGStore(pool),
+		filesStore:    files.NewPGStore(pool),
+		health:        pool,
+		close:         pool.Close,
+	}, nil
+}
+
+func selectPersistence(ctx context.Context, cfg *config.Config, o options, lg *slog.Logger) (persistence, error) {
+	if o.useSQLite {
+		return openSQLitePersistence(ctx, o.sqlitePath, lg)
+	}
+	return openPostgresPersistence(ctx, cfg, lg)
+}
+
+type sqliteHealth struct{ db *sql.DB }
+
+func (h sqliteHealth) Ping(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := h.db.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping sqlite: %w", err)
 	}
 	return nil
 }

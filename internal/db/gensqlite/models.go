@@ -4,6 +4,34 @@
 
 package gensqlite
 
+type ConnectedAccount struct {
+	ID                string
+	UserID            string
+	Kind              string
+	ProviderAccountID string
+	Email             string
+	DisplayName       string
+	AccessTokenEnc    []byte
+	RefreshTokenEnc   []byte
+	TokenExpiresAt    *string
+	Status            string
+	LastError         string
+	Ordinal           int64
+	AppFolderID       *string
+	CreatedAt         string
+	UpdatedAt         string
+}
+
+type OauthState struct {
+	StateHash    []byte
+	UserID       string
+	Kind         string
+	RedirectTo   string
+	PkceVerifier *string
+	CreatedAt    string
+	ExpiresAt    string
+}
+
 type SecurityEvent struct {
 	ID        int64
 	UserID    *string
@@ -26,6 +54,15 @@ type Session struct {
 	ExpiresAt   string
 	UsedAt      *string
 	RevokedAt   *string
+}
+
+type StorageAccount struct {
+	ConnectedAccountID string
+	TotalBytes         int64
+	UsedBytes          int64
+	ReservedBytes      int64
+	LastSyncedAt       *string
+	LastError          string
 }
 
 type TokenFamily struct {
