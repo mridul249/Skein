@@ -75,7 +75,7 @@ is also an adversary.
   memory, never `localStorage` or `sessionStorage`. The refresh token lives
   in an `httpOnly; SameSite=Strict` cookie, `Secure` whenever
   `SKEIN_ENV=production` or `SKEIN_PUBLIC_URL` is https (see
-  [CONFIGURATION.md](CONFIGURATION.md#public-url-and-cookies) for exactly
+  [CONFIGURATION.md](../docs/CONFIGURATION.md#public-url-and-cookies) for exactly
   when).
 
 ## OAuth account linking
