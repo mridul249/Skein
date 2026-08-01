@@ -51,16 +51,22 @@ This is a four-step procedure, not one pipe.
 **Verification status, so you know what this page is worth.** `make backup`
 is covered by tests (`internal/db/backup_test.go`): a failing dump exits
 non-zero and writes nothing, and a successful dump contains the `citext`
-extension and `goose_db_version` rows this procedure depends on. The dump
-was also checked row-for-row against a live database - `users`,
-`connected_accounts`, `folders`, `files`, `file_shards` all matched exactly.
+extension and `goose_db_version` rows this procedure depends on.
 
-The restore steps below have **not** been re-run end to end since step 1 was
-corrected; the `createdb` line as previously written did not work. Treat the
-restore path as documented-and-reasoned rather than freshly tested, and
-rehearse it against a throwaway database before you need it in anger. That
-rehearsal is the only way to find out that your backups are restorable
-rather than merely present.
+The restore was rehearsed end to end on 2026-08-01 against a throwaway
+database, using the exact steps below. Every column of every row in `users`,
+`connected_accounts`, `folders`, `files` and `file_shards` hashed identically
+to the source, and `goose` reported `no migrations to run. current version:
+8` - so the dump lands at a known schema version rather than re-running
+migrations. `scripts/restore-rehearsal.sh` re-runs that check on demand:
+
+```bash
+scripts/restore-rehearsal.sh                 # newest dump in backups/
+scripts/restore-rehearsal.sh backups/foo.gz  # a specific one
+```
+
+Rehearse it yourself after any schema change. A backup is only a backup if it
+restores, and the only way to know is to try.
 
 ### 1. Prerequisites on the target cluster
 
