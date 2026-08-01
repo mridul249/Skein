@@ -1,3 +1,5 @@
+<samp>
+
 # Backup and disaster recovery
 
 **Two things have to survive, not one.** `SKEIN_MASTER_KEY` decrypts shard
@@ -145,3 +147,5 @@ audits the two against each other (`doctor`, Phase 7 Task 6, not built).
 - **A lost master key with no backup.** There is no recovery path. This is
   by design - a recoverable master key is a master key an attacker with
   database access can also recover.
+
+</samp>

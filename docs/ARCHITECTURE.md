@@ -1,3 +1,5 @@
+<samp>
+
 # Architecture
 
 A structural reference: what exists, where, and how the pieces fit. For the
@@ -295,3 +297,5 @@ threat model this closes and the one it deliberately leaves open.
 - Quota sync is never on the upload hot path; a background ticker refreshes
   the cached figure, and the atomic reservation (above) is what actually
   keeps concurrent uploads correct regardless of how stale that cache is.
+
+</samp>

@@ -1,3 +1,5 @@
+<samp>
+
 # Security
 
 ## Threat model
@@ -215,3 +217,5 @@ contact process yet. If you find a real vulnerability, open an issue
 describing the class of problem without publishing exploit details in the
 public tracker, or reach the maintainer through whatever contact method is
 listed in the repository at the time.
+
+</samp>

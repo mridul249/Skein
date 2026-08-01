@@ -1,3 +1,5 @@
+<samp>
+
 # Configuration
 
 Every setting is an environment variable, loaded once at boot
@@ -109,3 +111,5 @@ deliberately (§6) and is not subject to this check because it never sets
 
 Not read from `.env.example` by default; export it in your shell or launch
 `skein-desktop` with it set if you want your own client.
+
+</samp>
