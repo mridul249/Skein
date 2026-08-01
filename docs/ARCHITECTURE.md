@@ -74,8 +74,10 @@ rather than lingering as an orphan after its window is already gone.
 
 ### Desktop OAuth
 
-RFC 8252: a Desktop app OAuth client (no client secret — the client ID is
-not a secret for this client type), PKCE mandatory
+RFC 8252: a Desktop app OAuth client (ID and secret both compiled in and
+both non-confidential for this client type — Google requires the secret at
+exchange anyway; see [SECURITY.md](SECURITY.md#pkce-desktop-oauth)), PKCE
+mandatory
 (`oauth2.S256ChallengeOption`/`VerifierOption`), and the authorization
 request opens the system's default browser rather than the embedded
 webview. `internal/desktopoauth` opens an ephemeral loopback listener,

@@ -94,11 +94,16 @@ because it structurally cannot see them.
 
 ### PKCE (desktop OAuth)
 
-The desktop build uses a Desktop app (RFC 8252) OAuth client — **no client
-secret is compiled into the binary, because this client type does not have
-one.** A client secret's confidentiality assumption doesn't hold for
-something distributed to every user's machine; RFC 8252 treats the client
-ID as non-secret and relies on PKCE instead:
+The desktop build uses a Desktop app (RFC 8252) OAuth client. Google issues
+a client secret for this client type and **requires it at the token
+exchange**, so one is compiled into the binary alongside the client ID —
+`SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET` overrides it.
+
+**That secret is not confidential, and nothing here depends on it being
+unknown.** It ships in a binary any user can unpack, so its confidentiality
+assumption cannot hold; RFC 8252 §8.5 says as much for installed apps. Treat
+it as a public identifier that Google's endpoint happens to demand. Security
+for this flow rests entirely on PKCE and the loopback redirect:
 
 - A random verifier is generated fresh for every connect **attempt**, never
   reused across attempts — even a retried connection gets a new one.
@@ -112,6 +117,15 @@ ID as non-secret and relies on PKCE instead:
   closed — releasing the port — on every exit path: success, provider
   error, timeout, or the caller giving up. RFC 8252 explicitly permits
   arbitrary loopback ports for this client type.
+
+The accepted consequence: anyone can extract the shipped ID and secret and
+use them against Google's API on Skein's quota. That is the trade for the
+app working without every user registering their own Google client, and it
+is the reason `SKEIN_GOOGLE_DESKTOP_CLIENT_ID` / `_SECRET` exist. Extracting
+them does **not** grant access to any user's Drive or any Skein data — a
+token still requires that user to complete a consent screen in their own
+browser, and PKCE binds the resulting code to the one client instance that
+started the request.
 
 ### Why the system browser
 
