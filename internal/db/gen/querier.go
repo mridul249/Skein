@@ -12,6 +12,11 @@ import (
 
 type Querier interface {
 	AbandonExpiredUploads(ctx context.Context) ([]AbandonExpiredUploadsRow, error)
+	// ClearAccountTokens wipes stored credentials without touching the row, so a
+	// disconnected account stops being usable while its id — and therefore every
+	// file_shards.connected_account_id pointing at it — survives. access_token_enc
+	// is NOT NULL, hence the empty blob rather than NULL.
+	ClearAccountTokens(ctx context.Context, id uuid.UUID) error
 	// ConsumeOAuthState is single use by construction: the row is deleted as it is
 	// read, so a replayed callback finds nothing. The expiry predicate is in SQL so
 	// a stale state cannot be accepted by a clock-skewed application check.
@@ -32,6 +37,11 @@ type Querier interface {
 	CreateTokenFamily(ctx context.Context, arg CreateTokenFamilyParams) error
 	CreateUpload(ctx context.Context, arg CreateUploadParams) (Upload, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// DeleteConnectedAccount is deliberately NOT used to disconnect a drive: the
+	// ON DELETE SET NULL on file_shards.connected_account_id would orphan every
+	// shard the drive held, unrecoverably (known issue #19). Disconnect soft
+	// deletes via SetAccountStatus + ClearAccountTokens instead. This remains for
+	// true row removal, e.g. hard-deleting a user's data.
 	DeleteConnectedAccount(ctx context.Context, arg DeleteConnectedAccountParams) (int64, error)
 	DeleteExpiredOAuthStates(ctx context.Context) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)

@@ -70,6 +70,23 @@ UPDATE connected_accounts
        updated_at = now()
  WHERE id = $1;
 
+-- ClearAccountTokens wipes stored credentials without touching the row, so a
+-- disconnected account stops being usable while its id — and therefore every
+-- file_shards.connected_account_id pointing at it — survives. access_token_enc
+-- is NOT NULL, hence the empty blob rather than NULL.
+-- name: ClearAccountTokens :exec
+UPDATE connected_accounts
+   SET access_token_enc  = ''::bytea,
+       refresh_token_enc = NULL,
+       token_expires_at  = NULL,
+       updated_at        = now()
+ WHERE id = $1;
+
+-- DeleteConnectedAccount is deliberately NOT used to disconnect a drive: the
+-- ON DELETE SET NULL on file_shards.connected_account_id would orphan every
+-- shard the drive held, unrecoverably (known issue #19). Disconnect soft
+-- deletes via SetAccountStatus + ClearAccountTokens instead. This remains for
+-- true row removal, e.g. hard-deleting a user's data.
 -- name: DeleteConnectedAccount :execrows
 DELETE FROM connected_accounts WHERE id = $1 AND user_id = $2;
 

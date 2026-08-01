@@ -79,14 +79,14 @@ export function Drives() {
       {/*
         Design.md §7: name the consequence, not "Are you sure?".
 
-        The wording below is load-bearing and is reproduced verbatim from the
-        `window.confirm` this replaced. It used to end "until you reconnect",
-        which is false: disconnect deletes the account row, so the shards' link
-        to it is nulled and reconnecting mints a new row that re-links nothing.
-        Known issue #19. The mechanism fix is scheduled for Session 3 (soft
-        delete, keeping the row id stable); until it lands the warning has to
-        say what actually happens. Restore the reassuring wording when the fix
-        makes it true — and not before.
+        The wording below is load-bearing. It spent a while saying reconnecting
+        did NOT restore access, which was true then: disconnect deleted the
+        account row, ON DELETE SET NULL nulled every shard's link to it, and
+        reconnecting minted a new row that re-linked nothing (known issue #19).
+        That fix has landed — Disconnect now soft deletes, keeping the row id
+        stable — so "until you reconnect" is accurate again and the warning
+        says so. If the mechanism ever changes back, this text has to change
+        with it.
       */}
       <Modal
         open={confirming !== null}
@@ -99,10 +99,9 @@ export function Drives() {
           setConfirming(null);
         }}
       >
-        Files with a shard on it become unreadable, and reconnecting does NOT
-        currently restore access — the link between those files and this drive is
-        lost. Nothing is deleted from Google; the data is still there, but Skein
-        will not be able to find it.
+        Files with a shard on it become unreadable until you reconnect this same
+        Google account. Nothing is deleted from Google, and the link between those
+        files and this drive is kept.
       </Modal>
 
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">

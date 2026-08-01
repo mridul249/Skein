@@ -54,14 +54,13 @@ make test-short    # skips the slow memory-ceiling / integration tests
 make bench         # the streaming memory benchmark
 ```
 
-`internal/files` is expected to fail one test -
-`TestDisconnectThenReconnectRestoresAccess` - **by design**. It is a
-committed reproduction of a known, tracked issue (#19 in the project's
-session log: disconnecting a drive orphans shards permanently rather than
-just making them temporarily unreachable). Every other package should be
-green. If a change makes a *different* test fail, that's a real
-regression; if this specific one starts passing, the underlying issue was
-fixed and the test should be updated to assert the fix, not left red.
+Every package should be green. `TestDisconnectThenReconnectRestoresAccess`
+in `internal/files` used to be an expected failure — a committed
+reproduction of issue #19, where disconnecting a drive orphaned its shards
+permanently instead of making them temporarily unreachable. That issue is
+fixed: `Disconnect` soft deletes (status `disabled`, credentials cleared)
+so the account row id survives and reconnecting the same Google identity
+re-links every shard. The test now asserts the fix.
 
 ### Frontend
 

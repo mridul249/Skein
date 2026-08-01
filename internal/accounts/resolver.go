@@ -33,7 +33,13 @@ type Resolver struct {
 // NewResolver builds a backend resolver. fallback may be nil, in which case a
 // shard with no account is an error rather than a silent local write.
 func NewResolver(svc *Service, fallback storage.Backend) *Resolver {
-	return &Resolver{svc: svc, fallback: fallback, cache: map[uuid.UUID]storage.Backend{}}
+	r := &Resolver{svc: svc, fallback: fallback, cache: map[uuid.UUID]storage.Backend{}}
+	// The cache is consulted before the account row is re-read, so a
+	// disconnect that only changed the row would otherwise never be noticed
+	// here — the drive would keep serving from a backend built on the old
+	// grant until the process restarted.
+	svc.OnAccountInvalidated(r.Forget)
+	return r
 }
 
 // For returns the backend holding a shard.

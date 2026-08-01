@@ -154,7 +154,18 @@ func (s *PGStore) SetAppFolderID(ctx context.Context, id uuid.UUID, folderID str
 	return *got, nil
 }
 
-// DeleteAccount unlinks an account the user owns.
+// ClearAccountTokens wipes stored credentials, leaving the row and its id in
+// place. See the Store interface, and Service.Disconnect for why the row has
+// to survive.
+func (s *PGStore) ClearAccountTokens(ctx context.Context, id uuid.UUID) error {
+	if err := s.q.ClearAccountTokens(ctx, id); err != nil {
+		return fmt.Errorf("clear account tokens: %w", err)
+	}
+	return nil
+}
+
+// DeleteAccount unlinks an account the user owns. Not the disconnect path —
+// see the note on DeleteConnectedAccount in queries/accounts.sql.
 func (s *PGStore) DeleteAccount(ctx context.Context, userID, id uuid.UUID) (int64, error) {
 	n, err := s.q.DeleteConnectedAccount(ctx, gen.DeleteConnectedAccountParams{ID: id, UserID: userID})
 	if err != nil {
