@@ -33,7 +33,7 @@ func TestBuildWithSQLiteDoesNotRequirePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite for inspection: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck // Test cleanup.
 
 	for _, table := range []string{
 		"users",

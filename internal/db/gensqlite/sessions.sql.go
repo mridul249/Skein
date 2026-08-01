@@ -115,7 +115,7 @@ func (q *Queries) EventsOfKind(ctx context.Context, kind string) ([]SecurityEven
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []SecurityEvent{}
 	for rows.Next() {
 		var i SecurityEvent
@@ -431,7 +431,7 @@ func (q *Queries) SessionsInFamily(ctx context.Context, familyID string) ([]Sess
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []Session{}
 	for rows.Next() {
 		var i Session

@@ -38,7 +38,7 @@ SELECT ca.id, ca.ordinal, ca.email,
 	if err != nil {
 		return nil, fmt.Errorf("list planning candidates: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var out []Candidate
 	for rows.Next() {
@@ -114,7 +114,7 @@ RETURNING storage_account_id, bytes`, uploadID.String())
 	if err != nil {
 		return 0, fmt.Errorf("delete reservations: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var n int64
 	for rows.Next() {
@@ -155,7 +155,7 @@ RETURNING storage_account_id, bytes`, s.fmt(s.now()))
 	if err != nil {
 		return 0, 0, fmt.Errorf("select expired reservations: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var count int
 	var total int64

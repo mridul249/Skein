@@ -193,7 +193,7 @@ func (q *Queries) FolderDescendants(ctx context.Context, arg FolderDescendantsPa
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []uuid.UUID{}
 	for rows.Next() {
 		var id uuid.UUID
@@ -299,7 +299,7 @@ func (q *Queries) ListChildFolders(ctx context.Context, arg ListChildFoldersPara
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []Folder{}
 	for rows.Next() {
 		var i Folder
@@ -331,7 +331,7 @@ func (q *Queries) ListFileShards(ctx context.Context, fileID uuid.UUID) ([]FileS
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []FileShard{}
 	for rows.Next() {
 		var i FileShard
@@ -392,7 +392,7 @@ func (q *Queries) ListFiles(ctx context.Context, arg ListFilesParams) ([]File, e
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []File{}
 	for rows.Next() {
 		var i File
@@ -432,7 +432,7 @@ func (q *Queries) ListFolders(ctx context.Context, userID uuid.UUID) ([]Folder, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []Folder{}
 	for rows.Next() {
 		var i Folder
@@ -468,7 +468,7 @@ func (q *Queries) ListShardsForFiles(ctx context.Context, dollar_1 []uuid.UUID) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []FileShard{}
 	for rows.Next() {
 		var i FileShard
@@ -511,7 +511,7 @@ func (q *Queries) ListTrashedFiles(ctx context.Context, arg ListTrashedFilesPara
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	items := []File{}
 	for rows.Next() {
 		var i File
