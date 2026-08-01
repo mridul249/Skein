@@ -46,7 +46,7 @@ Existing storage aggregators force a trade-off between deployment complexity, fi
 | **Large-File Striping** | No | No | **Yes** |
 | **Encrypted by Default** | Opt-in overlay | No | **Yes (Framed GCM)** |
 | **Media Seeking & Previews** | High latency (large chunks) | Full download required | **Instant (64 KiB frames)** |
-| **Data Recovery Architecture** | Lost if local index is wiped | Central DB reliant | **Self-Describing Manifests** |
+| **Data Recovery Architecture** | Lost if local index is wiped | Central DB reliant | Central DB, planned self-describing manifests ([status](docs/ARCHITECTURE.md#recovery)) |
 | **Privacy Scope** | Full Drive Access | Full Drive Access | **`drive.file` scope only** |
 | **Deployment Footprint** | Binary + complex config | MySQL + 2x Node + Compose | **One single binary** |
 
@@ -54,11 +54,11 @@ Existing storage aggregators force a trade-off between deployment complexity, fi
 
 ## Core Architecture Pillars
 
-### 1. Self-Describing Drives (Zero Database Lock-In)
+### 1. The database is the source of truth today — self-describing drives are planned, not built
 
-Most storage aggregators rely exclusively on a centralized local database to track where file chunks reside. If that database becomes corrupted or lost, your data is permanently unrecoverable.
+Most storage aggregators rely exclusively on a centralized local database to track where file chunks reside, and right now **Skein does too**. `file_shards` in PostgreSQL is the only record of which shard belongs to which file and which drive holds it; losing the database without a backup loses that mapping even though the encrypted bytes are still sitting on your Drive accounts. See [docs/BACKUP.md](docs/BACKUP.md) — back up the database, not just `SKEIN_MASTER_KEY`.
 
-Skein writes an encrypted sidecar manifest directly alongside every file's shards on your cloud drives. Your storage accounts become completely **self-describing**. The local database acts as a high-performance index cache rather than a single point of failure. If your machine crashes, an end-to-end restore can rebuild the state index straight from the connected drives.
+An encrypted sidecar manifest written alongside every file's shards — making a drive **self-describing** and a from-scratch database rebuild possible — is planned (Phase 7 Task 5.1) and **not implemented yet**. This section will be rewritten once it lands; until then, treat the database as a single point of failure for the mapping, even though it is not one for the ciphertext.
 
 ### 2. Zero-Allocation Memory Streaming
 
@@ -85,7 +85,7 @@ Multi-gigabyte uploads remain supported even on resource-constrained 512 MB VPS 
 Standard whole-file GCM encryption forces you to buffer and decrypt entire gigabyte-scale ciphertexts before verifying a single byte. Skein slices data into granular **64 KiB encrypted frames** with computable offsets:
 
 * **Instant Video Scrubbing:** HTTP range requests map requested byte ranges directly to their containing 64 KiB frames. Seeking a video fetches **64 KiB instead of 256 MiB**.
-* **In-App Previews:** Generates image and document previews directly from remote encrypted shards without downloading the full payload.
+* **In-App Previews:** Images, video and audio preview inline, decrypted on the fly from the same ranged reads — no document/PDF preview yet.
 
 ### 4. Restricted Security Scope (`drive.file`)
 
@@ -136,12 +136,12 @@ make desktop   # Outputs bin/skein-desktop
 
 | Guide | Description |
 | --- | --- |
-| [docs/INSTALL.md](https://www.google.com/search?q=docs/INSTALL.md) | Step-by-step setup and OAuth client setup |
-| [docs/CONFIGURATION.md](https://www.google.com/search?q=docs/CONFIGURATION.md) | Environment variables and runtime configuration |
-| [docs/BACKUP.md](https://www.google.com/search?q=docs/BACKUP.md) | Disaster recovery, master key management, and manifest recovery |
-| [docs/ARCHITECTURE.md](https://www.google.com/search?q=docs/ARCHITECTURE.md) | Shard routing, crypto specs, and quota calculations |
-| [docs/SECURITY.md](https://www.google.com/search?q=docs/SECURITY.md) | Threat model, zero-knowledge guarantees, and scope isolation |
-| [docs/DEVELOPMENT.md](https://www.google.com/search?q=docs/DEVELOPMENT.md) | Build steps, test runner execution, and contributing guidelines |
+| [docs/INSTALL.md](docs/INSTALL.md) | Step-by-step setup and OAuth client setup |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Environment variables and runtime configuration |
+| [docs/BACKUP.md](docs/BACKUP.md) | Disaster recovery, master key management, and manifest recovery |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Shard routing, crypto specs, and quota calculations |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat model, zero-knowledge guarantees, and scope isolation |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build steps, test runner execution, and contributing guidelines |
 
 ---
 

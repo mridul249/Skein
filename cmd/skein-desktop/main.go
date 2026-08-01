@@ -2,23 +2,33 @@
 // native window instead of a browser tab.
 //
 // Per Phase7.md 4.3, this does not rewrite the frontend onto Wails bindings.
-// The server binds 127.0.0.1:0, the OS assigns a port, and the webview's
-// asset server reverse-proxies every request to that port — one frontend,
-// two shells, byte-identical requests and responses either way.
+// The server binds 127.0.0.1:0, the OS assigns a port, and the window
+// navigates directly to that real http:// address — one frontend, two
+// shells, byte-identical requests and responses either way.
+//
+// The window does NOT go through Wails' wails:// custom scheme, and that is
+// deliberate, not an oversight: that bridge builds every request with
+// context.Background() and nothing ever replaces it with one tied to the
+// real request lifecycle, so r.Context() never cancels — not on abort, not
+// on navigation, not ever, until the whole process dies. It also has no
+// working download handling on Linux at all. Found 2026-08-01 from a real
+// desktop-app bug report: a cancelled upload kept writing shards and holding
+// quota reservations, and a "downloaded" file never reached disk with no
+// visible progress or error. Full writeup: third_party/wails-v2.13.0/PATCH.md.
+// wails.RunWithStartURL is this session's small fork of Wails that makes
+// pointing the window at a real address possible at all — see that file for
+// why the standard wails.Run has no way to do this.
 package main
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"time"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	waillinux "github.com/wailsapp/wails/v2/pkg/options/linux"
 
 	"github.com/mridul60214/skein/internal/accounts"
@@ -87,12 +97,7 @@ func main() {
 		}
 	}()
 
-	target, err := url.Parse("http://" + a.Addr())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "skein-desktop: parse server address: %v\n", err)
-		os.Exit(1)
-	}
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	startURL := "http://" + a.Addr()
 
 	// drainDone is what main() actually waits on before returning — not
 	// a.Serve's return, which fires as soon as httpSrv.Shutdown's first line
@@ -104,15 +109,12 @@ func main() {
 	// once drainInBackground has actually finished one of its two exits.
 	drainDone := make(chan struct{})
 
-	err = wails.Run(&options.App{
+	err = wails.RunWithStartURL(&options.App{
 		Title:     "Skein",
 		Width:     minWidth,
 		Height:    minHeight,
 		MinWidth:  minWidth,
 		MinHeight: minHeight,
-		AssetServer: &assetserver.Options{
-			Handler: proxy,
-		},
 		Linux: &waillinux.Options{
 			ProgramName: "skein-desktop",
 		},
@@ -137,7 +139,7 @@ func main() {
 			cancel()
 			go drainInBackground(a, drainDone) //nolint:contextcheck // deliberately detached from OnShutdown's ctx; see drainInBackground's own doc comment
 		},
-	})
+	}, startURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "skein-desktop: %v\n", err)
 		os.Exit(1)

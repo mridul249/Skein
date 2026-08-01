@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -194,8 +195,15 @@ func (s *Service) completeConnect(ctx context.Context, cfg *oauth2.Config, state
 	if err != nil {
 		if errors.Is(err, skerr.ErrNotFound) {
 			// Unknown, expired or already used — all the same from here,
-			// and all mean "start again".
-			return Account{}, "", skerr.Public(skerr.ErrUnauthorized,
+			// and all mean "start again". ErrValidation, not ErrUnauthorized:
+			// on the desktop path this reaches an authenticated handler
+			// (accounts.Connector.Connect), and the frontend treats any 401
+			// as "your Skein session died" — it clears the session and
+			// retries the whole request once, which for a connect attempt
+			// means a second loopback listener and a second browser tab.
+			// This failure is about the OAuth attempt, never about whether
+			// the caller is still logged into Skein. Reproduced 2026-08-01.
+			return Account{}, "", skerr.Public(skerr.ErrValidation,
 				"That authorisation expired or was already used. Try connecting again.")
 		}
 		return Account{}, "", fmt.Errorf("consume oauth state: %w", err)
@@ -210,11 +218,54 @@ func (s *Service) completeConnect(ctx context.Context, cfg *oauth2.Config, state
 	}
 	token, err := cfg.Exchange(exchangeCtx, code, opts...)
 	if err != nil {
-		// The provider's message can contain the code; it is not logged
-		// and not returned.
-		s.log.WarnContext(ctx, "oauth code exchange failed",
-			slog.String("user_id", pending.UserID.String()))
-		return Account{}, "", skerr.Public(skerr.ErrUnauthorized,
+		// The provider's full error response can contain the code; it is
+		// never logged or returned whole. RFC 6749's 'error' parameter
+		// (invalid_grant, redirect_uri_mismatch, ...) is a fixed enum with
+		// no secret in it, so it is the one piece worth surfacing — without
+		// it, "Google rejected that authorisation" was the entire diagnosis
+		// available for every failure, secret-carrying or not.
+		var rerr *oauth2.RetrieveError
+		// client_id is not a secret (RFC 8252) — safe to log unconditionally,
+		// and it is what actually distinguishes "wrong client type" from
+		// "wrong client entirely" when more than one Google client exists.
+		fields := []any{slog.String("user_id", pending.UserID.String()), slog.String("client_id", cfg.ClientID)}
+		if errors.As(err, &rerr) && rerr.ErrorCode != "" {
+			fields = append(fields, slog.String("oauth_error_code", rerr.ErrorCode))
+		}
+		s.log.WarnContext(ctx, "oauth code exchange failed", fields...)
+
+		// Reproduced 2026-08-01: a public client (cfg.ClientSecret == "",
+		// the desktop PKCE path) whose Google Cloud client was registered
+		// as "Web application" instead of "Desktop app" gets exactly this
+		// error — Web application clients require a client_secret at
+		// exchange regardless of PKCE, and Desktop app clients are the only
+		// type Google exempts from that requirement. This is a Console
+		// configuration mistake, not a bug in the request Skein sends
+		// (verified: client_id, code, redirect_uri, code_verifier are all
+		// present and correct — proven independently by
+		// TestCompleteGoogleConnectPKCESendsTheStoredVerifier). Name it
+		// specifically rather than the generic message, since the fix is a
+		// 30-second Console change once someone knows what to look for.
+		if cfg.ClientSecret == "" && errors.As(err, &rerr) && rerr.ErrorCode == "invalid_request" &&
+			strings.Contains(strings.ToLower(rerr.ErrorDescription), "client_secret") {
+			// Name the offending client id, not just the mistake. The common
+			// case is a project with two Google clients — a Web application one
+			// for the server and a Desktop app one for skein-desktop — where
+			// the desktop build is pointed at the wrong one. Both ids end in
+			// .apps.googleusercontent.com and are indistinguishable by eye, so
+			// "recreate the client" sends the reader to Console to redo work
+			// that is already done when the real fix is to correct one env var.
+			// The id is safe to state: RFC 8252 §8.5 treats it as public, which
+			// is the same reasoning that puts it in the log line above.
+			return Account{}, "", skerr.Public(skerr.ErrValidation,
+				"Google rejected the connection because client %s needs a secret. "+
+					"That means it is registered as \"Web application\"; desktop sign-in "+
+					"requires a client of type \"Desktop app\", which uses no secret. "+
+					"Check SKEIN_GOOGLE_DESKTOP_CLIENT_ID points at a Desktop app client, "+
+					"or create one in Google Cloud Console.", cfg.ClientID)
+		}
+
+		return Account{}, "", skerr.Public(skerr.ErrValidation,
 			"Google rejected that authorisation. Try connecting again.")
 	}
 

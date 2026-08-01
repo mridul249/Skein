@@ -21,6 +21,7 @@ import { Trash } from '../../src/pages/Trash';
 import { Drives } from '../../src/pages/Drives';
 import { Login } from '../../src/pages/Login';
 import { UploadsProvider, useUploads } from '../../src/lib/uploads-context';
+import { DownloadsProvider } from '../../src/lib/downloads-context';
 import { api, type Drive, type FileItem, type Folder, type Quota } from '../../src/lib/api';
 
 const GB = 1024 ** 3;
@@ -202,17 +203,19 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={client}>
       <UploadsProvider uploader={params.has('transfers') ? stubUploader : undefined}>
-        {params.has('transfers') && <SeedTransfers />}
-        <MemoryRouter initialEntries={[route]}>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route element={<Layout />}>
-              <Route index element={<Files />} />
-              <Route path="trash" element={<Trash />} />
-              <Route path="settings" element={<Drives />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
+        <DownloadsProvider>
+          {params.has('transfers') && <SeedTransfers />}
+          <MemoryRouter initialEntries={[route]}>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route element={<Layout />}>
+                <Route index element={<Files />} />
+                <Route path="trash" element={<Trash />} />
+                <Route path="settings" element={<Drives />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </DownloadsProvider>
       </UploadsProvider>
     </QueryClientProvider>
   </StrictMode>,

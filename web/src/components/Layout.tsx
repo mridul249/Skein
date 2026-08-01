@@ -6,6 +6,7 @@ import clsx from 'clsx';
 import { api } from '../lib/api';
 import { QuotaRail } from './QuotaBar';
 import { UploadList } from './UploadList';
+import { DownloadList } from './DownloadList';
 import { useSession } from '../lib/session';
 import { Wordmark } from './Wordmark';
 
@@ -138,6 +139,7 @@ export function Layout() {
             user cannot cancel.
           */}
           <UploadList />
+          <DownloadList />
           <Outlet context={{ quota }} />
         </div>
       </main>

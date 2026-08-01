@@ -17,6 +17,7 @@ import { Modal } from '../components/Modal';
 import { FileDetail } from '../components/FileDetail';
 import { bytes, relativeTime } from '../lib/format';
 import { useUploads } from '../lib/uploads-context';
+import { useDownloads } from '../lib/downloads-context';
 
 export function Files() {
   const qc = useQueryClient();
@@ -42,6 +43,7 @@ export function Files() {
   }, [selectedId]);
   const inputRef = useRef<HTMLInputElement>(null);
   const { start: startUploadJob } = useUploads();
+  const { start: startDownloadJob, fail: failDownloadJob } = useDownloads();
 
   const { data: quota } = useQuery({ queryKey: ['quota'], queryFn: api.quota });
   const { data: drivesData } = useQuery({ queryKey: ['drives'], queryFn: api.listDrives });
@@ -142,11 +144,19 @@ export function Files() {
    * Hands the transfer to the browser rather than running it in the tab.
    *
    * Only the short capability URL crosses JS; the bytes never do. The browser
-   * streams straight to disk, shows the transfer in its own download manager,
-   * and keeps going if this tab closes — which is also why no beforeunload
-   * warning belongs on this path, and why there is no progress bar to build.
+   * streams straight to disk and keeps going if this tab closes — which is
+   * also why no beforeunload warning belongs on this path.
+   *
+   * No real progress or completion signal is possible here: once `a.click()`
+   * fires, the transfer is entirely the browser/webview's, and JS is never
+   * told anything more about it — that silence is what keeps this path off
+   * the heap (known issue #15). `startDownloadJob`/DownloadList only record
+   * that a download was asked for, so the desktop build (which, unlike a
+   * real browser, has no download manager UI of its own) has somewhere to
+   * show that; the user dismisses it themselves.
    */
   async function download(file: FileItem) {
+    const jobId = startDownloadJob(file.name);
     try {
       const url = await api.contentURL(file.id);
       const a = document.createElement('a');
@@ -157,7 +167,9 @@ export function Files() {
       a.download = file.name;
       a.click();
     } catch (err) {
-      setBanner(err instanceof ApiError ? err.message : 'Could not download that file.');
+      const message = err instanceof ApiError ? err.message : 'Could not download that file.';
+      failDownloadJob(jobId, message);
+      setBanner(message);
     }
   }
 

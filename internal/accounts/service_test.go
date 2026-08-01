@@ -153,14 +153,38 @@ func TestCompleteGoogleConnectRejectsUnknownState(t *testing.T) {
 	svc, _, _ := newTestService(t, true)
 
 	_, _, err := svc.CompleteGoogleConnect(context.Background(), "never-issued", "code")
-	if !errors.Is(err, skerr.ErrUnauthorized) {
-		t.Fatalf("CompleteGoogleConnect() = %v, want ErrUnauthorized", err)
+	// ErrValidation, not ErrUnauthorized: see the comment on this branch in
+	// service.go. An unknown OAuth state says nothing about the caller's own
+	// Skein session.
+	if !errors.Is(err, skerr.ErrValidation) {
+		t.Fatalf("CompleteGoogleConnect() = %v, want ErrValidation", err)
 	}
 
 	for _, tc := range []struct{ state, code string }{{"", "c"}, {"s", ""}, {"", ""}} {
 		if _, _, err := svc.CompleteGoogleConnect(context.Background(), tc.state, tc.code); err == nil {
 			t.Errorf("CompleteGoogleConnect(%q,%q) succeeded", tc.state, tc.code)
 		}
+	}
+}
+
+// A real bug, reproduced 2026-08-01: BeginGoogleConnect on the desktop
+// build runs behind middleware.Auth, and the frontend's request layer
+// treats *any* 401 response as "the Skein session died" — it clears the
+// whole app session and, worse, retries the failed request once against a
+// freshly refreshed token (api.ts's one-retry-after-refresh rule), which
+// for a connect attempt means a second loopback listener and a second
+// browser tab. An OAuth exchange failure is about the attempt, never about
+// whether the caller is still logged into Skein, so none of the failure
+// paths reachable from that authenticated handler may map to
+// skerr.ErrUnauthorized. This guards the whole class, not just the one
+// call site the bug was first seen on.
+func TestOAuthAttemptFailuresNeverMapToUnauthorized(t *testing.T) {
+	svc, _, _ := newTestService(t, true)
+
+	_, _, err := svc.CompleteGoogleConnect(context.Background(), "never-issued", "code")
+	if errors.Is(err, skerr.ErrUnauthorized) {
+		t.Fatalf("CompleteGoogleConnect(unknown state) = %v; must never be ErrUnauthorized "+
+			"(the frontend clears the session and retries on any 401)", err)
 	}
 }
 

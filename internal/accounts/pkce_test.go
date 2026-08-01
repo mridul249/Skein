@@ -5,13 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
+
+	"github.com/mridul60214/skein/internal/skerr"
 )
 
 // fakeTokenServer stands in for Google's token endpoint. It records every
@@ -145,7 +149,7 @@ func TestCompleteGoogleConnectPKCESendsTheStoredVerifier(t *testing.T) {
 	// The profile fetch after a successful exchange hits the real Google
 	// userinfo endpoint, which this test cannot and must not reach (Rules.md
 	// §4: no test depends on the network). So this stops at
-	// skerr.ErrUnauthorized from fetchGoogleProfile — the assertion that
+	// skerr.ErrValidation from fetchGoogleProfile — the assertion that
 	// matters, that the token endpoint received the correct verifier, has
 	// already happened by then.
 	_, _, err = svc.CompleteGoogleConnectPKCE(context.Background(), cfg, state, "auth-code")
@@ -164,4 +168,61 @@ func TestCompleteGoogleConnectPKCESendsTheStoredVerifier(t *testing.T) {
 func s256(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// missingClientSecretTokenServer reproduces exactly what Google's real
+// token endpoint returns when a Google Cloud OAuth client was registered as
+// "Web application" instead of "Desktop app" — reproduced live 2026-08-01
+// against a real misconfigured client, not invented from the RFC alone.
+func missingClientSecretTokenServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error":             "invalid_request",
+			"error_description": "client_secret is missing.",
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// The single most likely real-world mistake for anyone setting up their own
+// desktop OAuth client (Phase7 Task 4.4 point 6, CONFIGURATION.md's
+// SKEIN_GOOGLE_DESKTOP_CLIENT_ID): registering it as "Web application" in
+// Google Cloud Console instead of "Desktop app". Web application clients
+// require a client_secret at exchange regardless of PKCE; Desktop app
+// clients are the only type Google exempts from that. The generic "Google
+// rejected that authorisation" message gave no way to tell this apart from
+// an expired code or a network blip — this asserts the specific,
+// actionable message fires instead.
+func TestCompleteGoogleConnectPKCENamesTheWrongClientTypeMistake(t *testing.T) {
+	tokenSrv := missingClientSecretTokenServer(t)
+	svc, _, _ := newTestService(t, false)
+	cfg := testPKCEConfig(tokenSrv.URL)
+	userID := uuid.New()
+
+	verifier := oauth2.GenerateVerifier()
+	authURL, err := svc.BeginGoogleConnectPKCE(context.Background(), cfg, verifier, userID, "")
+	if err != nil {
+		t.Fatalf("BeginGoogleConnectPKCE() = %v", err)
+	}
+	u, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatalf("parse auth url: %v", err)
+	}
+	state := u.Query().Get("state")
+
+	_, _, err = svc.CompleteGoogleConnectPKCE(context.Background(), cfg, state, "auth-code")
+	if err == nil {
+		t.Fatal("CompleteGoogleConnectPKCE() succeeded; expected the exchange to fail")
+	}
+	var pub *skerr.PublicError
+	if !errors.As(err, &pub) {
+		t.Fatalf("error = %v, want a *skerr.PublicError", err)
+	}
+	if !strings.Contains(pub.Message, "Desktop app") {
+		t.Errorf("message = %q, want it to name the Desktop app client type mistake", pub.Message)
+	}
 }

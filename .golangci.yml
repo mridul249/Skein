@@ -55,6 +55,12 @@ linters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-dirs:
+    # A local fork of github.com/wailsapp/wails/v2, vendored so
+    # wails.RunWithStartURL can exist at all — see third_party/wails-v2.13.0/PATCH.md.
+    # Everything but the three patched files is byte-identical to upstream
+    # and not ours to lint.
+    - third_party
 
 formatters:
   enable:
