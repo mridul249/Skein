@@ -115,11 +115,13 @@ export function FilePreview({ file }: { file: FileItem }) {
         <h3 className="mb-2 text-label font-semibold text-muted">Preview</h3>
         <div className="rounded border border-line bg-canvas p-4">
           <p className="text-caption text-muted">
-            Too large to show here — a {bytes(file.size_bytes)} image decodes to far more
+            Too large to show here - a {bytes(file.size_bytes)} image decodes to far more
             than that in memory.
           </p>
           <a
             href={fullSizeURL ?? undefined}
+            target="_blank" 
+            rel="noopener noreferrer"
             onClick={(e) => {
               if (!fullSizeURL) {
                 e.preventDefault();
@@ -133,7 +135,7 @@ export function FilePreview({ file }: { file: FileItem }) {
         </div>
       </section>
     );
-  }
+}
 
   return (
     <section>
