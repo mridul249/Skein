@@ -40,14 +40,26 @@ import (
 // version is stamped at build time via -ldflags.
 var version = "dev"
 
-// desktopClientID is the compiled-in default Desktop app OAuth client id
-// (RFC 8252). It is not a secret — desktop clients don't have one, and
-// distributing a client id publicly is how Google's own documentation
-// describes this client type working. Empty until a real Google Cloud
-// client exists; stamped in via -ldflags -X the same way version is.
-// SKEIN_GOOGLE_DESKTOP_CLIENT_ID overrides it at runtime, which is what lets
-// anyone use their own client and API quota (Phase7 Task 4.4 point 6).
-var desktopClientID = ""
+// desktopClientID and desktopClientSecret are the compiled-in default
+// Desktop app OAuth credentials (RFC 8252 installed app). Both are empty
+// until a real Google Cloud client exists; both are stamped in via
+// -ldflags -X the same way version is, and both are overridden at runtime by
+// SKEIN_GOOGLE_DESKTOP_CLIENT_ID / _SECRET, which is what lets anyone use
+// their own client and API quota (Phase7 Task 4.4 point 6).
+//
+// Shipping the secret inside a distributed binary is deliberate and is how
+// Google intends this client type to work: it issues a secret for Desktop app
+// clients and requires it at token exchange, while RFC 8252 §8.5 recognises
+// that an installed app cannot keep one. Anyone can unpack the binary and
+// read it. It is therefore not a credential in the sense the other secrets in
+// this project are — PKCE and the loopback redirect are what secure the flow
+// (see accounts.DesktopGoogleOAuthConfig). Consequence worth knowing: a
+// third party can use this client id to consume Skein's Google API quota,
+// which is the accepted trade for the app working out of the box.
+var (
+	desktopClientID     = ""
+	desktopClientSecret = ""
+)
 
 // minWidth/minHeight keep the window above the frontend's lg breakpoint
 // (1024px, web/src/components/FileDetail.tsx:111) at which the detail
@@ -196,7 +208,7 @@ func drainInBackground(a *app.App, done chan<- struct{}) {
 // just once here, so an operator can set SKEIN_GOOGLE_DESKTOP_CLIENT_ID and
 // retry a connect without restarting the app.
 func newDesktopConnector(svc *accounts.Service, log *slog.Logger) handlers.DesktopConnector {
-	return desktopoauth.NewConnector(svc, log, resolveDesktopClientID)
+	return desktopoauth.NewConnector(svc, log, resolveDesktopClientID, resolveDesktopClientSecret)
 }
 
 // resolveDesktopClientID prefers an operator-set override — "use my own
@@ -208,4 +220,22 @@ func resolveDesktopClientID() string {
 		return v
 	}
 	return desktopClientID
+}
+
+// resolveDesktopClientSecret is resolveDesktopClientID for the secret that
+// Google requires alongside it at token exchange. Same override rule.
+//
+// The pair must come from one Google client. Overriding only the id would
+// otherwise silently pair a user's client with the compiled-in secret of a
+// different one, which Google rejects as an opaque invalid_client — so a
+// half-set override returns "" here and Connect reports the missing variable
+// by name instead.
+func resolveDesktopClientSecret() string {
+	if v := os.Getenv("SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET"); v != "" {
+		return v
+	}
+	if os.Getenv("SKEIN_GOOGLE_DESKTOP_CLIENT_ID") != "" {
+		return ""
+	}
+	return desktopClientSecret
 }

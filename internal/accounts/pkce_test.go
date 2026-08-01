@@ -18,17 +18,17 @@ import (
 	"github.com/mridul60214/skein/internal/skerr"
 )
 
-// fakeTokenServer stands in for Google's token endpoint. It records every
-// code_verifier it is presented and always issues a token — the tests below
+// recordingTokenServer stands in for Google's token endpoint. It records the
+// full form of every request and always issues a token — the tests below
 // inspect what was sent rather than have the server itself gate on it.
-func fakeTokenServer(t *testing.T) (*httptest.Server, *[]string) {
+func recordingTokenServer(t *testing.T) (*httptest.Server, *[]url.Values) {
 	t.Helper()
-	var verifiers []string
+	var forms []url.Values
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("parse token request: %v", err)
 		}
-		verifiers = append(verifiers, r.Form.Get("code_verifier"))
+		forms = append(forms, r.Form)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token":  "fake-access-token",
@@ -38,14 +38,18 @@ func fakeTokenServer(t *testing.T) (*httptest.Server, *[]string) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &verifiers
+	return srv, &forms
 }
 
 func testPKCEConfig(tokenURL string) *oauth2.Config {
 	return &oauth2.Config{
-		ClientID:    "desktop-client-id",
-		RedirectURL: "http://127.0.0.1:0/callback",
-		Scopes:      []string{"drive.file"},
+		ClientID: "desktop-client-id",
+		// Desktop app clients do carry a secret: Google issues one and
+		// requires it at exchange. It is not confidential (RFC 8252 §8.5)
+		// but it must be sent. See accounts.DesktopGoogleOAuthConfig.
+		ClientSecret: "desktop-client-secret",
+		RedirectURL:  "http://127.0.0.1:0/callback",
+		Scopes:       []string{"drive.file"},
 		Endpoint: oauth2.Endpoint{
 			AuthURL:   "https://accounts.google.com/o/oauth2/auth",
 			TokenURL:  tokenURL,
@@ -54,11 +58,16 @@ func testPKCEConfig(tokenURL string) *oauth2.Config {
 	}
 }
 
-func TestBeginGoogleConnectPKCERequiresNoClientSecret(t *testing.T) {
+// The client secret belongs at the token endpoint, never in the
+// authorisation URL — that URL is handed to the system browser, lands in
+// history, and is visible in the address bar. Google requires the secret at
+// exchange (see DesktopGoogleOAuthConfig) but never in this leg, so a config
+// that carries one must still produce a clean auth URL.
+func TestBeginGoogleConnectPKCENeverPutsTheSecretInTheAuthURL(t *testing.T) {
 	svc, _, _ := newTestService(t, false)
 	cfg := testPKCEConfig("https://example.invalid/token")
-	if cfg.ClientSecret != "" {
-		t.Fatal("test config carries a client secret; the point of this test is that it doesn't need one")
+	if cfg.ClientSecret == "" {
+		t.Fatal("test config has no client secret; this test cannot show one is withheld")
 	}
 
 	verifier := oauth2.GenerateVerifier()
@@ -72,7 +81,10 @@ func TestBeginGoogleConnectPKCERequiresNoClientSecret(t *testing.T) {
 		t.Fatalf("parse auth url: %v", err)
 	}
 	if u.Query().Get("client_secret") != "" {
-		t.Error("auth URL carries a client_secret; desktop clients must not send one")
+		t.Error("auth URL carries a client_secret; it belongs only in the token exchange")
+	}
+	if strings.Contains(authURL, cfg.ClientSecret) {
+		t.Errorf("auth URL %q contains the client secret", authURL)
 	}
 	wantChallenge := s256(verifier)
 	if got := u.Query().Get("code_challenge"); got != wantChallenge {
@@ -130,7 +142,7 @@ func TestPKCEVerifierIsNeverReusedAcrossAttempts(t *testing.T) {
 // verifier parameter at all: a caller cannot supply one even if it wanted
 // to, so this is the only source it could have come from.
 func TestCompleteGoogleConnectPKCESendsTheStoredVerifier(t *testing.T) {
-	tokenSrv, verifiers := fakeTokenServer(t)
+	tokenSrv, forms := recordingTokenServer(t)
 	svc, _, _ := newTestService(t, false)
 	cfg := testPKCEConfig(tokenSrv.URL)
 	userID := uuid.New()
@@ -157,11 +169,11 @@ func TestCompleteGoogleConnectPKCESendsTheStoredVerifier(t *testing.T) {
 		t.Fatal("CompleteGoogleConnectPKCE() succeeded; expected the (unreachable in test) profile fetch to fail")
 	}
 
-	if len(*verifiers) != 1 {
-		t.Fatalf("token requests received = %d, want 1", len(*verifiers))
+	if len(*forms) != 1 {
+		t.Fatalf("token requests received = %d, want 1", len(*forms))
 	}
-	if (*verifiers)[0] != verifier {
-		t.Errorf("code_verifier sent = %q, want %q", (*verifiers)[0], verifier)
+	if got := (*forms)[0].Get("code_verifier"); got != verifier {
+		t.Errorf("code_verifier sent = %q, want %q", got, verifier)
 	}
 }
 
@@ -170,10 +182,12 @@ func s256(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// missingClientSecretTokenServer reproduces exactly what Google's real
-// token endpoint returns when a Google Cloud OAuth client was registered as
-// "Web application" instead of "Desktop app" — reproduced live 2026-08-01
-// against a real misconfigured client, not invented from the RFC alone.
+// missingClientSecretTokenServer reproduces exactly what Google's real token
+// endpoint returns when no client_secret is sent — reproduced live
+// 2026-08-01, not invented from the RFC alone. It was originally read as
+// proof the client was the wrong type; it is not. Google returns this for a
+// genuine Desktop app client too, because it requires the secret from those
+// as well.
 func missingClientSecretTokenServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -188,23 +202,18 @@ func missingClientSecretTokenServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// The single most likely real-world mistake for anyone setting up their own
-// desktop OAuth client (Phase7 Task 4.4 point 6, CONFIGURATION.md's
-// SKEIN_GOOGLE_DESKTOP_CLIENT_ID): registering it as "Web application" in
-// Google Cloud Console instead of "Desktop app". Web application clients
-// require a client_secret at exchange regardless of PKCE; Desktop app
-// clients are the only type Google exempts from that. The generic "Google
-// rejected that authorisation" message gave no way to tell this apart from
-// an expired code or a network blip — this asserts the specific,
-// actionable message fires instead.
-func TestCompleteGoogleConnectPKCENamesTheWrongClientTypeMistake(t *testing.T) {
-	tokenSrv := missingClientSecretTokenServer(t)
+// The secret Google requires must actually reach the token endpoint.
+// Regression guard for the original bug: DesktopGoogleOAuthConfig set no
+// ClientSecret at all, so every desktop exchange failed with
+// `invalid_request: client_secret is missing` — and the diagnostic then blamed
+// the user's Console setup for it.
+func TestCompleteGoogleConnectPKCESendsTheClientSecret(t *testing.T) {
+	tokenSrv, forms := recordingTokenServer(t)
 	svc, _, _ := newTestService(t, false)
 	cfg := testPKCEConfig(tokenSrv.URL)
-	userID := uuid.New()
 
 	verifier := oauth2.GenerateVerifier()
-	authURL, err := svc.BeginGoogleConnectPKCE(context.Background(), cfg, verifier, userID, "")
+	authURL, err := svc.BeginGoogleConnectPKCE(context.Background(), cfg, verifier, uuid.New(), "")
 	if err != nil {
 		t.Fatalf("BeginGoogleConnectPKCE() = %v", err)
 	}
@@ -212,9 +221,46 @@ func TestCompleteGoogleConnectPKCENamesTheWrongClientTypeMistake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse auth url: %v", err)
 	}
-	state := u.Query().Get("state")
 
-	_, _, err = svc.CompleteGoogleConnectPKCE(context.Background(), cfg, state, "auth-code")
+	// Stops at the (unreachable in test) profile fetch; the token request has
+	// already been made and recorded by then.
+	_, _, _ = svc.CompleteGoogleConnectPKCE(context.Background(), cfg, u.Query().Get("state"), "auth-code")
+
+	if len(*forms) != 1 {
+		t.Fatalf("token requests received = %d, want 1", len(*forms))
+	}
+	got := (*forms)[0]
+	if got.Get("client_secret") != cfg.ClientSecret {
+		t.Errorf("client_secret sent = %q, want %q", got.Get("client_secret"), cfg.ClientSecret)
+	}
+	// Both, not either: Google wants the secret, and PKCE is what actually
+	// secures a client whose secret ships inside the binary.
+	if got.Get("code_verifier") != verifier {
+		t.Errorf("code_verifier sent = %q, want %q", got.Get("code_verifier"), verifier)
+	}
+}
+
+// When the secret really is absent, the message must point at our own unset
+// variable. The message it replaced told the user to recreate their Google
+// client as a "Desktop app" — advice that was wrong even when the client was
+// already exactly that, which is the bug this whole change fixes.
+func TestMissingClientSecretNamesTheUnsetVariableNotTheClientType(t *testing.T) {
+	tokenSrv := missingClientSecretTokenServer(t)
+	svc, _, _ := newTestService(t, false)
+	cfg := testPKCEConfig(tokenSrv.URL)
+	cfg.ClientSecret = ""
+
+	verifier := oauth2.GenerateVerifier()
+	authURL, err := svc.BeginGoogleConnectPKCE(context.Background(), cfg, verifier, uuid.New(), "")
+	if err != nil {
+		t.Fatalf("BeginGoogleConnectPKCE() = %v", err)
+	}
+	u, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatalf("parse auth url: %v", err)
+	}
+
+	_, _, err = svc.CompleteGoogleConnectPKCE(context.Background(), cfg, u.Query().Get("state"), "auth-code")
 	if err == nil {
 		t.Fatal("CompleteGoogleConnectPKCE() succeeded; expected the exchange to fail")
 	}
@@ -222,7 +268,42 @@ func TestCompleteGoogleConnectPKCENamesTheWrongClientTypeMistake(t *testing.T) {
 	if !errors.As(err, &pub) {
 		t.Fatalf("error = %v, want a *skerr.PublicError", err)
 	}
-	if !strings.Contains(pub.Message, "Desktop app") {
-		t.Errorf("message = %q, want it to name the Desktop app client type mistake", pub.Message)
+	if !strings.Contains(pub.Message, "SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET") {
+		t.Errorf("message = %q, want it to name the unset variable", pub.Message)
+	}
+	if !strings.Contains(pub.Message, cfg.ClientID) {
+		t.Errorf("message = %q, want it to name the client id %q", pub.Message, cfg.ClientID)
+	}
+	// The old advice. Desktop app clients do have secrets, so telling anyone
+	// to recreate their client as one is a dead end.
+	if strings.Contains(pub.Message, "Desktop app") {
+		t.Errorf("message = %q still blames the client type", pub.Message)
+	}
+}
+
+// A configured secret that Google rejects for some other reason must not
+// surface in anything the user sees. It is low-value (RFC 8252 §8.5) but
+// there is no reason to echo it into a UI or a support paste.
+func TestExchangeFailureNeverEchoesTheClientSecret(t *testing.T) {
+	tokenSrv := missingClientSecretTokenServer(t)
+	svc, _, _ := newTestService(t, false)
+	cfg := testPKCEConfig(tokenSrv.URL)
+
+	verifier := oauth2.GenerateVerifier()
+	authURL, err := svc.BeginGoogleConnectPKCE(context.Background(), cfg, verifier, uuid.New(), "")
+	if err != nil {
+		t.Fatalf("BeginGoogleConnectPKCE() = %v", err)
+	}
+	u, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatalf("parse auth url: %v", err)
+	}
+
+	_, _, err = svc.CompleteGoogleConnectPKCE(context.Background(), cfg, u.Query().Get("state"), "auth-code")
+	if err == nil {
+		t.Fatal("CompleteGoogleConnectPKCE() succeeded; expected the exchange to fail")
+	}
+	if strings.Contains(err.Error(), cfg.ClientSecret) {
+		t.Errorf("error %q leaks the client secret", err.Error())
 	}
 }
