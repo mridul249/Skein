@@ -46,9 +46,21 @@ different environment than your shell's.
 
 ## Restoring
 
-This is a three-step procedure, not one pipe - verified end to end against
-a throwaway cluster with no `skein` role present, so these steps are what
-actually worked, not what should work in theory.
+This is a four-step procedure, not one pipe.
+
+**Verification status, so you know what this page is worth.** `make backup`
+is covered by tests (`internal/db/backup_test.go`): a failing dump exits
+non-zero and writes nothing, and a successful dump contains the `citext`
+extension and `goose_db_version` rows this procedure depends on. The dump
+was also checked row-for-row against a live database - `users`,
+`connected_accounts`, `folders`, `files`, `file_shards` all matched exactly.
+
+The restore steps below have **not** been re-run end to end since step 1 was
+corrected; the `createdb` line as previously written did not work. Treat the
+restore path as documented-and-reasoned rather than freshly tested, and
+rehearse it against a throwaway database before you need it in anger. That
+rehearsal is the only way to find out that your backups are restorable
+rather than merely present.
 
 ### 1. Prerequisites on the target cluster
 
@@ -61,6 +73,21 @@ even with superuser rights on the restore role.
 ```bash
 createdb skein_restore   # or whatever name you're restoring into
 ```
+
+**Creating the database needs a role with `CREATEDB`, which the application
+role deliberately does not have.** Skein's own `SKEIN_DATABASE_URL` role
+only owns its tables; pointing `createdb` at it fails with `permission
+denied to create database`, and bare `createdb` fails with `role "<you>"
+does not exist` unless your shell user happens to be a PostgreSQL role. Use
+an administrative role for this step:
+
+```bash
+sudo -u postgres createdb -O skein skein_restore
+```
+
+`-O skein` makes the application role the owner, so the restored database is
+usable by the same credentials as the original. Steps 2 and 3 can then run as
+either role.
 
 ### 2. Restore the dump
 

@@ -164,7 +164,23 @@ backup:
 	        -c 'SELECT max(version_id) FROM goose_db_version' 2>/dev/null); \
 	[ -n "$$ver" ] || ver=unknown; \
 	out="backups/skein-$$(date +%Y%m%d-%H%M%S)-v$$ver.sql.gz"; \
-	pg_dump --no-owner --no-privileges "$$SKEIN_DATABASE_URL" | gzip > "$$out"; \
+	tmp="$$out.partial"; \
+	: 'pg_dump | gzip hides pg_dump failure: sh reports the exit status of'; \
+	: 'the LAST command, so a dump that never connected still left a valid'; \
+	: 'empty .gz and printed "wrote ...". A backup that fails silently is'; \
+	: 'worse than one that fails loudly. Capture pg_dump own status, and'; \
+	: 'write to .partial so a failed run cannot leave a file that looks'; \
+	: 'like a backup. Reproduced 2026-08-01.'; \
+	if pg_dump --no-owner --no-privileges "$$SKEIN_DATABASE_URL" > "$$tmp.sql"; then \
+	  gzip -c "$$tmp.sql" > "$$out" && rm -f "$$tmp.sql"; \
+	else \
+	  rm -f "$$tmp.sql" "$$out"; \
+	  echo "backup FAILED: pg_dump could not dump $$SKEIN_DATABASE_URL; no file written" >&2; \
+	  exit 1; \
+	fi; \
+	if [ ! -s "$$out" ]; then \
+	  rm -f "$$out"; echo "backup FAILED: dump was empty; no file written" >&2; exit 1; \
+	fi; \
 	echo "wrote $$out ($$(du -h "$$out" | cut -f1))"; \
 	echo "schema version: $$ver — restoring this dump lands at v$$ver, then run 'make migrate'"; \
 	echo; \
