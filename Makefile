@@ -71,10 +71,25 @@ build-go:
 ## are empty so Wails does not run a second, competing Vite build — `make
 ## web` already produced internal/web/dist, which cmd/skein-desktop embeds
 ## the same way cmd/skein does.
+##
+## DESKTOP_CLIENT_ID/_SECRET are the Google Desktop app OAuth credentials
+## baked into a distributed build. Both are optional: left unset, the binary
+## has no default and each user supplies SKEIN_GOOGLE_DESKTOP_CLIENT_ID and
+## _SECRET themselves. Google requires the secret at token exchange even for
+## this public client type, and it is not confidential — it ships inside the
+## binary, and PKCE is what secures the flow (docs/SECURITY.md). Set both or
+## neither; a half-set pair is rejected at connect time rather than silently
+## mixing credentials from two different clients.
+DESKTOP_CLIENT_ID ?=
+DESKTOP_CLIENT_SECRET ?=
+DESKTOP_LDFLAGS = -X main.version=$(VERSION) \
+	-X main.desktopClientID=$(DESKTOP_CLIENT_ID) \
+	-X main.desktopClientSecret=$(DESKTOP_CLIENT_SECRET)
+
 desktop: web
 	@mkdir -p bin
 	cd cmd/skein-desktop && $(GOBIN)/wails build -tags webkit2_41 -skipbindings \
-		-trimpath -ldflags '-X main.version=$(VERSION)' -clean -f
+		-trimpath -ldflags '$(DESKTOP_LDFLAGS)' -clean -f
 	cp cmd/skein-desktop/build/bin/skein-desktop bin/skein-desktop
 	@ls -lh bin/skein-desktop
 

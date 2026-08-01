@@ -25,16 +25,21 @@ import (
 // discourage embedded webviews for the consent screen, and only a real
 // browser shows the user the address bar that makes the request legible.
 type Connector struct {
-	svc      *accounts.Service
-	log      *slog.Logger
-	clientID func() string
+	svc          *accounts.Service
+	log          *slog.Logger
+	clientID     func() string
+	clientSecret func() string
 }
 
-// NewConnector builds a connector. clientID is resolved at connect time, not
-// at construction, so a client id set later (env var, or a future "use my
-// own Google client" setting) takes effect without restarting.
-func NewConnector(svc *accounts.Service, log *slog.Logger, clientID func() string) *Connector {
-	return &Connector{svc: svc, log: log, clientID: clientID}
+// NewConnector builds a connector. clientID and clientSecret are resolved at
+// connect time, not at construction, so credentials set later (env vars, or a
+// future "use my own Google client" setting) take effect without restarting.
+//
+// clientSecret is not confidential — Google issues one for Desktop app
+// clients and requires it at exchange, but it ships in the binary and PKCE is
+// what actually secures this flow. See accounts.DesktopGoogleOAuthConfig.
+func NewConnector(svc *accounts.Service, log *slog.Logger, clientID, clientSecret func() string) *Connector {
+	return &Connector{svc: svc, log: log, clientID: clientID, clientSecret: clientSecret}
 }
 
 // Connect runs one attempt end to end and returns once the drive is linked
@@ -48,6 +53,15 @@ func (c *Connector) Connect(ctx context.Context, userID uuid.UUID) (accounts.Acc
 		return accounts.Account{}, skerr.Public(skerr.ErrNotImplemented,
 			"No Google client is configured for this app. Set SKEIN_GOOGLE_DESKTOP_CLIENT_ID and restart.")
 	}
+	clientSecret := c.clientSecret()
+	if clientSecret == "" {
+		// Google requires a secret for Desktop app clients at token exchange
+		// (see accounts.DesktopGoogleOAuthConfig). Catching it here names the
+		// missing variable; letting it through produces an invalid_request
+		// from Google that reads as though the client were the wrong type.
+		return accounts.Account{}, skerr.Public(skerr.ErrNotImplemented,
+			"No Google client secret is configured for this app. Set SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET and restart.")
+	}
 
 	listener, err := OpenLoopbackListener()
 	if err != nil {
@@ -59,7 +73,7 @@ func (c *Connector) Connect(ctx context.Context, userID uuid.UUID) (accounts.Acc
 	// Close deliberately does not take ctx (see its own doc comment).
 	defer listener.Close() //nolint:contextcheck
 
-	cfg := accounts.DesktopGoogleOAuthConfig(clientID, listener.RedirectURL())
+	cfg := accounts.DesktopGoogleOAuthConfig(clientID, c.clientSecret(), listener.RedirectURL())
 	verifier := oauth2.GenerateVerifier()
 
 	authURL, err := c.svc.BeginGoogleConnectPKCE(ctx, cfg, verifier, userID, "")
