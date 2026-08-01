@@ -1,3 +1,5 @@
+<samp>
+
 # Development
 
 ## Prerequisites
@@ -138,3 +140,5 @@ See `PLAN/Rules.md` for the full, longer rule set this project holds itself
 to - in particular §1's table of anti-patterns this codebase exists as a
 reaction to, and §5's eleven-question security checklist run against every
 diff touching a handler, a query, or a stream.
+
+</samp>

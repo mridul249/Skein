@@ -1,3 +1,5 @@
+<samp>
+
 # Implementation notes
 
 Things a reader of the code will wonder about, answered once here rather than
@@ -109,3 +111,5 @@ Named because "missing" and "deliberately absent" look identical from outside:
   the data is there; nothing consumes it.
 - **S3 / R2 / B2 backends.** `storage.Backend` is the whole interface needed;
   `KindS3` is already a valid value in the database constraint.
+
+</samp>

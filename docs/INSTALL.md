@@ -1,3 +1,5 @@
+<samp>
+
 # Install
 
 Two binaries, two setups. Pick the one you actually want before you start:
@@ -146,3 +148,5 @@ Both builds land on the same login screen - registration is open, there is
 no invite gate. Register, sign in, connect a drive (§4), and you're pooling
 storage. `docs/CONFIGURATION.md` covers every environment variable if you
 need to tune limits, ports, or proxy trust before going further.
+
+</samp>
