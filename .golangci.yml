@@ -6,6 +6,7 @@ run:
 
 linters:
   default: none
+
   enable:
     - errcheck
     - govet
@@ -19,51 +20,43 @@ linters:
 
   settings:
     errcheck:
-      # check-blank stays off: writes to an http.ResponseWriter after the
-      # status is committed have no recovery path, and `_, _ =` is the
-      # honest way to say so. check-type-assertions stays off because the
-      # comma-ok form is already the safe form.
       check-type-assertions: false
       check-blank: false
       exclude-functions:
         - (net/http.ResponseWriter).Write
+
     gosec:
       excludes:
-        # G115 (integer conversion overflow) fires on every int64<->int
-        # conversion. Sizes are validated against explicit bounds before
-        # conversion at each site that matters.
         - G115
-    # govet's default analysers only. The shadow check is deliberately off:
-    # it fires on `if err := f(); err != nil` inside any function that already
-    # has an err, which is the idiomatic form, and Rules.md §4 does not ask
-    # for it. Genuine shadowing of a value that is later read still shows up
-    # in review.
+
     govet:
       disable:
         - fieldalignment
 
   exclusions:
     generated: lax
-    rules:
-      # Generated sqlc output is not ours to lint.
-      - path: internal/db/gen/
-        linters: [errcheck, gosec, staticcheck, unused, govet]
-      # Tests may use weak randomness and read fixture paths.
-      - path: _test\.go$
-        linters: [gosec, bodyclose, contextcheck]
 
-issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
-  exclude-dirs:
-    # A local fork of github.com/wailsapp/wails/v2, vendored so
-    # wails.RunWithStartURL can exist at all — see third_party/wails-v2.13.0/PATCH.md.
-    # Everything but the three patched files is byte-identical to upstream
-    # and not ours to lint.
-    - third_party
+    paths:
+      - third_party/
+
+    rules:
+      - path: ^internal/db/gen/
+        linters:
+          - errcheck
+          - gosec
+          - staticcheck
+          - unused
+          - govet
+
+      - path: .*_test\.go$
+        linters:
+          - gosec
+          - bodyclose
+          - contextcheck
 
 formatters:
   enable:
     - gofmt
+
   exclusions:
     generated: lax
