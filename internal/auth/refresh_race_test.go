@@ -30,8 +30,20 @@ import (
 // security response fires, reports success, and leaves a live session chain.
 //
 // No production code is touched. Store is a consumer-declared interface
-// (store.go:74), so the barrier is a decorator around MemoryStore: it holds the
-// winner's successor insert until the loser's family revocation has returned.
+// (store.go:74), so the barrier is a decorator around whichever store is under
+// test: it holds the winner's successor insert until the loser's family
+// revocation has returned.
+//
+// This runs against SQLite too, which is not obviously safe: SQLite permits one
+// writer at a time, so an interleaving that suspends one write mid-flight while
+// another must commit could deadlock rather than pass or fail. It does not, and
+// the reason is that the barrier blocks BETWEEN statements rather than inside a
+// transaction. CreateSession waits before issuing its INSERT, holding no write
+// lock while it waits, so the loser's revocation acquires the lock, commits and
+// releases it; only then does the insert run. Had the barrier been placed
+// inside a transaction that already held the write lock, this would deadlock
+// until busy_timeout fired and the harness would report timedOut rather than
+// silently passing -- which is what the timedOut guard below exists for.
 
 // barrierStore forces the revoke-before-insert order.
 //
@@ -98,7 +110,7 @@ func (b *barrierStore) state() (waited, timedOut bool) {
 
 // describeFamily renders every session in the family so the interleaving is
 // legible from the failure output rather than reconstructed by hand.
-func describeFamily(t *testing.T, store *MemoryStore, familyID uuid.UUID) {
+func describeFamily(t *testing.T, store testStore, familyID uuid.UUID) {
 	t.Helper()
 
 	sessions := store.SessionsInFamily(familyID)
@@ -132,7 +144,11 @@ func fmtTime(t *time.Time) string {
 // That test stays exactly as it is: it is the check that the fix also holds
 // under real timing, not only under this barrier.
 func TestRefreshConcurrentUseRevokesFamilyDeterministically(t *testing.T) {
-	store := NewMemoryStore()
+	// Runs against whichever backend the conformance harness selected, not
+	// MemoryStore unconditionally: forcing this interleaving only proves
+	// something about the store actually under test. Verified to engage under
+	// both -- waited=true, timedOut=false on memory and on SQLite alike.
+	store := newConformanceStore(t)
 	barrier := newBarrierStore(store)
 	svc := NewService(
 		barrier,

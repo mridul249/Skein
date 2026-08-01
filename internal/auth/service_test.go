@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/mridul60214/skein/internal/skerr"
 )
 
@@ -18,9 +20,25 @@ const (
 	testPassword = "correct horse battery staple"
 )
 
-func newTestService(t *testing.T) (*Service, *MemoryStore) {
+// testStore is the Store plus the inspection helpers these tests assert on.
+// MemoryStore and SQLiteStore both satisfy it, which is what lets every test
+// below run unmodified against either backend.
+type testStore interface {
+	Store
+	SessionByID(id uuid.UUID) (Session, bool)
+	SessionsInFamily(familyID uuid.UUID) []Session
+	FamilyRevokedAt(familyID uuid.UUID) (*time.Time, bool)
+	EventsOfKind(kind string) []SecurityEvent
+	ExpireSession(id uuid.UUID) error
+}
+
+// newTestService builds a service over whichever backend the current
+// conformance run selected (see storeconformance_test.go). It defaults to
+// MemoryStore, so a test run directly -- `go test -run TestLogin` -- behaves
+// exactly as it did before this was parameterised.
+func newTestService(t *testing.T) (*Service, testStore) {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newConformanceStore(t)
 	svc := NewService(
 		store,
 		NewTokenIssuer(strings.Repeat("k", 48), 15*time.Minute),
