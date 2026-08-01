@@ -92,7 +92,7 @@ bench:
 
 ## lint: gofmt check, go vet, golangci-lint
 lint:
-	@gofmt -l . | grep -v '^web/' | (! grep .) || (echo "gofmt needed on the files above"; exit 1)
+	@gofmt -l . | grep -v '^web/' | grep -v '^third_party/' | (! grep .) || (echo "gofmt needed on the files above"; exit 1)
 	go vet $(PKG)
 	$(GOBIN)/golangci-lint run
 

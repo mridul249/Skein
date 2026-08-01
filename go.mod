@@ -50,3 +50,8 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )
+
+// Local fork: wails.RunWithStartURL, so cmd/skein-desktop can point the
+// window at a real http:// origin instead of the wails:// custom scheme.
+// See third_party/wails-v2.13.0/PATCH.md for what changed and why.
+replace github.com/wailsapp/wails/v2 => ./third_party/wails-v2.13.0

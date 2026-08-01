@@ -10,6 +10,7 @@ import { Login } from './pages/Login';
 import { Trash } from './pages/Trash';
 import { SessionContext, type SessionValue } from './lib/session';
 import { UploadsProvider } from './lib/uploads-context';
+import { DownloadsProvider } from './lib/downloads-context';
 import { api, onSessionChange, type User } from './lib/api';
 import './styles/index.css';
 import { Wordmark } from './components/Wordmark';
@@ -70,17 +71,19 @@ function App() {
         known issue #13, and the cause of the reservation-leak incident.
       */}
       <UploadsProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-            <Route element={user ? <Layout /> : <Navigate to="/login" replace />}>
-              <Route path="/" element={<Files />} />
-              <Route path="/trash" element={<Trash />} />
-              <Route path="/settings" element={<Drives />} />
-            </Route>
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </BrowserRouter>
+        <DownloadsProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+              <Route element={user ? <Layout /> : <Navigate to="/login" replace />}>
+                <Route path="/" element={<Files />} />
+                <Route path="/trash" element={<Trash />} />
+                <Route path="/settings" element={<Drives />} />
+              </Route>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </BrowserRouter>
+        </DownloadsProvider>
       </UploadsProvider>
     </SessionContext.Provider>
   );

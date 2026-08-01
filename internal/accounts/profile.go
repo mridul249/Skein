@@ -47,8 +47,14 @@ func (s *Service) fetchGoogleProfile(ctx context.Context, token *oauth2.Token) (
 		_ = resp.Body.Close()
 	}()
 
+	// ErrValidation, not ErrUnauthorized, on both failures below: this can be
+	// reached from the desktop connect flow's authenticated handler, and the
+	// frontend clears the whole app session (and retries once) on any 401 —
+	// see the identical reasoning recorded in service.go's completeConnect.
+	// A Google profile lookup failing says nothing about whether the caller
+	// is still logged into Skein.
 	if resp.StatusCode != http.StatusOK {
-		return googleProfile{}, skerr.Public(skerr.ErrUnauthorized,
+		return googleProfile{}, skerr.Public(skerr.ErrValidation,
 			"Google would not confirm which account that was. Try connecting again.")
 	}
 
@@ -59,7 +65,7 @@ func (s *Service) fetchGoogleProfile(ctx context.Context, token *oauth2.Token) (
 		return googleProfile{}, fmt.Errorf("decode google profile: %w", err)
 	}
 	if strings.TrimSpace(p.Sub) == "" {
-		return googleProfile{}, skerr.Public(skerr.ErrUnauthorized,
+		return googleProfile{}, skerr.Public(skerr.ErrValidation,
 			"Google did not return an account id. Try connecting again.")
 	}
 	if p.Email == "" {

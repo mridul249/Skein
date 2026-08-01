@@ -77,13 +77,24 @@ func (c *Connector) Connect(ctx context.Context, userID uuid.UUID) (accounts.Acc
 	if err != nil {
 		c.log.WarnContext(ctx, "desktop oauth attempt timed out or was cancelled",
 			slog.String("user_id", userID.String()), slog.String("error", err.Error()))
-		return accounts.Account{}, skerr.Public(skerr.ErrUnauthorized,
+		// Not ErrUnauthorized: that sentinel means "your session is invalid"
+		// everywhere else in the API, and the frontend's generic 401 handler
+		// treats it as exactly that — it clears the whole app session and,
+		// worse, retries the request once against a freshly refreshed token
+		// (api.ts's one-retry-after-refresh rule). For every other 401 that
+		// retry is correct and harmless. Here it is not: a second retry
+		// means a second loopback listener and a second browser tab, and
+		// clearing the session logs the user out of the app entirely over
+		// an OAuth attempt that timed out, which has nothing to do with
+		// whether their Skein login is still valid. Reproduced 2026-08-01 —
+		// this mapping is the actual cause of both symptoms.
+		return accounts.Account{}, skerr.Public(skerr.ErrValidation,
 			"That took too long. Try connecting again.")
 	}
 	if result.Err != "" {
 		c.log.WarnContext(ctx, "desktop oauth cancelled or refused",
 			slog.String("user_id", userID.String()), slog.String("provider_error", result.Err))
-		return accounts.Account{}, skerr.Public(skerr.ErrUnauthorized, "Connection cancelled.")
+		return accounts.Account{}, skerr.Public(skerr.ErrValidation, "Connection cancelled.")
 	}
 
 	acct, _, err := c.svc.CompleteGoogleConnectPKCE(ctx, cfg, result.State, result.Code)
