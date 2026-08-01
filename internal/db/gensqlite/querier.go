@@ -9,6 +9,27 @@ import (
 )
 
 type Querier interface {
+	// ClearAccountTokens wipes stored credentials without touching the row, so a
+	// disconnected account stops being usable while its id -- and therefore every
+	// file_shards.connected_account_id pointing at it -- survives. The Postgres
+	// version casts an empty string to bytea; here the caller passes an empty
+	// blob, since access_token_enc is NOT NULL.
+	//
+	ClearAccountTokens(ctx context.Context, arg ClearAccountTokensParams) error
+	// ConsumeOAuthState is single use by construction: the row is deleted as it is
+	// read, so a replayed callback finds nothing. The expiry predicate is in SQL so
+	// a stale state cannot be accepted by a clock-skewed application check.
+	//
+	ConsumeOAuthState(ctx context.Context, arg ConsumeOAuthStateParams) (OauthState, error)
+	// SQLite dialect of internal/db/queries/accounts.sql. Same contracts; the
+	// differences are noted where they exist. now() becomes a bound parameter
+	// throughout, as in sessions.sql.
+	//
+	// KEEP THIS FILE ASCII-ONLY -- see the note at the top of sessions.sql. sqlc
+	// v1.31.1 miscounts multi-byte characters in comments and truncates the query
+	// that follows.
+	CreateConnectedAccount(ctx context.Context, arg CreateConnectedAccountParams) (ConnectedAccount, error)
+	CreateOAuthState(ctx context.Context, arg CreateOAuthStateParams) error
 	// SQLite dialect of internal/db/queries/sessions.sql. Same contracts, same
 	// comments where the reasoning is unchanged; the differences are noted where
 	// they exist. now() becomes a bound parameter throughout (see users.sql).
@@ -35,6 +56,14 @@ type Querier interface {
 	// also makes these queries testable against a fake clock rather than the
 	// wall clock. See internal/db/migrations/sqlite/00001_auth.sql.
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// DeleteConnectedAccount is deliberately NOT used to disconnect a drive: the
+	// ON DELETE SET NULL on file_shards.connected_account_id would orphan every
+	// shard the drive held, unrecoverably (known issue #19). Disconnect soft
+	// deletes via SetAccountStatus + ClearAccountTokens instead. This remains for
+	// true row removal, e.g. hard-deleting a user's data.
+	//
+	DeleteConnectedAccount(ctx context.Context, arg DeleteConnectedAccountParams) (int64, error)
+	DeleteExpiredOAuthStates(ctx context.Context, expiresAt string) (int64, error)
 	// DeleteExpiredSessions drops long-dead rows. The Postgres original computes
 	// the cutoff in SQL (now() - INTERVAL '30 days'); here the caller passes the
 	// already-computed cutoff, so the retention window lives in one place in Go
@@ -44,6 +73,9 @@ type Querier interface {
 	EventsOfKind(ctx context.Context, kind string) ([]SecurityEvent, error)
 	ExpireSession(ctx context.Context, arg ExpireSessionParams) (int64, error)
 	FamilyRevokedAt(ctx context.Context, id string) (*string, error)
+	GetAppFolderID(ctx context.Context, id string) (*string, error)
+	GetConnectedAccount(ctx context.Context, arg GetConnectedAccountParams) (ConnectedAccount, error)
+	GetConnectedAccountByProviderID(ctx context.Context, arg GetConnectedAccountByProviderIDParams) (ConnectedAccount, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
 	// GetSessionByRefreshHash looks a session up by the hash of the presented
 	// token. It deliberately returns revoked, used and expired rows too: the
@@ -56,6 +88,15 @@ type Querier interface {
 	//
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
+	// ListActiveAccountsForSync feeds the background quota ticker, which is not
+	// acting on behalf of a request and so has no user to scope by.
+	//
+	ListActiveAccountsForSync(ctx context.Context) ([]ConnectedAccount, error)
+	ListConnectedAccounts(ctx context.Context, userID string) ([]ConnectedAccount, error)
+	// ListStorageAccounts returns capacity joined to the owning account. It is one
+	// query rather than a list plus a lookup per row, per Rules.md section 2.12.
+	//
+	ListStorageAccounts(ctx context.Context, userID string) ([]ListStorageAccountsRow, error)
 	MarkEmailVerified(ctx context.Context, arg MarkEmailVerifiedParams) error
 	// MarkSessionUsed claims a refresh token. The used_at IS NULL predicate makes
 	// the claim atomic: two concurrent refreshes with the same token produce one
@@ -85,6 +126,13 @@ type Querier interface {
 	// not drift on the one query that enforces issue #11.
 	//
 	MarkSessionUsed(ctx context.Context, arg MarkSessionUsedParams) (Session, error)
+	NextAccountOrdinal(ctx context.Context, userID string) (int64, error)
+	// --- test support ---------------------------------------------------------
+	// Back the inspection helpers the accounts test suite uses (memstore.go has
+	// in-memory equivalents). Read-only apart from SetReservedBytes, and no
+	// production caller.
+	PendingStateCount(ctx context.Context) (int64, error)
+	PendingVerifiers(ctx context.Context) ([]string, error)
 	RecordSecurityEvent(ctx context.Context, arg RecordSecurityEventParams) error
 	// RevokeAllUserSessions signs a user out everywhere.
 	//
@@ -125,7 +173,29 @@ type Querier interface {
 	// state (memstore.go has in-memory equivalents). They are read-only and have
 	// no production caller.
 	SessionsInFamily(ctx context.Context, familyID string) ([]Session, error)
+	SetAccountStatus(ctx context.Context, arg SetAccountStatusParams) error
+	// SetAppFolderID records where this account's shards live at the provider.
+	//
+	// The app_folder_id IS NULL predicate makes the write single-shot: if another
+	// process established a folder first, this one returns no row and the caller
+	// re-reads rather than overwriting a good id with a duplicate folder.
+	//
+	SetAppFolderID(ctx context.Context, arg SetAppFolderIDParams) (*string, error)
+	SetReservedBytes(ctx context.Context, arg SetReservedBytesParams) error
+	SetStorageAccountError(ctx context.Context, arg SetStorageAccountErrorParams) error
+	StateHashExists(ctx context.Context, stateHash []byte) (int64, error)
+	// UpdateAccountTokens refreshes the stored credentials for an account that is
+	// already linked. The user_id predicate is not decoration: it is what stops a
+	// callback from writing tokens into somebody else's row.
+	//
+	// Setting status back to 'active' is what makes reconnecting a disconnected
+	// drive work: Disconnect soft deletes by setting status = 'disabled' and
+	// clearing the tokens (issue #19), and this is the write that undoes both
+	// while keeping the row id -- and therefore every shard's link to it -- intact.
+	//
+	UpdateAccountTokens(ctx context.Context, arg UpdateAccountTokensParams) (ConnectedAccount, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
+	UpsertStorageAccount(ctx context.Context, arg UpsertStorageAccountParams) error
 }
 
 var _ Querier = (*Queries)(nil)

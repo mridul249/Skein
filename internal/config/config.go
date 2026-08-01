@@ -26,7 +26,7 @@ type Config struct {
 	LogLevel string `env:"SKEIN_LOG_LEVEL" envDefault:"info"`
 	LogJSON  bool   `env:"SKEIN_LOG_JSON"  envDefault:"false"`
 
-	DatabaseURL string `env:"SKEIN_DATABASE_URL,required"`
+	DatabaseURL string `env:"SKEIN_DATABASE_URL"`
 
 	// MasterKeyB64 is the base64 (standard encoding) of a 32-byte key. All
 	// other keys in the system derive from it via HKDF-SHA256.
@@ -87,11 +87,21 @@ type Config struct {
 
 // Load reads the configuration from the environment and validates it.
 func Load() (*Config, error) {
+	return load(true)
+}
+
+// LoadDesktop reads configuration for skein-desktop. The desktop build uses a
+// local SQLite database, so SKEIN_DATABASE_URL is optional there.
+func LoadDesktop() (*Config, error) {
+	return load(false)
+}
+
+func load(requireDatabaseURL bool) (*Config, error) {
 	var c Config
 	if err := env.Parse(&c); err != nil {
 		return nil, fmt.Errorf("parse environment: %w", err)
 	}
-	if err := c.validate(); err != nil {
+	if err := c.validate(requireDatabaseURL); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -135,8 +145,12 @@ func (c *Config) GoogleConfigured() bool {
 	return c.GoogleClientID != "" && c.GoogleClientSecret != "" && c.GoogleRedirectURL != ""
 }
 
-func (c *Config) validate() error {
+func (c *Config) validate(requireDatabaseURL bool) error {
 	var errs []error
+
+	if requireDatabaseURL && c.DatabaseURL == "" {
+		errs = append(errs, errors.New("SKEIN_DATABASE_URL is required"))
+	}
 
 	switch c.Env {
 	case "development", "production", "test":

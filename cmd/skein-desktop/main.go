@@ -87,7 +87,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	a, err := app.Build(ctx, app.WithDesktopConnect(newDesktopConnector))
+	a, err := app.Build(ctx,
+		app.WithSQLiteDatabase(""),
+		app.WithDesktopConnect(newDesktopConnector),
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "skein-desktop: %v\n", err)
 		os.Exit(1)
