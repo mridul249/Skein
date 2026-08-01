@@ -15,7 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
 )
 
 // fakeDrive counts folder creates, which is the number the exit criteria are

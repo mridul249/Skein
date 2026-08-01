@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 // Principal is the authenticated caller attached to a request context.

@@ -13,10 +13,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/capability"
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
-	"github.com/mridul60214/skein/internal/httpapi/httpx"
-	"github.com/mridul60214/skein/internal/httpapi/middleware"
+	"github.com/mridul249/Skein/internal/capability"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
+	"github.com/mridul249/Skein/internal/httpapi/httpx"
+	"github.com/mridul249/Skein/internal/httpapi/middleware"
 )
 
 // stubVerifier accepts exactly one bearer token.

@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 // MemoryStore is an in-memory Store for tests, in the same spirit as

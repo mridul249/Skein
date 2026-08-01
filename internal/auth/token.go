@@ -11,7 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/httpapi/middleware"
+	"github.com/mridul249/Skein/internal/httpapi/middleware"
 )
 
 // refreshTokenLen is 32 bytes of crypto/rand per Rules.md §2.8.

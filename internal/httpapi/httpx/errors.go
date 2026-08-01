@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/mridul60214/skein/internal/httpapi/middleware"
-	"github.com/mridul60214/skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/httpapi/middleware"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 // Package httpx renders API responses. It sits below the router so that

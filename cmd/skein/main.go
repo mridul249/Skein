@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/mridul60214/skein/internal/app"
+	"github.com/mridul249/Skein/internal/app"
 )
 
 // version is stamped at build time via -ldflags.

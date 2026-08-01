@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/capability"
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
+	"github.com/mridul249/Skein/internal/capability"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
 )
 
 func testSigner(t *testing.T) *capability.Signer {

@@ -37,7 +37,7 @@ import (
 
 	"github.com/google/uuid"
 
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
 )
 
 // TTL is how long a minted grant stays valid.

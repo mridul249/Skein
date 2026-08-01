@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/mridul60214/skein/internal/db/gen"
+	"github.com/mridul249/Skein/internal/db/gen"
 )
 
 // PGStore is the Postgres implementation of Store.

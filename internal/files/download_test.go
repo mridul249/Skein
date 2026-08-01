@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/files"
-	"github.com/mridul60214/skein/internal/skerr"
-	"github.com/mridul60214/skein/internal/storage"
+	"github.com/mridul249/Skein/internal/files"
+	"github.com/mridul249/Skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 func TestOpenRange(t *testing.T) {

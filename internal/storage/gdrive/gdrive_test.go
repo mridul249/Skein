@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mridul60214/skein/internal/storage"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 // The Drive endpoints are package-level constants, so the tests point the

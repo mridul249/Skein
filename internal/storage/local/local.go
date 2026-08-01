@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/mridul60214/skein/internal/storage"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 // Backend stores objects as files under a root directory.

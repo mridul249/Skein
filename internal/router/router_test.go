@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
-	"github.com/mridul60214/skein/internal/skerr"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 const (

@@ -12,12 +12,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/capability"
-	"github.com/mridul60214/skein/internal/files"
-	"github.com/mridul60214/skein/internal/httpapi/httpx"
-	"github.com/mridul60214/skein/internal/httpapi/middleware"
-	"github.com/mridul60214/skein/internal/skerr"
-	"github.com/mridul60214/skein/internal/storage"
+	"github.com/mridul249/Skein/internal/capability"
+	"github.com/mridul249/Skein/internal/files"
+	"github.com/mridul249/Skein/internal/httpapi/httpx"
+	"github.com/mridul249/Skein/internal/httpapi/middleware"
+	"github.com/mridul249/Skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 // sniffLen is how many bytes http.DetectContentType looks at. Reading exactly

@@ -12,16 +12,16 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/accounts"
-	"github.com/mridul60214/skein/internal/auth"
-	"github.com/mridul60214/skein/internal/capability"
-	"github.com/mridul60214/skein/internal/config"
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
-	"github.com/mridul60214/skein/internal/files"
-	"github.com/mridul60214/skein/internal/httpapi/handlers"
-	"github.com/mridul60214/skein/internal/httpapi/httpx"
-	"github.com/mridul60214/skein/internal/httpapi/middleware"
-	"github.com/mridul60214/skein/internal/web"
+	"github.com/mridul249/Skein/internal/accounts"
+	"github.com/mridul249/Skein/internal/auth"
+	"github.com/mridul249/Skein/internal/capability"
+	"github.com/mridul249/Skein/internal/config"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
+	"github.com/mridul249/Skein/internal/files"
+	"github.com/mridul249/Skein/internal/httpapi/handlers"
+	"github.com/mridul249/Skein/internal/httpapi/httpx"
+	"github.com/mridul249/Skein/internal/httpapi/middleware"
+	"github.com/mridul249/Skein/internal/web"
 )
 
 // jsonBodyLimit caps every JSON request body. Rules.md §2.13.

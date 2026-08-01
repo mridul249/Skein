@@ -12,13 +12,13 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/accounts"
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
-	"github.com/mridul60214/skein/internal/files"
-	"github.com/mridul60214/skein/internal/router"
-	"github.com/mridul60214/skein/internal/skerr"
-	"github.com/mridul60214/skein/internal/storage"
-	"github.com/mridul60214/skein/internal/storage/local"
+	"github.com/mridul249/Skein/internal/accounts"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
+	"github.com/mridul249/Skein/internal/files"
+	"github.com/mridul249/Skein/internal/router"
+	"github.com/mridul249/Skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/storage"
+	"github.com/mridul249/Skein/internal/storage/local"
 )
 
 // Issue #19, now fixed and guarded here. Disconnecting a drive used to delete

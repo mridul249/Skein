@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/mridul60214/skein/internal/db/gen"
-	"github.com/mridul60214/skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/db/gen"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 const pgUniqueViolation = "23505"

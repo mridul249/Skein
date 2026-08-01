@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
-	"github.com/mridul60214/skein/internal/skerr"
-	"github.com/mridul60214/skein/internal/storage"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
+	"github.com/mridul249/Skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 // Content is an open read over a file's bytes.

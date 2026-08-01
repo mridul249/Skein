@@ -31,10 +31,10 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	waillinux "github.com/wailsapp/wails/v2/pkg/options/linux"
 
-	"github.com/mridul60214/skein/internal/accounts"
-	"github.com/mridul60214/skein/internal/app"
-	"github.com/mridul60214/skein/internal/desktopoauth"
-	"github.com/mridul60214/skein/internal/httpapi/handlers"
+	"github.com/mridul249/Skein/internal/accounts"
+	"github.com/mridul249/Skein/internal/app"
+	"github.com/mridul249/Skein/internal/desktopoauth"
+	"github.com/mridul249/Skein/internal/httpapi/handlers"
 )
 
 // version is stamped at build time via -ldflags.

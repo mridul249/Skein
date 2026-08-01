@@ -19,8 +19,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/httpapi/middleware"
-	"github.com/mridul60214/skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/httpapi/middleware"
+	"github.com/mridul249/Skein/internal/skerr"
 )
 
 const (

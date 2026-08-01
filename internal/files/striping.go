@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/router"
+	"github.com/mridul249/Skein/internal/router"
 )
 
 // StripingPlanner adapts router.Planner to the Planner interface the upload

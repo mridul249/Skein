@@ -10,9 +10,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mridul60214/skein/internal/db/gensqlite"
-	"github.com/mridul60214/skein/internal/skerr"
-	"github.com/mridul60214/skein/internal/storage"
+	"github.com/mridul249/Skein/internal/db/gensqlite"
+	"github.com/mridul249/Skein/internal/skerr"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 // sqliteTimeLayout matches internal/auth's: fixed-width UTC RFC 3339, so text

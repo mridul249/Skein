@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mridul60214/skein/internal/files"
-	"github.com/mridul60214/skein/internal/storage"
+	"github.com/mridul249/Skein/internal/files"
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 // memoryCeilingBytes is the promise this project makes.

@@ -13,7 +13,7 @@ import (
 
 	"github.com/caarlos0/env/v11"
 
-	skcrypto "github.com/mridul60214/skein/internal/crypto"
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
 )
 
 // MasterKeyLen is the required length, in bytes, of the decoded master key.
