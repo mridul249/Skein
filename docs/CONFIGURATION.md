@@ -6,7 +6,8 @@ the process before it listens, never a runtime surprise. `.env` is read in
 development; in production, set these however your deployment does.
 
 Both `skein serve` and `skein-desktop` read the same variables. The desktop
-build additionally reads `SKEIN_GOOGLE_DESKTOP_CLIENT_ID` (§6).
+build additionally reads `SKEIN_GOOGLE_DESKTOP_CLIENT_ID` and
+`SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET` (§6).
 
 ## Core
 
@@ -103,7 +104,8 @@ deliberately (§6) and is not subject to this check because it never sets
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SKEIN_GOOGLE_DESKTOP_CLIENT_ID` | *(empty; falls back to the compiled-in default)* | Overrides the Google Desktop app OAuth client id compiled into `skein-desktop` at build time, for anyone who wants their own API quota instead of Skein's shared one. Re-read on every connect attempt, so setting it takes effect without restarting the app. No corresponding secret variable exists — desktop OAuth clients don't have one (RFC 8252); see [SECURITY.md](SECURITY.md#pkce-desktop-oauth). |
+| `SKEIN_GOOGLE_DESKTOP_CLIENT_ID` | *(empty; falls back to the compiled-in default)* | Overrides the Google Desktop app OAuth client id compiled into `skein-desktop` at build time, for anyone who wants their own API quota instead of Skein's shared one. Re-read on every connect attempt, so setting it takes effect without restarting the app. **Must be set together with `_SECRET`** — setting only this one is rejected rather than silently pairing your client id with the built-in secret of a different client. |
+| `SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET` | *(empty; falls back to the compiled-in default)* | The secret Google issues for the Desktop app client above. Google requires it at the token exchange even though the client is public, so it must be set whenever `_ID` is. It is **not confidential** — it ships inside the distributed binary and PKCE is what actually secures this flow; see [SECURITY.md](SECURITY.md#pkce-desktop-oauth). |
 
 Not read from `.env.example` by default; export it in your shell or launch
 `skein-desktop` with it set if you want your own client.

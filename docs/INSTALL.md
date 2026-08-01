@@ -102,10 +102,15 @@ If you want your own client instead of Skein's shared one — for your own
 Drive API quota, or because you don't want to trust a shared client —
 create a **Desktop app** OAuth client the same way as steps 1–3 above (type
 **Desktop app**, not Web application; no redirect URI to register — Skein's
-loopback listener supplies one per attempt), then set
-`SKEIN_GOOGLE_DESKTOP_CLIENT_ID` in your environment before launching
-`skein-desktop`. No client secret field exists for this client type; if a
-flow ever appears to want one, the client was registered as the wrong type.
+loopback listener supplies one per attempt), then set **both**
+`SKEIN_GOOGLE_DESKTOP_CLIENT_ID` and `SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET`
+in your environment before launching `skein-desktop`.
+
+Google does issue a client secret for Desktop app clients, and its token
+endpoint requires it — so setting only the ID is rejected with a message
+naming the missing variable. The secret is not confidential (it ships in the
+binary; PKCE is what secures the flow), but it must be sent. See
+[SECURITY.md](SECURITY.md#pkce-desktop-oauth).
 
 ## 5. Build and run
 
