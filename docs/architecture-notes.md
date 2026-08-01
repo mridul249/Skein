@@ -22,7 +22,7 @@ frame. `size_bytes` is what the provider stores, `plain_size_bytes` is what the
 user uploaded, and `plain_offset` is where the shard sits in the whole file.
 
 Conflating them works exactly until encryption is enabled and then silently
-mis-seeks every range request — a bug that produces plausible wrong bytes
+mis-seeks every range request - a bug that produces plausible wrong bytes
 rather than an error.
 
 ## Why uploads are a Reader chain, not a Writer chain
@@ -41,7 +41,7 @@ consumer, no goroutines, and cancellation propagates by itself.
 
 Drive's resumable upload declares `X-Upload-Content-Length` when the session
 opens, before any content is sent. So the ciphertext length must be computable
-from the plaintext length rather than discovered while producing it — hence
+from the plaintext length rather than discovered while producing it - hence
 `crypto.StreamOverhead`, and hence the framing being fixed-size rather than
 compressed or padded to a variable boundary.
 
@@ -53,7 +53,7 @@ that failure arrives after the entire file has been uploaded.
 
 Per-file keys plus a `(shard_index, frame_index)` counter give a nonce that is
 unique by construction. Random 96-bit nonces would have a birthday problem at
-this frame count — a 30 GB file is roughly half a million frames — and, more
+this frame count - a 30 GB file is roughly half a million frames - and, more
 importantly, a random nonce has to be stored somewhere per frame, which would
 break the fixed-stride offset arithmetic that range reads depend on.
 
@@ -71,7 +71,7 @@ Both run on `context.WithoutCancel` plus their own timeout.
 When a spent refresh token is presented, one of two things happened: it was
 stolen, or the legitimate client replayed it. The server cannot tell which.
 Revoking only the presented token would leave a thief's successor alive in the
-stolen case, which is the worse failure — so the whole family goes, and the
+stolen case, which is the worse failure - so the whole family goes, and the
 legitimate user signs in again.
 
 The family deadline also does not slide: a successor inherits its predecessor's

@@ -5,12 +5,12 @@ Two binaries, two setups. Pick the one you actually want before you start:
 | | `skein serve` (headless) | `skein-desktop` (native window) |
 |---|---|---|
 | Runs where | a server, container, VPS | your own machine |
-| Database | PostgreSQL — you run it | PostgreSQL — you still run it (see the note below) |
+| Database | PostgreSQL - you run it | PostgreSQL - you still run it (see the note below) |
 | Google OAuth setup | you create a Cloud Console client | **zero Console steps** |
 | Build | `CGO_ENABLED=0`, static, cross-compiles | requires cgo, built per-platform |
 
 **The desktop build talks to PostgreSQL too.** It does not embed a database of
-its own yet — that lands after an owner-written rewrite of the shard router,
+its own yet - that lands after an owner-written rewrite of the shard router,
 tracked in `PLAN/Phase7.md`. If you were expecting a single file with nothing
 else to run, that is not this release; point `SKEIN_DATABASE_URL` at a
 Postgres exactly as you would for the server build. See
@@ -40,7 +40,7 @@ openssl rand -base64 48   # -> SKEIN_JWT_SECRET
 ```
 
 Paste both into `.env`. **`SKEIN_MASTER_KEY` decrypts every file you ever
-upload — read [docs/BACKUP.md](BACKUP.md) before you store anything you'd
+upload - read [docs/BACKUP.md](BACKUP.md) before you store anything you'd
 miss.**
 
 ## 3. Database
@@ -53,7 +53,7 @@ make dev-db   # postgres on 127.0.0.1:5433, matches .env.example
 ```
 
 Migrations run automatically on boot (`db.Migrate`, embedded in the binary
-via `goose`) — there is no separate migrate step for a fresh install. `make
+via `goose`) - there is no separate migrate step for a fresh install. `make
 migrate` / `make migrate-status` exist for operating on a database the
 binary isn't currently running against.
 
@@ -64,7 +64,7 @@ reason the desktop build exists.
 
 ### Server build (`skein serve`)
 
-You supply your own OAuth client — there is no shared one, by design
+You supply your own OAuth client - there is no shared one, by design
 (`drive.file` scope only, so Skein can never see files it didn't create):
 
 1. [console.cloud.google.com](https://console.cloud.google.com) → new project
@@ -83,31 +83,31 @@ You supply your own OAuth client — there is no shared one, by design
 5. Copy the client ID and client secret into `.env`:
    `SKEIN_GOOGLE_CLIENT_ID`, `SKEIN_GOOGLE_CLIENT_SECRET`.
 6. Start Skein, sign in, **Settings → Connect a drive**. The browser
-   navigates to Google's consent screen and back — nothing else to
+   navigates to Google's consent screen and back - nothing else to
    configure.
 
 ### Desktop build (`skein-desktop`)
 
 No Console steps. The desktop binary is built as a **Desktop app** (RFC
-8252) OAuth client — a client type Google does not require a secret for —
+8252) OAuth client - a client type Google does not require a secret for -
 and Skein ships with a working one compiled in.
 
 **Connect a drive → Settings → Connect a drive** opens your system's
-default browser (not the app window — see
+default browser (not the app window - see
 [docs/SECURITY.md](SECURITY.md#why-the-system-browser) for why), you sign
 in and grant access, and the tab tells you to close it. The desktop app
 picks up the connection automatically.
 
-If you want your own client instead of Skein's shared one — for your own
-Drive API quota, or because you don't want to trust a shared client —
+If you want your own client instead of Skein's shared one - for your own
+Drive API quota, or because you don't want to trust a shared client -
 create a **Desktop app** OAuth client the same way as steps 1–3 above (type
-**Desktop app**, not Web application; no redirect URI to register — Skein's
+**Desktop app**, not Web application; no redirect URI to register - Skein's
 loopback listener supplies one per attempt), then set **both**
 `SKEIN_GOOGLE_DESKTOP_CLIENT_ID` and `SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET`
 in your environment before launching `skein-desktop`.
 
 Google does issue a client secret for Desktop app clients, and its token
-endpoint requires it — so setting only the ID is rejected with a message
+endpoint requires it - so setting only the ID is rejected with a message
 naming the missing variable. The secret is not confidential (it ships in the
 binary; PKCE is what secures the flow), but it must be sent. See
 [SECURITY.md](SECURITY.md#pkce-desktop-oauth).
@@ -121,7 +121,7 @@ make web && make build
 ./bin/skein
 ```
 
-`make build` builds the frontend first — `make build-go` skips that step if
+`make build` builds the frontend first - `make build-go` skips that step if
 `internal/web/dist` is already populated.
 
 ### Desktop
@@ -134,15 +134,15 @@ make desktop
 ```
 
 `wails doctor` may report `libwebkit: Not Found` even with all three
-packages installed — it checks for the package name `webkit2gtk-4.0`, which
+packages installed - it checks for the package name `webkit2gtk-4.0`, which
 recent Ubuntu releases (26.04, verified) do not ship; only `4.1` does. This
 is a false positive. `make desktop` already builds with the correct tag
-(`-tags webkit2_41`) regardless of what `wails doctor` says — do not chase
+(`-tags webkit2_41`) regardless of what `wails doctor` says - do not chase
 that warning.
 
 ## 6. First run
 
-Both builds land on the same login screen — registration is open, there is
+Both builds land on the same login screen - registration is open, there is
 no invite gate. Register, sign in, connect a drive (§4), and you're pooling
 storage. `docs/CONFIGURATION.md` covers every environment variable if you
 need to tune limits, ports, or proxy trust before going further.
