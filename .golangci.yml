@@ -39,6 +39,10 @@ linters:
       - third_party/
 
     rules:
+      - path: ^internal/accounts/storeconformance_test\.go$
+        linters:
+          - unused
+
       - path: ^internal/db/gen/
         linters:
           - errcheck

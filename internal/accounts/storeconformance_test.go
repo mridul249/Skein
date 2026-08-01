@@ -12,6 +12,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// TODO(#123): Finish migrating service_test.go to the backend-agnostic
+// conformance harness. Temporarily excluded from the `unused` linter.
+
 // Same design as internal/auth/storeconformance_test.go, and for the same
 // reason: the exit bar is the existing suite passing unmodified against both
 // backends, not a parallel set of SQLite-only tests that can drift.
