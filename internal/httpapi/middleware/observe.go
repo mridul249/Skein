@@ -79,7 +79,7 @@ func Recoverer(next http.Handler) http.Handler {
 				slog.String("stack", string(debug.Stack())))
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"error":"internal","message":"Something failed on the server.","request_id":"` +
+			_, _ = w.Write([]byte(`{"error":"internal","message":"Something failed on the server. If this persists, try reconnecting your Google Drive account..","request_id":"` +
 				reqID + `"}`))
 		}()
 		next.ServeHTTP(w, r)
