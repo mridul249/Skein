@@ -50,7 +50,7 @@ func statusFor(err error) (int, string, string) {
 	case errors.Is(err, skerr.ErrNotImplemented):
 		return http.StatusNotImplemented, "not_implemented", "That is not available yet."
 	default:
-		return http.StatusInternalServerError, "internal", "Something failed on the server."
+		return http.StatusInternalServerError, "internal", "Something failed on the server. If this persists, try reconnecting your Google Drive account.."
 	}
 }
 
@@ -113,7 +113,7 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
 			"encode response", slog.String("error", err.Error()))
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":"internal","message":"Something failed on the server."}`))
+		_, _ = w.Write([]byte(`{"error":"internal","message":"Something failed on the server. If this persists, try reconnecting your Google Drive account.."}`))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
