@@ -1,23 +1,48 @@
 <samp>
 
-# skein
+<p align="center">
+<img src="public/logo.svg" width="110">
+</p>
 
-```
+<h1 align="center">Skein</h1>
+
+<p align="center">
+<b>75 GB of free cloud storage that cannot hold a 30 GB file.</b>
+</p>
+
+<p align="center">
+Pool fragmented cloud drives into a single encrypted storage array.
+</p>
+
+<p align="center">
+  <a href="https://github.com/mridul249/Skein/actions/workflows/ci.yml">
+    <img src="https://github.com/mridul249/Skein/actions/workflows/ci.yml/badge.svg" alt="Build">
+  </a>
+  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/license-Apache%202-blue" alt="License">
+  <img src="https://img.shields.io/badge/platform-Linux-lightgrey" alt="Platform">
+</p>
+
+
+
+```text
          one file  ─┬─►  ████████  drive 1
                     ├─►  ████████  drive 2
                     └─►  ████      drive 3
 
                     s k e i n
-
 ```
 
-**75 GB of free cloud storage that cannot hold a 30 GB file.**
 
-Five free Google accounts give you 75 GB of total storage, but they operate as isolated 15 GB silos. You are forced to manually manage file splits, and a single large file-like a 30 GB raw video archive or virtual machine image-simply has nowhere to land.
+## Why Skein?
 
 If you have ever tried to combine multiple free Google Drive accounts into a single pool of storage, you have likely run into the same hurdles as existing options: **files cannot span across accounts, encryption breaks media seeking, tools demand full access to your personal drive, or losing your local index database permanently destroys access to your data.**
 
 I built Skein to solve these structural issues in a single static binary.
+
+**75 GB of free cloud storage that cannot hold a 30 GB file.**
+
+Five free Google accounts give you 75 GB of total storage, but they operate as isolated 15 GB silos. You are forced to manually manage file splits, and a single large file-like a 30 GB raw video archive or virtual machine image-simply has nowhere to land.
 
 **Skein** pools your fragmented cloud drives into a unified storage array. It automatically stripes large files across multiple accounts when no single drive fits, encrypts everything client-side before it leaves your machine, and packages the entire runtime into a single Go binary with an embedded web interface.
 
@@ -33,6 +58,33 @@ $ skein status
 ```
 
 *Skein (noun): a coiled length of yarn. Files are woven across multiple accounts.*
+
+---
+
+## Screenshots
+<p align="center">
+<img src="public/P4.png" width="95%">
+</p>
+
+<p align="center">
+<img src="public/P2.png" width="48%">
+<img src="public/P5.png" width="48%">
+</p>
+
+<p align="center">
+<img src="public/P3.png" width="95%">
+</p>
+
+---
+
+## Highlights
+
+- Strip files across multiple Google Drives
+- Client-side AES-256-GCM encryption
+- Constant-memory streaming uploads
+- Instant media seeking
+- Single static Go binary
+- Uses only `drive.file` OAuth scope
 
 ---
 
