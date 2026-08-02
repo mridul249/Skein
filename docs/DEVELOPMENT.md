@@ -10,7 +10,7 @@
 - `golangci-lint`, `goose`, `sqlc` - `make tools` installs the pinned
   versions
 - For desktop work: `libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev`,
-  `wails` - see [INSTALL.md](INSTALL.md#desktop) for the exact commands
+  `wails` - see [INSTALL.md](docs/INSTALL.md#desktop) for the exact commands
 
 ## First-time setup
 
@@ -136,9 +136,5 @@ adding a new target that touches the database.
   name. Context is always the first parameter, named `ctx`, never stored on
   a struct. Interfaces are declared by the consumer, not the implementer.
 
-See `PLAN/Rules.md` for the full, longer rule set this project holds itself
-to - in particular §1's table of anti-patterns this codebase exists as a
-reaction to, and §5's eleven-question security checklist run against every
-diff touching a handler, a query, or a stream.
 
 </samp>
