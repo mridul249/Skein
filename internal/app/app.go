@@ -40,8 +40,14 @@ type options struct {
 	// internally, which do not exist yet at the point a caller supplies
 	// options, so Build calls this once they do.
 	desktopConnect func(*accounts.Service, *slog.Logger) handlers.DesktopConnector
-	useSQLite      bool
-	sqlitePath     string
+
+	// desktopClientID/Secret resolve the installed-app credentials used for
+	// token refresh. Functions rather than values so an operator override via
+	// the environment is read at use, matching the connector's behaviour.
+	desktopClientID     func() string
+	desktopClientSecret func() string
+	useSQLite           bool
+	sqlitePath          string
 }
 
 // WithDesktopConnect makes the accounts handler run the desktop OAuth flow
@@ -50,6 +56,25 @@ type options struct {
 // cmd/skein-desktop passes this.
 func WithDesktopConnect(newConnector func(*accounts.Service, *slog.Logger) handlers.DesktopConnector) Option {
 	return func(o *options) { o.desktopConnect = newConnector }
+}
+
+// WithDesktopOAuth supplies the installed-app credentials used to REFRESH
+// stored Drive tokens on the desktop build.
+//
+// This is separate from WithDesktopConnect because the two halves of the OAuth
+// lifecycle take different paths, which is precisely how the 2026-08-05 bug
+// happened: the connector builds a per-attempt config for the EXCHANGE, while
+// refresh uses the config stored on accounts.Service. app.go built that stored
+// config only from the web SKEIN_GOOGLE_CLIENT_ID/_SECRET/_REDIRECT_URL
+// triple, which a desktop install never sets — so refresh had no credentials
+// and every Drive operation died with oauth2: "unauthorized_client".
+//
+// Same resolver functions the connector uses, so the two cannot drift.
+func WithDesktopOAuth(clientID, clientSecret func() string) Option {
+	return func(o *options) {
+		o.desktopClientID = clientID
+		o.desktopClientSecret = clientSecret
+	}
 }
 
 // WithSQLiteDatabase makes Build use the local SQLite desktop database instead
@@ -141,6 +166,18 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	// No local fallback backend in a normal deployment: every shard belongs
 	// to a connected drive, and silently writing to the server's own disk
 	// when none is connected would be a surprise, not a convenience.
+	// Desktop token refresh needs the installed-app credentials. Without this
+	// the service refreshes against the web config — nil on a desktop install
+	// — and every Drive call fails with unauthorized_client.
+	if o.desktopClientID != nil && o.desktopClientSecret != nil {
+		id, secret := o.desktopClientID(), o.desktopClientSecret()
+		accountsSvc.SetDesktopOAuth(id, secret)
+		if id == "" || secret == "" {
+			lg.Warn("desktop oauth credentials are incomplete; " +
+				"drive token refresh will fail until they are set")
+		}
+	}
+
 	resolver := accounts.NewResolver(accountsSvc, nil)
 
 	// Capacity is claimed through the atomic conditional UPDATE in

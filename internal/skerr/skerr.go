@@ -32,6 +32,17 @@ var (
 	// instead: the request was well-formed and the caller is who they say
 	// they are, but an account is in a state that blocks it.
 	ErrDriveNeedsReconnect = errors.New("drive needs reconnection")
+
+	// ErrProviderMisconfigured is the OAuth client itself being wrong — bad
+	// credentials, a deleted client, or a build missing the installed-app
+	// secret needed for token refresh.
+	//
+	// Deliberately distinct from ErrDriveNeedsReconnect. Both mean "Drive is
+	// unusable", but only one is fixable by the user: reconnecting repairs a
+	// revoked grant and does nothing at all for a broken client. Rendering
+	// this as needs_reauth puts a Reconnect button in front of a user who can
+	// never succeed with it.
+	ErrProviderMisconfigured = errors.New("provider oauth client is misconfigured")
 )
 
 // PublicError carries a message that is safe to show a user, plus optional

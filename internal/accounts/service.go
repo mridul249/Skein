@@ -55,9 +55,23 @@ type Service struct {
 	flight singleflight.Group
 
 	// mu guards invalidators, which are registered during wiring but fired
-	// from request goroutines.
+	// from request goroutines, and the desktop OAuth credentials below.
 	mu           sync.RWMutex
 	invalidators []func(accountID uuid.UUID)
+
+	// desktopClientID/Secret are the RFC 8252 installed-app credentials, set
+	// by the desktop binary via SetDesktopOAuth.
+	//
+	// They exist because REFRESH and EXCHANGE take different paths. The
+	// exchange builds a per-attempt config in desktopoauth.Connector and
+	// passes it in as a parameter, so 28ba3ef's fix reached it. Refresh goes
+	// through refreshConfig() below, which until 2026-08-05 could only see
+	// the WEB config built from SKEIN_GOOGLE_CLIENT_ID/_SECRET/_REDIRECT_URL
+	// — variables a desktop install never sets. The result was a nil config
+	// on desktop and every Drive operation failing with
+	// oauth2: "unauthorized_client".
+	desktopClientID     string
+	desktopClientSecret string
 
 	now func() time.Time
 }
@@ -115,6 +129,41 @@ func DesktopGoogleOAuthConfig(clientID, clientSecret, redirectURL string) *oauth
 			AuthStyle: oauth2.AuthStyleInParams,
 		},
 	}
+}
+
+// SetDesktopOAuth supplies the installed-app credentials used to refresh
+// tokens on the desktop build. Safe to call before serving starts; the desktop
+// binary calls it during wiring.
+//
+// Kept separate from the web config rather than overwriting it: the two client
+// types have different redirect requirements, and a desktop process that also
+// had web credentials must not start refreshing desktop tokens against the web
+// client.
+func (s *Service) SetDesktopOAuth(clientID, clientSecret string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.desktopClientID = clientID
+	s.desktopClientSecret = clientSecret
+}
+
+// refreshConfig returns the OAuth config used to refresh stored tokens.
+//
+// Desktop credentials win when present. A desktop install sets only
+// SKEIN_GOOGLE_DESKTOP_CLIENT_ID/_SECRET, so without this the service is
+// constructed with a nil config and refresh fails before it reaches Google.
+//
+// The redirect URL is deliberately empty: RFC 6749 §6 does not include
+// redirect_uri in a refresh_token grant, and the loopback port that served the
+// original exchange is long gone by then.
+func (s *Service) refreshConfig() *oauth2.Config {
+	s.mu.RLock()
+	id, secret := s.desktopClientID, s.desktopClientSecret
+	s.mu.RUnlock()
+
+	if id != "" && secret != "" {
+		return DesktopGoogleOAuthConfig(id, secret, "")
+	}
+	return s.oauth
 }
 
 // BeginGoogleConnect returns the URL to send the browser to.
@@ -422,7 +471,8 @@ func (s *Service) backendFor(ctx context.Context, acct StoredAccount) (storage.B
 	if acct.Kind != storage.KindGoogleDrive {
 		return nil, fmt.Errorf("accounts: no backend for kind %q", acct.Kind)
 	}
-	if s.oauth == nil {
+	oauthCfg := s.refreshConfig()
+	if oauthCfg == nil {
 		return nil, ErrProviderNotConfigured
 	}
 
@@ -442,10 +492,12 @@ func (s *Service) backendFor(ctx context.Context, acct StoredAccount) (storage.B
 
 	// persistingSource writes a refreshed token back as ciphertext, so a
 	// rotated refresh token is not lost when the process restarts.
+	detached := context.WithoutCancel(ctx)
 	src := &persistingSource{
 		svc:    s,
 		acct:   acct,
-		source: s.oauth.TokenSource(context.WithoutCancel(ctx), tok),
+		ctx:    detached,
+		source: oauthCfg.TokenSource(detached, tok),
 	}
 
 	client := oauth2.NewClient(context.WithoutCancel(ctx), src)
@@ -575,7 +627,18 @@ func (s *Service) recordSyncFailure(ctx context.Context, acct StoredAccount, cau
 	switch {
 	case errors.Is(cause, storage.ErrRateLimited):
 		msg = "Google is rate limiting this drive. It will retry on its own."
-	case errors.Is(cause, storage.ErrUnauthorized) || errors.Is(cause, skcrypto.ErrDecrypt):
+
+	// A misconfigured OAuth CLIENT is not the user's problem and reconnecting
+	// cannot fix it. Marking the account needs_reauth here would send them
+	// round a loop that can never succeed, so the account stays active and the
+	// message names the real fault. Checked BEFORE the revoked-grant branch so
+	// a config error can never fall through to it.
+	case errors.Is(cause, ErrRefreshClientMisconfigured):
+		msg = "Skein's Google client is misconfigured. This is a server " +
+			"setting, not something reconnecting will fix."
+
+	case errors.Is(cause, ErrRefreshGrantRevoked) ||
+		errors.Is(cause, storage.ErrUnauthorized) || errors.Is(cause, skcrypto.ErrDecrypt):
 		status = StatusNeedsReauth
 		msg = "Google revoked access. Reconnect this drive."
 	}
@@ -716,15 +779,53 @@ func (s *Service) PurgeExpiredOAuthStates(ctx context.Context) (int64, error) {
 // a provider that rotates refresh tokens would eventually invalidate the one
 // on disk.
 type persistingSource struct {
-	svc    *Service
-	acct   StoredAccount
+	svc  *Service
+	acct StoredAccount
+	// ctx is detached from the request (context.WithoutCancel) because a
+	// refresh triggered by a cancelled download still has to persist its
+	// rotated token and record a revoked grant.
+	ctx    context.Context
 	source oauth2.TokenSource
 }
 
 func (p *persistingSource) Token() (*oauth2.Token, error) {
 	tok, err := p.source.Token()
 	if err != nil {
-		return nil, fmt.Errorf("refresh provider token: %w", err)
+		// Classify at the refresh boundary: this failure happens inside the
+		// oauth2 library, before any Drive call, so gdrive.apiError never sees
+		// it. Without this the account stays 'active' while every operation
+		// fails, and the caller gets a bare 500.
+		classified := classifyRefreshError(err)
+
+		// Record the transition here rather than leaving it to the caller.
+		// A refresh failure can surface from a download, a quota sync or an
+		// app-folder probe, and only some of those run through
+		// recordSyncFailure — so marking it at the one point every refresh
+		// passes through is what makes the account state actually track
+		// reality. Only a revoked grant transitions; a misconfigured client
+		// deliberately does not (see recordSyncFailure).
+		if errors.Is(classified, ErrRefreshGrantRevoked) {
+			if serr := p.svc.store.SetAccountStatus(context.WithoutCancel(p.ctx),
+				p.acct.ID, StatusNeedsReauth,
+				"Google revoked access. Reconnect this drive."); serr != nil {
+				p.svc.log.WarnContext(p.ctx, "could not mark account needs_reauth",
+					slog.String("account_id", p.acct.ID.String()),
+					slog.String("error", serr.Error()))
+			}
+		}
+		if errors.Is(classified, ErrRefreshClientMisconfigured) {
+			p.svc.log.ErrorContext(p.ctx, "the google oauth client is misconfigured; "+
+				"drive token refresh cannot succeed until it is fixed",
+				slog.String("account_id", p.acct.ID.String()),
+				slog.String("fix", "set SKEIN_GOOGLE_DESKTOP_CLIENT_ID/_SECRET "+
+					"on desktop, or SKEIN_GOOGLE_CLIENT_ID/_SECRET on the server"),
+				slog.String("error", classified.Error()))
+		}
+
+		// The API shape: {code, message, account_id}, 409 for a dead grant so
+		// the frontend does not read it as a lost Skein session.
+		return nil, AsAPIError(fmt.Errorf("refresh provider token: %w", classified),
+			p.acct.ID, p.acct.Email)
 	}
 
 	// Nothing changed; no write needed.
