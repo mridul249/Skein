@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -41,7 +42,21 @@ func NewMemoryStore() *MemoryStore {
 }
 
 // CreateAccount links a provider account, rejecting a duplicate provider id.
+//
+// access_token_enc is NOT NULL under both real dialects
+// (00003_accounts.sql:18, sqlite/00002_accounts.sql:41). Enforcing it here is
+// not defensive coding: without it this store accepts an account that every
+// real backend rejects, and a test written against it passes on memory and
+// fails on SQLite. The conformance run surfaced exactly that.
+//
+// refresh_token_enc is deliberately not checked -- it is nullable in both
+// schemas, because encryptTokens leaves it nil when Google withholds a refresh
+// token on re-consent.
 func (m *MemoryStore) CreateAccount(_ context.Context, n NewAccount) (StoredAccount, error) {
+	if n.AccessTokenEnc == nil {
+		return StoredAccount{}, fmt.Errorf("%w: access token envelope is required", skerr.ErrValidation)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

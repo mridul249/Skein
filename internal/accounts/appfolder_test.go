@@ -114,12 +114,22 @@ func newFolderService(t *testing.T) (*Service, conformanceStore, StoredAccount) 
 	store := newConformanceStore(t)
 	svc := NewService(store, ring, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
+	// A sealed envelope rather than nil: access_token_enc is NOT NULL in both
+	// real schemas, so an account without one is not a state any backend can
+	// hold. Sealed the same way the service does it, keyed on the owner.
+	userID := uuid.New()
+	accessEnc, err := ring.SealString(skcrypto.InfoToken, userID[:], "access-token")
+	if err != nil {
+		t.Fatalf("SealString() = %v", err)
+	}
+
 	acct, err := store.CreateAccount(context.Background(), NewAccount{
 		ID:                uuid.New(),
-		UserID:            uuid.New(),
+		UserID:            userID,
 		Kind:              "gdrive",
 		ProviderAccountID: "sub-1",
 		Email:             "drive@example.com",
+		AccessTokenEnc:    accessEnc,
 		Ordinal:           1,
 	})
 	if err != nil {
