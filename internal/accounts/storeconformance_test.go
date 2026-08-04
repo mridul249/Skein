@@ -12,7 +12,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// TODO(#123): Finish migrating service_test.go to the backend-agnostic
+// TODO(#31): Finish migrating service_test.go to the backend-agnostic
 // conformance harness. Temporarily excluded from the `unused` linter.
 
 // Same design as internal/auth/storeconformance_test.go, and for the same

@@ -114,6 +114,19 @@ type disconnectFixture struct {
 	ids      []uuid.UUID
 	subs     []string
 	userID   uuid.UUID
+	ring     *skcrypto.Keyring
+}
+
+// sealedToken builds the access-token envelope every account row must carry:
+// access_token_enc is NOT NULL in both real schemas, so nil is not a state any
+// backend can hold.
+func sealedToken(t *testing.T, ring *skcrypto.Keyring, userID uuid.UUID) []byte {
+	t.Helper()
+	enc, err := ring.SealString(skcrypto.InfoToken, userID[:], "access-token")
+	if err != nil {
+		t.Fatalf("SealString() = %v", err)
+	}
+	return enc
 }
 
 func newDisconnectFixture(t *testing.T) *disconnectFixture {
@@ -145,6 +158,7 @@ func newDisconnectFixture(t *testing.T) *disconnectFixture {
 			Kind:              storage.KindGoogleDrive,
 			ProviderAccountID: subs[i],
 			Email:             subs[i] + "@example.com",
+			AccessTokenEnc:    sealedToken(t, ring, userID),
 			Ordinal:           int32(i + 1),
 		})
 		if cerr != nil {
@@ -175,7 +189,7 @@ func newDisconnectFixture(t *testing.T) *disconnectFixture {
 
 	return &disconnectFixture{
 		svc: svc, files: fileStore, accounts: acctStore, acctSvc: acctSvc,
-		backends: backends, ids: ids, subs: subs, userID: userID,
+		backends: backends, ids: ids, subs: subs, userID: userID, ring: ring,
 	}
 }
 
@@ -290,6 +304,7 @@ func TestDisconnectThenReconnectRestoresAccess(t *testing.T) {
 		Kind:              storage.KindGoogleDrive,
 		ProviderAccountID: f.subs[0], // same Google identity
 		Email:             f.subs[0] + "@example.com",
+		AccessTokenEnc:    sealedToken(t, f.ring, f.userID),
 		Ordinal:           1,
 	})
 	if rerr != nil {
