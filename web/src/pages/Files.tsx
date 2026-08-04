@@ -209,6 +209,7 @@ export function Files() {
     setBulkBusy(true);
     setBulkOutcome(null);
     try {
+      // Trashes, not destroys — recoverable from the Trash view.
       const outcome = await runBulkDelete(ids);
       setBulkOutcome(outcome);
       // The successes are gone; the failures stay selected so Retry acts on
@@ -379,6 +380,7 @@ export function Files() {
       {bulkOutcome && (
         <BulkOutcomeNotice
           outcome={bulkOutcome}
+          verb="Moved to trash"
           onDismiss={() => setBulkOutcome(null)}
           onRetry={
             bulkOutcome.failedIds.length > 0
@@ -391,6 +393,7 @@ export function Files() {
       <SelectionToolbar
         count={selectedIds.length}
         busy={bulkBusy}
+        deleteLabel="Move to trash"
         onDelete={() => void bulkDelete(selectedIds)}
         onDownload={() => void bulkDownload(selectedIds)}
         onClear={() => setSelection(sel.clear())}
@@ -479,7 +482,7 @@ export function Files() {
                 <td className="w-10 pl-4" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
-                    className="h-4 w-4 cursor-pointer accent-accent"
+                    className="checkbox"
                     aria-label={`Select ${file.name}`}
                     checked={sel.isSelected(selection, file.id)}
                     onChange={(e) => {

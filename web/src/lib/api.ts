@@ -283,9 +283,22 @@ export const api = {
     });
   },
 
-  /** Deletes many files at once, returning one result per file. */
+  /**
+   * Moves many files to the trash, returning one result per file.
+   *
+   * Trashes rather than destroys, matching the single-file delete. Permanent
+   * removal is bulkPurge.
+   */
   async bulkDelete(fileIds: string[]): Promise<BulkResponse> {
     return request<BulkResponse>('/api/files/bulk-delete', {
+      method: 'POST',
+      body: { file_ids: fileIds },
+    });
+  },
+
+  /** Permanently deletes many files. The trash view's delete. */
+  async bulkPurge(fileIds: string[]): Promise<BulkResponse> {
+    return request<BulkResponse>('/api/files/bulk-delete?permanent=true', {
       method: 'POST',
       body: { file_ids: fileIds },
     });

@@ -154,6 +154,42 @@
            focus:border-accent focus:outline-none;
   }
 
+  /*
+    A checkbox that belongs to the theme.
+
+    appearance-none is what makes this possible at all: the native control
+    paints an opaque white box that no colour utility can reach, which is why
+    the default looked pasted onto a dark page. Everything below is drawn by
+    us.
+
+    NO GLYPH INSIDE. A tick or a dash would need a second colour that reads on
+    the accent, and at 16px it is noise — the filled square already carries the
+    state unambiguously. The indeterminate case is a narrower inset bar rather
+    than a dash, which is the same idea one step smaller.
+  */
+  .checkbox {
+    @apply h-4 w-4 shrink-0 cursor-pointer appearance-none rounded-sm border
+           border-borderStrong bg-canvas transition-colors duration-hover
+           hover:border-accent
+           focus-visible:outline focus-visible:outline-2
+           focus-visible:outline-offset-2 focus-visible:outline-accent
+           checked:border-accent checked:bg-accent
+           indeterminate:border-accent;
+  }
+
+  /*
+    The indeterminate marker. Drawn with a gradient rather than a pseudo
+    element because an <input> cannot host one.
+  */
+  .checkbox:indeterminate {
+    background-image: linear-gradient(
+      to bottom,
+      transparent 0 5px,
+      theme('colors.accent') 5px 9px,
+      transparent 9px 100%
+    );
+  }
+
   .label {
     @apply mb-1.5 block text-label font-semibold text-muted;
   }

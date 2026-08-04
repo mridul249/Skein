@@ -40,8 +40,11 @@ test('a clean run reads as a plain success', () => {
 
 test('a total failure does not claim any successes', () => {
   const msg = summarise(outcome(0, [{ id: 'a', error: 'nope' }]));
-  assert.ok(msg.includes('Could not delete 1 file'), msg);
-  assert.ok(!msg.includes('Deleted'), `a total failure must not claim successes: ${msg}`);
+  // The property, not the exact wording: a total failure names the count and
+  // does not claim any successes.
+  assert.ok(msg.includes('1 file'), msg);
+  assert.ok(!/^\w+ \d+ files?\.$/.test(msg), `reads as a success: ${msg}`);
+  assert.ok(!msg.includes('Deleted 1'), `a total failure must not claim successes: ${msg}`);
 });
 
 // Failures are grouped so ten rate-limited files are one line, not ten.

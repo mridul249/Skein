@@ -40,12 +40,16 @@ function merge(responses: BulkResponse[]): BulkOutcome {
  * into per-file failures rather than thrown, so one bad batch does not discard
  * the results of the batches that already succeeded.
  */
-export async function runBulkDelete(ids: readonly string[]): Promise<BulkOutcome> {
+export async function runBulkDelete(
+  ids: readonly string[],
+  opts: { permanent?: boolean } = {},
+): Promise<BulkOutcome> {
   const responses: BulkResponse[] = [];
+  const send = opts.permanent ? api.bulkPurge : api.bulkDelete;
 
   for (const batch of chunk(ids)) {
     try {
-      responses.push(await api.bulkDelete(batch));
+      responses.push(await send(batch));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'The request failed.';
       responses.push({
@@ -80,7 +84,7 @@ export function summarise(outcome: BulkOutcome, verb = 'Deleted'): string {
     return `${verb} ${succeeded} ${succeeded === 1 ? 'file' : 'files'}.`;
   }
   if (succeeded === 0) {
-    return `Could not delete ${failed} ${failed === 1 ? 'file' : 'files'}.`;
+    return `Could not process ${failed} ${failed === 1 ? 'file' : 'files'}.`;
   }
   return `${verb} ${succeeded} of ${succeeded + failed} files. ${failed} failed.`;
 }

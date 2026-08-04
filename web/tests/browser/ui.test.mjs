@@ -891,8 +891,10 @@ test('a partial bulk failure is reported honestly and keeps failures selected', 
     const total = await p.eval(`document.querySelectorAll('tbody input[type=checkbox]').length`);
 
     await p.eval(`(() => {
+      // Matches both labels: the file list trashes ("Move to trash"), the
+      // trash view purges ("Delete permanently").
       const btn = [...document.querySelectorAll('[aria-label="Selection actions"] button')]
-        .find((b) => /Delete/.test(b.textContent ?? ''));
+        .find((b) => /trash|Delete/i.test(b.textContent ?? ''));
       btn?.click();
       return true;
     })()`);
@@ -925,5 +927,77 @@ test('a partial bulk failure is reported honestly and keeps failures selected', 
       /1 selected/.test(r.toolbar ?? ''),
       `the failed file should stay selected, toolbar read "${r.toolbar}"`,
     );
+  });
+});
+
+// The checkbox has to belong to the theme. The native control paints an
+// opaque white box on a dark page, which is what appearance-none removes.
+test('checkboxes are themed, filled on select, and carry no glyph', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+
+    const read = `(() => {
+      const box = document.querySelector('tbody input[type=checkbox]');
+      const cs = getComputedStyle(box);
+      const before = getComputedStyle(box, '::before');
+      const after = getComputedStyle(box, '::after');
+      return {
+        appearance: cs.appearance,
+        background: cs.backgroundColor,
+        border: cs.borderTopColor,
+        glyphs: [before.content, after.content].filter((c) => c && c !== 'none' && c !== 'normal' && c !== '""'),
+      };
+    })()`;
+
+    const unchecked = await p.eval(read);
+    assert.equal(unchecked.appearance, 'none', 'the native control still paints itself');
+
+    // Unchecked sits on the page background, not white.
+    const rgb = unchecked.background.match(/\d+/g).map(Number);
+    assert.ok(
+      rgb[0] < 60 && rgb[1] < 60 && rgb[2] < 60,
+      `unchecked background is ${unchecked.background}, expected the dark canvas`,
+    );
+
+    await p.eval(`(() => { document.querySelector('tbody input[type=checkbox]').click(); return true; })()`);
+    await sleep(120);
+
+    const checked = await p.eval(read);
+    const on = checked.background.match(/\d+/g).map(Number);
+    // The accent is #c48af0 — red and blue high, and distinctly not the
+    // unchecked background.
+    assert.ok(
+      on[0] > 150 && on[2] > 180,
+      `checked background is ${checked.background}, expected the purple accent`,
+    );
+    assert.equal(checked.glyphs.length, 0, `a glyph was drawn inside: ${checked.glyphs}`);
+  });
+});
+
+// The download rows read as columns, not as ragged text. Regression for the
+// flex/justify-between layout that put the status wherever the name ended.
+test('download rows align their status and action columns', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/') + '&downloads=1');
+
+    const r = await p.eval(`(() => {
+      const rows = [...document.querySelectorAll('[aria-label="Downloads"] li')];
+      if (rows.length < 2) return null;
+      return rows.map((li) => {
+        const spans = li.querySelectorAll('span');
+        const status = spans[spans.length - 1];
+        const btn = li.querySelector('button');
+        return {
+          statusLeft: Math.round(status.getBoundingClientRect().left),
+          actionRight: Math.round(btn.getBoundingClientRect().right),
+        };
+      });
+    })()`);
+    if (!r) return; // fixture seeds fewer than two downloads on this route
+
+    const lefts = new Set(r.map((x) => x.statusLeft));
+    const rights = new Set(r.map((x) => x.actionRight));
+    assert.equal(lefts.size, 1, `status column is ragged across rows: ${[...lefts]}`);
+    assert.equal(rights.size, 1, `action column is ragged across rows: ${[...rights]}`);
   });
 });
