@@ -217,6 +217,10 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 		},
 		lg.With(slog.String("component", "files")),
 	)
+	// One Drive worker pool per process, shared by quota sync and by the bulk
+	// file operations. Two pools would each stay politely under the cap while
+	// together exceeding it.
+	filesSvc.SetWorkPool(accountsSvc.Pool())
 
 	var desktopConnect handlers.DesktopConnector
 	if o.desktopConnect != nil {
