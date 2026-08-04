@@ -5,6 +5,7 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -17,6 +18,7 @@ import (
 	"github.com/mridul249/Skein/internal/capability"
 	"github.com/mridul249/Skein/internal/config"
 	skcrypto "github.com/mridul249/Skein/internal/crypto"
+	"github.com/mridul249/Skein/internal/db"
 	"github.com/mridul249/Skein/internal/files"
 	"github.com/mridul249/Skein/internal/httpapi/handlers"
 	"github.com/mridul249/Skein/internal/httpapi/httpx"
@@ -32,6 +34,13 @@ const (
 	authRatePerMin   = 5
 	apiRatePerMin    = 300
 	publicRatePerMin = 30
+
+	// backupRatePerMin is its own budget, far below apiRatePerMin. A dump is
+	// minutes of database work and a full copy of the index in memory; a few
+	// per hour is the real usage pattern, and anything faster is either a
+	// mistake or someone exfiltrating. 1/min is ~60/hour worst case, and the
+	// Dumper additionally refuses concurrent runs outright.
+	backupRatePerMin = 1
 
 	// contentRatePerMin governs the byte-serving routes only, and is separate
 	// from apiRatePerMin because the traffic shape is different (known issue
@@ -64,6 +73,11 @@ type Deps struct {
 	// Keyring signs content capability URLs. Without it the download
 	// endpoint still works for a bearer token; only minting is unavailable.
 	Keyring *skcrypto.Keyring
+	// Dumper backs GET /api/system/backup. Nil leaves the route unmounted.
+	Dumper *db.Dumper
+	// DumpDB is the handle the schema version is read from for the backup
+	// filename. Nil is tolerated: the version reports 0.
+	DumpDB *sql.DB
 	// DesktopConnect is nil on the server build. When set, the accounts
 	// handler runs the desktop OAuth flow (system browser, loopback
 	// listener, PKCE) instead of the web flow, and the server-hosted
@@ -157,6 +171,7 @@ func (s *Server) routes() {
 		s.mountAuth(api)
 		s.mountAccounts(api)
 		s.mountFiles(api)
+		s.mountSystem(api)
 	})
 
 	s.mountUI(r)
@@ -216,6 +231,30 @@ func (s *Server) mountAuth(api chi.Router) {
 			priv.Use(middleware.RateLimit(middleware.NewLimiter(apiRatePerMin)))
 			priv.Get("/me", h.Me)
 		})
+	})
+}
+
+// mountSystem mounts the operator endpoints.
+//
+// Not mounted at all without a Dumper. The route additionally reports 404
+// unless SKEIN_BACKUP_TOKEN is set, so the default posture is that this does
+// not exist — see handlers.System for why a full database dump needs a gate
+// above the ordinary session check.
+func (s *Server) mountSystem(api chi.Router) {
+	if s.deps.Dumper == nil || s.deps.Auth == nil {
+		return
+	}
+	h := handlers.NewSystem(s.deps.Dumper, s.deps.Config.BackupToken,
+		s.deps.DumpDB, s.deps.Logger)
+
+	api.Route("/system", func(g chi.Router) {
+		// A Skein session is required on top of the operator token. Neither
+		// alone is sufficient: registration is open, so a session proves very
+		// little, and the token is a static secret.
+		g.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
+		// Its own budget, not apiRatePerMin. See backupRatePerMin.
+		g.Use(middleware.RateLimit(middleware.NewLimiter(backupRatePerMin)))
+		g.Get("/backup", h.Backup)
 	})
 }
 

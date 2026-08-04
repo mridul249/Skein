@@ -194,6 +194,8 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 		Accounts:       accountsSvc,
 		Files:          filesSvc,
 		Keyring:        keyring,
+		Dumper:         wired.dumper,
+		DumpDB:         wired.dumpDB,
 		DesktopConnect: desktopConnect,
 	})
 	if err != nil {
@@ -324,7 +326,13 @@ type persistence struct {
 	routerStore   router.Store
 	filesStore    files.Store
 	health        httpapi.Health
-	close         func()
+	// dumper backs GET /api/system/backup, and knows which engine it is
+	// dumping. dumpDB is the handle the schema version is read from; it is
+	// nil under Postgres, where the version comes from pg_dump's own output
+	// and the pool is pgx rather than database/sql.
+	dumper *db.Dumper
+	dumpDB *sql.DB
+	close  func()
 }
 
 func loadConfig(o options) (*config.Config, error) {
@@ -354,6 +362,8 @@ func openSQLitePersistence(ctx context.Context, sqlitePath string, lg *slog.Logg
 		routerStore:   router.NewSQLiteStore(sqlDB),
 		filesStore:    files.NewSQLiteStore(sqlDB),
 		health:        sqliteHealth{db: sqlDB},
+		dumper:        db.NewDumper(db.DialectSQLite, "", path),
+		dumpDB:        sqlDB,
 		close:         func() { _ = sqlDB.Close() },
 	}, nil
 }
@@ -377,6 +387,7 @@ func openPostgresPersistence(ctx context.Context, cfg *config.Config, lg *slog.L
 		routerStore:   router.NewPGStore(pool),
 		filesStore:    files.NewPGStore(pool),
 		health:        pool,
+		dumper:        db.NewDumper(db.DialectPostgres, cfg.DatabaseURL, ""),
 		close:         pool.Close,
 	}, nil
 }

@@ -39,6 +39,22 @@ type Config struct {
 	AccessTokenTTL  time.Duration `env:"SKEIN_ACCESS_TOKEN_TTL"  envDefault:"15m"`
 	RefreshTokenTTL time.Duration `env:"SKEIN_REFRESH_TOKEN_TTL" envDefault:"720h"`
 
+	// BackupToken gates GET /api/system/backup. UNSET BY DEFAULT, and the
+	// route 404s when it is unset.
+	//
+	// This is an operator flag that deliberately SIDESTEPS the auth model
+	// rather than extending it. Skein has no admin role — users has six
+	// columns and none of them is a role — and inventing one here would be a
+	// schema decision made as a side effect of adding a download link.
+	//
+	// What it grants is total: a full logical dump of the database, which is
+	// every user's file index, every connected Drive account, and every row of
+	// users including password_hash. Registration is open and unauthenticated,
+	// so on a reachable instance anyone can mint an account; the session
+	// requirement alone is therefore not a meaningful gate, which is why this
+	// token exists on top of it. A real operator role is the eventual fix.
+	BackupToken string `env:"SKEIN_BACKUP_TOKEN"`
+
 	GoogleClientID     string `env:"SKEIN_GOOGLE_CLIENT_ID"`
 	GoogleClientSecret string `env:"SKEIN_GOOGLE_CLIENT_SECRET"`
 	GoogleRedirectURL  string `env:"SKEIN_GOOGLE_REDIRECT_URL"`
