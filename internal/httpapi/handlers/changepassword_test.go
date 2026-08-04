@@ -130,8 +130,29 @@ func TestChangePasswordRejectsAWrongCurrentPassword(t *testing.T) {
 
 	rec := changePassword(t, r, tok,
 		`{"current_password":"wrong password entirely","new_password":"`+cpNew+`"}`)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rec.Code)
+
+	// NOT 401. The frontend clears the Skein session on any 401 and retries
+	// once after a refresh, so returning 401 for a typo signs the user out
+	// before the error can render — and burns two of the 5/min budget.
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("a wrong current password returned 401; the user is signed out " +
+			"instead of seeing the error")
+	}
+	if rec.Code != http.StatusBadRequest && rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want a validation status", rec.Code)
+	}
+	// The field is named so the modal can render it inline.
+	if !strings.Contains(rec.Body.String(), "current_password") {
+		t.Errorf("body does not name the field: %s", rec.Body.String())
+	}
+
+	// THE SESSION SURVIVES. A second wrong attempt with the same token must
+	// still be authenticated — it fails validation again, not authentication.
+	// Deliberately another WRONG password so the check does not mutate state.
+	after := changePassword(t, r, tok,
+		`{"current_password":"still not right","new_password":"`+cpNew+`"}`)
+	if after.Code == http.StatusUnauthorized {
+		t.Error("the session was destroyed by a failed change-password attempt")
 	}
 	// And nothing changed.
 	if got := postJSON(t, r, "/api/auth/login",

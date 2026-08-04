@@ -195,9 +195,15 @@ export function Files() {
       a.download = file.name;
       a.click();
     } catch (err) {
+      // A damaged file never gets a capability URL now (the server checks the
+      // shards are still there before signing), so this is where that lands.
+      // Before that check, the browser followed the link, the server refused,
+      // and WebKitGTK saved the ERROR RESPONSE to Downloads as the file.
+      const damaged = err instanceof ApiError && err.isDamagedFile;
       const message = err instanceof ApiError ? err.message : 'Could not download that file.';
-      failDownloadJob(jobId, message);
+      failDownloadJob(jobId, damaged ? 'This file is damaged and cannot be downloaded.' : message);
       setBanner(message);
+      if (damaged) throw err; // so a bulk download counts it as failed
     }
   }
 

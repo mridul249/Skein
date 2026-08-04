@@ -53,8 +53,11 @@ func TestChangePasswordRejectsAWrongCurrentPassword(t *testing.T) {
 	if cerr == nil {
 		t.Fatal("ChangePassword() accepted a wrong current password")
 	}
-	if !errors.Is(cerr, skerr.ErrUnauthorized) {
-		t.Errorf("error = %v, want ErrUnauthorized", cerr)
+	// ErrValidation, never ErrUnauthorized: the caller's session is fine, one
+	// field of their input was not. See
+	// TestChangePasswordWrongCurrentIsNotUnauthorized.
+	if !errors.Is(cerr, skerr.ErrValidation) {
+		t.Errorf("error = %v, want ErrValidation", cerr)
 	}
 
 	// The stored hash is untouched, and the original password still works.
@@ -271,5 +274,51 @@ func TestChangePasswordLeavesMasterKeyDerivationUnchanged(t *testing.T) {
 	}
 	if opened != "file contents" {
 		t.Errorf("decrypted %q, want %q", opened, "file contents")
+	}
+}
+
+// BUG, 2026-08-05. A WRONG CURRENT PASSWORD MUST NOT RETURN 401.
+//
+// This is the third instance of the same defect class, after the OAuth-attempt
+// failures (service_test.go:168) and the dead Drive grant (Block 3b). The
+// frontend treats ANY 401 as "the Skein session died": it clears the session
+// and, worse, retries once after a refresh — so a typo in the current-password
+// box signs the user out before the error can render, and spends two of the
+// 5/min credential budget doing it.
+//
+// A wrong current password is a failed field validation on an authenticated
+// request. The caller's session is perfectly valid; one field of their input
+// was not.
+func TestChangePasswordWrongCurrentIsNotUnauthorized(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	pair, err := svc.Register(ctx, testEmail, testPassword, testMeta())
+	if err != nil {
+		t.Fatalf("Register() = %v", err)
+	}
+
+	cerr := svc.ChangePassword(ctx, pair.User.ID, "not the current password", newTestPassword, testMeta())
+	if cerr == nil {
+		t.Fatal("ChangePassword() accepted a wrong current password")
+	}
+
+	if errors.Is(cerr, skerr.ErrUnauthorized) {
+		t.Fatalf("wrong current password returned ErrUnauthorized (%v); "+
+			"the frontend clears the Skein session on any 401, so the user is "+
+			"signed out instead of seeing the error", cerr)
+	}
+	if !errors.Is(cerr, skerr.ErrValidation) {
+		t.Errorf("error = %v, want ErrValidation", cerr)
+	}
+
+	// And it names the field, so the modal can render it inline rather than as
+	// a floating banner.
+	var pub *skerr.PublicError
+	if !errors.As(cerr, &pub) {
+		t.Fatal("the error carries no public message")
+	}
+	if pub.Fields["current_password"] == "" {
+		t.Errorf("fields = %v, want a current_password message", pub.Fields)
 	}
 }

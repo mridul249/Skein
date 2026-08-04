@@ -34,7 +34,7 @@ type landingModel struct {
 
 // The fallback line is always rendered, not injected by script. A blocked
 // window.close() must leave a page that tells the user what to do.
-const closeFallback = "Authentication complete — you can close this window."
+const closeFallback = "Authentication complete - you can close this window."
 
 // oauthErrorMessages maps the OAuth 2.0 error codes (RFC 6749 §4.1.2.1) to
 // text safe to render. A code outside this set renders the generic message,

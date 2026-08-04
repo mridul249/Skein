@@ -5,7 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/mridul249/Skein/internal/files"
 
 	"github.com/mridul249/Skein/internal/httpapi/httpx"
 	"github.com/mridul249/Skein/internal/skerr"
@@ -107,5 +112,69 @@ func TestProviderMisconfiguredIsDistinctFromNeedsReauth(t *testing.T) {
 	// And it never logs the user out of Skein.
 	if rec.Code == http.StatusUnauthorized {
 		t.Error("returned 401; the frontend would clear the Skein session")
+	}
+}
+
+// A damaged file is a 409 with the missing shards named, never a 500.
+//
+// From a live log: `msg="request refused" error="integrity check failed:
+// Shard 0 of this file is missing from its drive." status=500`. The detection
+// was right and the status was wrong — 500 tells the user to retry, and no
+// retry can ever succeed.
+func TestDamagedFileIs409WithTheMissingShards(t *testing.T) {
+	fileID := uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/files/x/content", nil)
+
+	damaged := &files.DamagedFileError{
+		FileID:        fileID,
+		MissingShards: []int32{0, 2},
+		TotalShards:   5,
+	}
+	httpx.WriteError(rec, req, fmt.Errorf("open shard: %w", damaged))
+
+	if rec.Code == http.StatusInternalServerError {
+		t.Fatal("a damaged file still returns 500; the user is told to retry " +
+			"something that can never succeed")
+	}
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409", rec.Code)
+	}
+
+	var body httpx.ErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error != "file_shards_missing" {
+		t.Errorf("code = %q, want file_shards_missing", body.Error)
+	}
+	if body.FileID != fileID.String() {
+		t.Errorf("file_id = %q, want %s", body.FileID, fileID)
+	}
+	// The indexes are the point: without them the client can only say
+	// "something is wrong with this file".
+	if len(body.MissingShards) != 2 || body.MissingShards[0] != 0 || body.MissingShards[1] != 2 {
+		t.Errorf("missing_shard_indexes = %v, want [0 2]", body.MissingShards)
+	}
+}
+
+// The user-facing message names the damage and does NOT offer a download,
+// which fails the same way.
+func TestDamagedFileMessageDoesNotOfferADownload(t *testing.T) {
+	d := &files.DamagedFileError{
+		FileID:        uuid.New(),
+		MissingShards: []int32{1},
+		TotalShards:   3,
+	}
+	msg := d.PublicMessage()
+
+	if !strings.Contains(msg, "damaged") {
+		t.Errorf("message does not say the file is damaged: %q", msg)
+	}
+	if !strings.Contains(msg, "1") || !strings.Contains(msg, "3") {
+		t.Errorf("message does not name which shard of how many: %q", msg)
+	}
+	if strings.Contains(strings.ToLower(msg), "download it instead") {
+		t.Errorf("the message offers a download, which fails identically: %q", msg)
 	}
 }
