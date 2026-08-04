@@ -153,6 +153,85 @@ func (s *Service) Login(ctx context.Context, email, password string, meta Reques
 	return s.startSession(ctx, user, meta)
 }
 
+// ChangePassword replaces a signed-in user's password, after proving they know
+// the current one.
+//
+// Requiring the current password is not ceremony: the caller is already
+// authenticated, so without it a stolen session cookie is a full account
+// takeover rather than a time-limited one. That check is why this endpoint
+// belongs behind the credential rate limiter with register and login — it
+// verifies a password, which makes it an online guessing oracle.
+//
+// IT DOES NOT SIGN OTHER DEVICES OUT, and that is a known gap, not an
+// oversight. Doing so needs validity state a racing insert inherits — the
+// per-user epoch described in known issue #18 — because both available
+// primitives are wrong for the job:
+//
+//   - RevokeTokenFamily is per-family, and a family is one login. Revoking
+//     every family except the current one needs a per-user family listing that
+//     exists in neither dialect.
+//   - RevokeAllUserSessions enumerates the sessions existing at one instant
+//     and cannot bind one inserted afterwards; its own comment in
+//     queries/sessions.sql records that it is unsound against a concurrent
+//     refresh and must not be wired up.
+//
+// The epoch is schema work owned by the Session 2 rewrite. Until it lands,
+// other sessions stay valid until they expire on their own, the Settings UI
+// says so in as many words, and TestChangePasswordDoesNotYetRevokeOtherSessions
+// pins the current behaviour so the epoch work has a test that must flip.
+func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, current, next string, meta RequestMeta) error {
+	// Length-bound the input before spending argon2 on it: cost is linear in
+	// input length past maxPasswordLen, so an unbounded current password is a
+	// cheap way to make the server do expensive work.
+	if utf8.RuneCountInString(current) > maxPasswordLen {
+		return errInvalidCredentials()
+	}
+
+	user, err := s.store.GetUserByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, skerr.ErrNotFound) {
+			return skerr.ErrUnauthorized
+		}
+		return fmt.Errorf("look up user: %w", err)
+	}
+
+	// The same verification path Login uses. A second implementation here is
+	// how the two drift into disagreeing about what a valid password is.
+	ok, err := VerifyPassword(user.PasswordHash, current)
+	if err != nil {
+		s.log.ErrorContext(ctx, "stored password hash is malformed",
+			slog.String("user_id", user.ID.String()))
+		return errInvalidCredentials()
+	}
+	if !ok {
+		s.record(ctx, &user.ID, EventLoginFailed,
+			map[string]any{"reason": "bad_password", "op": "change_password"}, meta)
+		return errInvalidCredentials()
+	}
+
+	// The same validator registration uses, applied after verification so a
+	// wrong current password cannot be distinguished from a weak new one by
+	// which error comes back.
+	if verr := validatePassword(next); verr != nil {
+		return verr
+	}
+
+	// HashPassword owns the argon2id parameters (password.go). Reading them
+	// here would be a second copy that silently stops matching.
+	hash, err := HashPassword(next)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	if uerr := s.store.UpdateUserPassword(ctx, user.ID, hash); uerr != nil {
+		return fmt.Errorf("update password: %w", uerr)
+	}
+
+	// EventPasswordChanged was declared at store.go and never emitted until
+	// now; this is its first caller.
+	s.record(ctx, &user.ID, EventPasswordChanged, nil, meta)
+	return nil
+}
+
 // Refresh rotates a refresh token.
 //
 // This is the whole point of the package. Rules.md §2.8:
