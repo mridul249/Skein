@@ -90,6 +90,9 @@ func main() {
 	a, err := app.Build(ctx,
 		app.WithSQLiteDatabase(""),
 		app.WithDesktopConnect(newDesktopConnector),
+		// Refresh needs the same credentials the exchange uses. See
+		// app.WithDesktopOAuth for why these are two separate paths.
+		app.WithDesktopOAuth(resolveDesktopClientID, resolveDesktopClientSecret),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "skein-desktop: %v\n", err)

@@ -35,6 +35,17 @@ func statusFor(err error) (int, string, string) {
 	switch {
 	case errors.Is(err, skerr.ErrValidation):
 		return http.StatusBadRequest, "validation_failed", "The request was not valid."
+	// A misconfigured OAuth client is a SERVER fault, not a user one. It must
+	// not render as needs_reauth: reconnecting cannot fix it, so a Reconnect
+	// button would be a trap. 503 rather than 500 — the condition is real,
+	// identified, and fixable by an operator.
+	//
+	// Ordered before ErrDriveNeedsReconnect so a config fault can never be
+	// reported as something the user is expected to repair.
+	case errors.Is(err, skerr.ErrProviderMisconfigured):
+		return http.StatusServiceUnavailable, "provider_misconfigured",
+			"Skein's Google client is misconfigured. This is a server setting; " +
+				"reconnecting the drive will not fix it."
 	// Before ErrUnauthorized: a dead Drive grant must never surface as 401.
 	// The frontend clears the Skein session on any 401, so a revoked *Google*
 	// token would sign the user out of the app entirely.

@@ -69,3 +69,43 @@ func TestDriveNeedsReconnectCarriesTheAccountID(t *testing.T) {
 		t.Error("account_id appears in both fields and the top level")
 	}
 }
+
+// A misconfigured OAuth client must NOT render as needs_reauth. Reconnecting
+// cannot fix a broken client, so a Reconnect button there is a trap: the user
+// re-consents, the exchange fails identically, and they go round again.
+func TestProviderMisconfiguredIsDistinctFromNeedsReauth(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/files/x/content", nil)
+
+	httpx.WriteError(rec, req, fmt.Errorf("refresh provider token: %w",
+		skerr.ErrProviderMisconfigured))
+
+	if rec.Code == http.StatusInternalServerError {
+		t.Error("a misconfigured client is still a bare 500; it is a known, named condition")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rec.Code)
+	}
+
+	var body httpx.ErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error == "drive_needs_reauth" {
+		t.Fatal("a client misconfiguration was reported as drive_needs_reauth; " +
+			"the UI would offer a Reconnect button that cannot work")
+	}
+	if body.Error != "provider_misconfigured" {
+		t.Errorf("error code = %q, want provider_misconfigured", body.Error)
+	}
+	// No account_id: the fault is not with any particular drive, and naming
+	// one would badge an account that is perfectly healthy.
+	if body.AccountID != "" {
+		t.Errorf("account_id = %q; a client misconfiguration is not about one drive",
+			body.AccountID)
+	}
+	// And it never logs the user out of Skein.
+	if rec.Code == http.StatusUnauthorized {
+		t.Error("returned 401; the frontend would clear the Skein session")
+	}
+}

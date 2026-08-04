@@ -10,8 +10,7 @@ services:
       POSTGRES_PASSWORD: skein
       POSTGRES_DB: skein
     ports:
-      # 5433 so it does not collide with a Postgres already on the host.
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - skein-dev-pgdata:/var/lib/postgresql/data
     healthcheck:
