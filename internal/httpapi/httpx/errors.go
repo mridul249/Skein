@@ -23,6 +23,10 @@ type ErrorBody struct {
 	// Fields carries per-field validation messages. It is populated only
 	// for validation errors and never contains internal detail.
 	Fields map[string]string `json:"fields,omitempty"`
+	// AccountID names the connected account a drive_needs_reauth error is
+	// about, so the client can badge the right drive and offer Reconnect for
+	// it rather than making the user guess which of several went dead.
+	AccountID string `json:"account_id,omitempty"`
 }
 
 // statusFor is the single place a domain error becomes an HTTP status.
@@ -31,6 +35,12 @@ func statusFor(err error) (int, string, string) {
 	switch {
 	case errors.Is(err, skerr.ErrValidation):
 		return http.StatusBadRequest, "validation_failed", "The request was not valid."
+	// Before ErrUnauthorized: a dead Drive grant must never surface as 401.
+	// The frontend clears the Skein session on any 401, so a revoked *Google*
+	// token would sign the user out of the app entirely.
+	case errors.Is(err, skerr.ErrDriveNeedsReconnect):
+		return http.StatusConflict, "drive_needs_reauth",
+			"A drive needs to be reconnected before this can run."
 	case errors.Is(err, skerr.ErrUnauthorized):
 		return http.StatusUnauthorized, "unauthorized", "Authentication is required."
 	case errors.Is(err, skerr.ErrForbidden):
@@ -96,11 +106,20 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 			slog.Int("status", status))
 	}
 
+	// account_id is promoted out of Fields to a top-level key: it identifies
+	// which drive to badge, which is not a per-field validation message and
+	// should not have to be dug out of a map meant for form errors.
+	accountID := fields["account_id"]
+	if accountID != "" && len(fields) == 1 {
+		fields = nil
+	}
+
 	WriteJSON(w, r, status, ErrorBody{
 		Error:     code,
 		Message:   msg,
 		RequestID: reqID,
 		Fields:    fields,
+		AccountID: accountID,
 	})
 }
 

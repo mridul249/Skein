@@ -30,6 +30,13 @@ var (
 	ErrUnauthorized   = errors.New("storage: provider rejected the credentials")
 	ErrQuota          = errors.New("storage: provider is out of space")
 	ErrRangeNotSat    = errors.New("storage: requested range is not satisfiable")
+
+	// ErrRateLimited is the provider asking the caller to slow down. It is
+	// deliberately distinct from ErrUnauthorized: Drive reports both as 403,
+	// but a rate limit is transient and retryable while a revoked grant needs
+	// the user to re-authorise. Collapsing the two marks a working account
+	// needs_reauth the first time a burst is throttled.
+	ErrRateLimited = errors.New("storage: provider is rate limiting")
 )
 
 // ObjectSpec describes an object about to be written.

@@ -567,7 +567,15 @@ func (s *Service) recordSyncFailure(ctx context.Context, acct StoredAccount, cau
 	msg := "Could not reach the provider."
 	status := acct.Status
 
-	if errors.Is(cause, storage.ErrUnauthorized) || errors.Is(cause, skcrypto.ErrDecrypt) {
+	// A rate limit is explicitly NOT a reason to re-authorise. Drive reports
+	// it as 403, the same status as a revoked grant, and gdrive.apiError is
+	// what tells the two apart; if that mapping regresses, a busy account
+	// starts demanding re-consent. Handled before the ErrUnauthorized branch
+	// so a future error that satisfies both cannot fall through to it.
+	switch {
+	case errors.Is(cause, storage.ErrRateLimited):
+		msg = "Google is rate limiting this drive. It will retry on its own."
+	case errors.Is(cause, storage.ErrUnauthorized) || errors.Is(cause, skcrypto.ErrDecrypt):
 		status = StatusNeedsReauth
 		msg = "Google revoked access. Reconnect this drive."
 	}
