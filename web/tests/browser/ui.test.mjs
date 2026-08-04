@@ -705,3 +705,225 @@ test('the modal has no entrance animation under prefers-reduced-motion', async (
     });
   }
 });
+
+// THE UPLOAD RUN-THROUGH, driven through the real store and real components.
+//
+// Two concurrent uploads, navigate away and back, both survive and neither is
+// dismissible; finish them; dismiss one; clear the rest.
+test('uploads survive navigation, and only terminal cards can be dismissed', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/') + '&transfers=1');
+
+    const readRows = `(() => [...document.querySelectorAll('[aria-label="Transfers"] li')].map((li) => ({
+      name: li.querySelector('span')?.textContent?.trim() ?? '',
+      action: li.querySelector('button')?.textContent?.trim() ?? '',
+    })))()`;
+
+    const before = await p.eval(readRows);
+    assert.equal(before.length, 2, 'the fixture should seed two concurrent uploads');
+    // Mid-flight, the only control is Cancel. A Dismiss here would orphan a
+    // running upload, which is issue #13.
+    for (const row of before) {
+      assert.equal(row.action, 'Cancel', `${row.name} offered "${row.action}" mid-flight`);
+    }
+
+    // Navigate away and back. The store lives above the router, so the jobs
+    // must still be there.
+    await p.eval(`(() => {
+      const trash = [...document.querySelectorAll('a')].find((a) => /Trash/i.test(a.textContent ?? ''));
+      trash?.click();
+      return true;
+    })()`);
+    await sleep(150);
+    await p.eval(`(() => {
+      const files = [...document.querySelectorAll('a')].find((a) => /Files/i.test(a.textContent ?? ''));
+      files?.click();
+      return true;
+    })()`);
+    await sleep(150);
+
+    const after = await p.eval(readRows);
+    assert.equal(after.length, 2, 'navigating away lost an in-flight upload (issue #13)');
+    for (const row of after) {
+      assert.equal(row.action, 'Cancel', 'an in-flight upload became dismissible');
+    }
+
+    // There is nothing to clear while both are running.
+    const clearBefore = await p.eval(
+      `Boolean(document.querySelector('[aria-label^="Clear"]'))`,
+    );
+    assert.equal(clearBefore, false, 'Clear appeared with no finished transfers');
+
+    // Finish both.
+    await p.eval(`window.__settleUpload('finishing-archive', 'done')`);
+    await p.eval(`window.__settleUpload('sending-video', 'error')`);
+    await sleep(200);
+
+    const settled = await p.eval(readRows);
+    assert.equal(settled.length, 2);
+    for (const row of settled) {
+      assert.equal(row.action, 'Dismiss', `${row.name} is terminal but not dismissible`);
+    }
+
+    // Dismiss one.
+    await p.eval(`(() => {
+      const btn = [...document.querySelectorAll('[aria-label="Transfers"] li button')]
+        .find((b) => b.textContent.trim() === 'Dismiss');
+      btn?.click();
+      return true;
+    })()`);
+    await sleep(150);
+    assert.equal((await p.eval(readRows)).length, 1, 'Dismiss did not remove the card');
+
+    // Clear the rest.
+    await p.eval(`(() => {
+      document.querySelector('[aria-label^="Clear"]')?.click();
+      return true;
+    })()`);
+    await sleep(150);
+    const panel = await p.eval(`Boolean(document.querySelector('[aria-label="Transfers"]'))`);
+    assert.equal(panel, false, 'Clear left the transfers panel behind');
+  });
+});
+
+// Clear must leave in-flight uploads running, not cancel them.
+test('Clear finished leaves an in-flight upload alone', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/') + '&transfers=1');
+
+    // Finish exactly one of the two.
+    await p.eval(`window.__settleUpload('finishing-archive', 'done')`);
+    await sleep(200);
+
+    await p.eval(`(() => {
+      document.querySelector('[aria-label^="Clear"]')?.click();
+      return true;
+    })()`);
+    await sleep(150);
+
+    const rows = await p.eval(`(() => [...document.querySelectorAll('[aria-label="Transfers"] li')].map((li) => ({
+      name: li.querySelector('span')?.textContent?.trim() ?? '',
+      action: li.querySelector('button')?.textContent?.trim() ?? '',
+    })))()`);
+
+    assert.equal(rows.length, 1, 'Clear removed an in-flight upload');
+    assert.match(rows[0].name, /sending-video/);
+    assert.equal(rows[0].action, 'Cancel', 'the surviving upload is no longer in flight');
+  });
+});
+
+// The download list must not imply tracking it cannot do.
+test('the download list shows no progress affordance', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+    const r = await p.eval(`(() => {
+      const panel = document.querySelector('[aria-label="Downloads"]');
+      if (!panel) return { present: false };
+      return {
+        present: true,
+        text: panel.textContent ?? '',
+        bars: panel.querySelectorAll('[role="progressbar"], .animate-sweep').length,
+      };
+    })()`);
+    if (!r.present) return; // no downloads seeded on this route
+    assert.equal(r.bars, 0, 'the download panel renders a progress affordance it cannot back');
+    assert.ok(!/%/.test(r.text), 'the download panel shows a percentage it cannot know');
+  });
+});
+
+// THE SELECTION RUN-THROUGH. Select rows, delete with a forced partial
+// failure, and confirm the result is rendered honestly.
+test('selection drives a toolbar, and the header checkbox is tri-state', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+
+    const state = `(() => {
+      const boxes = [...document.querySelectorAll('tbody input[type=checkbox]')];
+      const head = document.querySelector('thead input[type=checkbox]');
+      const bar = document.querySelector('[aria-label="Selection actions"]');
+      return {
+        rows: boxes.length,
+        headChecked: head?.checked ?? null,
+        headIndeterminate: head?.indeterminate ?? null,
+        toolbar: bar ? (bar.textContent ?? '').replace(/\\s+/g, ' ').trim() : null,
+      };
+    })()`;
+
+    const initial = await p.eval(state);
+    assert.ok(initial.rows >= 2, 'the fixture needs at least two file rows');
+    assert.equal(initial.toolbar, null, 'the toolbar showed with nothing selected');
+    assert.equal(initial.headIndeterminate, false);
+
+    // Select one row: the header goes indeterminate, not checked.
+    await p.eval(`(() => {
+      document.querySelectorAll('tbody input[type=checkbox]')[0].click();
+      return true;
+    })()`);
+    await sleep(120);
+
+    const one = await p.eval(state);
+    assert.equal(one.headIndeterminate, true, 'header is not indeterminate with a partial selection');
+    assert.equal(one.headChecked, false, 'header claims all rows are selected');
+    assert.ok(/1 selected/.test(one.toolbar ?? ''), `toolbar read "${one.toolbar}"`);
+
+    // Select all from the header.
+    await p.eval(`(() => { document.querySelector('thead input[type=checkbox]').click(); return true; })()`);
+    await sleep(120);
+
+    const all = await p.eval(state);
+    assert.equal(all.headChecked, true);
+    assert.equal(all.headIndeterminate, false);
+    assert.ok(
+      new RegExp(`${all.rows} selected`).test(all.toolbar ?? ''),
+      `toolbar read "${all.toolbar}" for ${all.rows} rows`,
+    );
+  });
+});
+
+test('a partial bulk failure is reported honestly and keeps failures selected', async () => {
+  await on({}, async (p) => {
+    // One of the fixture's files will fail.
+    await p.goto(url('/') + '&bulkfail=1');
+
+    await p.eval(`(() => { document.querySelector('thead input[type=checkbox]').click(); return true; })()`);
+    await sleep(120);
+
+    const total = await p.eval(`document.querySelectorAll('tbody input[type=checkbox]').length`);
+
+    await p.eval(`(() => {
+      const btn = [...document.querySelectorAll('[aria-label="Selection actions"] button')]
+        .find((b) => /Delete/.test(b.textContent ?? ''));
+      btn?.click();
+      return true;
+    })()`);
+    await sleep(400);
+
+    const r = await p.eval(`(() => {
+      const notice = document.querySelector('[role="status"]');
+      const bar = document.querySelector('[aria-label="Selection actions"]');
+      return {
+        text: notice ? (notice.textContent ?? '').replace(/\\s+/g, ' ').trim() : null,
+        toolbar: bar ? (bar.textContent ?? '').replace(/\\s+/g, ' ').trim() : null,
+      };
+    })()`);
+
+    assert.ok(r.text, 'no outcome was rendered after a partial failure');
+    // Neither a bare success nor a bare error: both counts appear.
+    assert.ok(
+      new RegExp(`${total - 1} of ${total}`).test(r.text),
+      `the notice must name both counts, read "${r.text}"`,
+    );
+    assert.ok(/1 failed/.test(r.text), `the notice must name the failures, read "${r.text}"`);
+    assert.ok(
+      /rate limiting/.test(r.text),
+      `the notice must say WHY it failed, read "${r.text}"`,
+    );
+    assert.ok(/Retry 1 failed/.test(r.text), 'no retry affordance for the failures');
+
+    // The failed file stays selected so Retry is one click.
+    assert.ok(
+      /1 selected/.test(r.toolbar ?? ''),
+      `the failed file should stay selected, toolbar read "${r.toolbar}"`,
+    );
+  });
+});

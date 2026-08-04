@@ -182,6 +182,30 @@ export class UploadStore {
     this.emit();
   }
 
+  /**
+   * dismissSettled removes every job that has reached a terminal state,
+   * leaving in-flight ones alone. Returns how many were removed.
+   *
+   * This is the Clear button. Like dismiss, it is a VIEW operation: it does
+   * not cancel anything, does not release a reservation, and never touches the
+   * server. An in-flight job surviving Clear is the whole point — the
+   * alternative reintroduces #13, where losing the handle to a running upload
+   * left it streaming with no UI attached.
+   */
+  dismissSettled(): number {
+    const before = this.jobs.length;
+    const next = this.jobs.filter(isActive);
+    if (next.length === before) return 0;
+    this.jobs = next;
+    this.emit();
+    return before - next.length;
+  }
+
+  /** settledCount is how many jobs Clear would remove. */
+  settledCount(): number {
+    return this.jobs.filter((job) => !isActive(job)).length;
+  }
+
   private settle(id: string): void {
     const job = this.jobs.find((j) => j.id === id);
     if (job) this.onSettled(job);

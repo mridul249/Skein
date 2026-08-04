@@ -1,13 +1,23 @@
 import { useDownloads } from '../lib/downloads-context';
 
 /**
- * Downloads in progress, rendered wherever the user happens to be — same
- * placement rationale as UploadList.
+ * Downloads handed to the browser, rendered wherever the user happens to be —
+ * same placement rationale as UploadList.
  *
- * There is no progress bar and no "done" state here on purpose: see
- * downloads.ts for why nothing in this process can observe either
- * truthfully once the browser has taken the transfer. This is a "something
- * is happening" indicator, dismissed by the user once they see it land.
+ * DELIBERATELY NOT A PROGRESS UI. `a.click()` hands the transfer entirely to
+ * the browser/webview and JS is never told anything more about it, which is
+ * precisely what keeps downloads off the heap (known issue #15). There is no
+ * byte count to render, so there is no bar, no spinner, no percentage and no
+ * indeterminate sweep — any of those would imply this row is tracking
+ * something it cannot see.
+ *
+ * The label says what is actually true: the transfer was handed over. Not
+ * "Downloading…", which reads as live tracking of something in flight.
+ *
+ * Real byte-level progress needs the transfer to run through Go rather than
+ * the webview, which is a desktop-only path with a native save picker. That is
+ * Block 6; `files.ProgressReader` (known issue #40) is already built for it
+ * and is waiting on exactly that route.
  */
 export function DownloadList() {
   const { jobs, dismiss } = useDownloads();
@@ -27,7 +37,9 @@ export function DownloadList() {
                   : 'shrink-0 text-data-sm text-muted'
               }
             >
-              {job.status === 'error' ? (job.error ?? 'Could not start.') : 'Downloading…'}
+              {job.status === 'error'
+                ? (job.error ?? 'Could not start that download.')
+                : 'Handed to your browser'}
             </span>
             <button
               type="button"

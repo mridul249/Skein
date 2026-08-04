@@ -227,6 +227,54 @@ test('dismiss removes a settled job but refuses a live one', async () => {
   assert.equal(page.jobs().length, 0);
 });
 
+test('clear dismisses every settled job and leaves live ones alone', async () => {
+  const { uploader, inFlight } = manualUploader();
+  const store = new UploadStore(uploader);
+  const page = mountRoute(store);
+
+  const done = store.start(file('done.bin', 1000), null);
+  const failed = store.start(file('failed.bin', 1000), null);
+  const live = store.start(file('live.bin', 1000), null);
+
+  nth(inFlight, 0).resolve();
+  nth(inFlight, 1).reject(new Error('drive refused'));
+  await settle();
+
+  assert.equal(page.jobs().length, 3);
+
+  const removed = store.dismissSettled();
+
+  assert.equal(removed, 2, 'both terminal jobs should have been dismissed');
+  const remaining = page.jobs();
+  assert.equal(remaining.length, 1, 'the in-flight upload must survive Clear');
+  assert.equal(nth(remaining, 0).id, live);
+  assert.equal(nth(remaining, 0).status, 'sending');
+
+  // And Clear did not cancel it: the transfer is still running, so resolving
+  // still lands normally. Dismissing is a VIEW operation.
+  nth(inFlight, 2).resolve();
+  await settle();
+  assert.equal(nth(page.jobs(), 0).status, 'done');
+
+  void done;
+  void failed;
+});
+
+test('clear on a list with nothing settled changes nothing', async () => {
+  const { uploader, inFlight } = manualUploader();
+  const store = new UploadStore(uploader);
+  const page = mountRoute(store);
+
+  store.start(file('live.bin', 1000), null);
+  const removed = store.dismissSettled();
+
+  assert.equal(removed, 0);
+  assert.equal(page.jobs().length, 1);
+
+  nth(inFlight, 0).resolve();
+  await settle();
+});
+
 /** A window stand-in that records what is attached. */
 function fakeWindow(): UnloadTarget & { count: () => number } {
   const handlers = new Set<(e: BeforeUnloadEvent) => void>();

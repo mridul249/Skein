@@ -162,6 +162,38 @@ client.setQueryData(['trash'], {
 const route = params.get('route') ?? '/';
 
 /**
+ * Stubs api.bulkDelete so partial failure can be exercised for real.
+ *
+ * Stubbed at the api object rather than at window.fetch: request() refreshes
+ * the access token BEFORE it calls fetch, and this fixture has no session, so
+ * a fetch-level stub is never reached — every call fails with "Sign in to
+ * continue" instead. Everything above the api boundary (the toolbar, the
+ * chunking, the outcome rendering, the failed files staying selected) is the
+ * real code under test.
+ *
+ * `?bulkfail=N` fails the first N files of each request.
+ */
+if (params.has('bulkfail')) {
+  const failCount = Number(params.get('bulkfail') ?? '0');
+  (api as unknown as Record<string, unknown>).bulkDelete = async (fileIds: string[]) => {
+    const results = fileIds.map((id, i) => ({
+      file_id: id,
+      ok: i >= failCount,
+      code: i < failCount ? 'rate_limited' : undefined,
+      error:
+        i < failCount
+          ? 'A drive is rate limiting. Try this file again shortly.'
+          : undefined,
+    }));
+    return {
+      results,
+      succeeded: results.filter((r) => r.ok).length,
+      failed: results.filter((r) => !r.ok).length,
+    };
+  };
+}
+
+/**
  * A stub uploader so the fixture can show real `sending` and `finishing`
  * states without a network.
  *
@@ -180,8 +212,30 @@ const stubUploader = (
   } else {
     onProgress(Math.round(file.size * 0.4), file.size);
   }
-  // Never settles: both jobs stay on screen for the length of the test.
-  return new Promise<void>(() => {});
+  // Never settles by default: both jobs stay on screen for the length of the
+  // test. `?settle` exposes a resolver so a test can drive them to a terminal
+  // state and exercise dismiss / clear-all for real.
+  return new Promise<void>((resolve, reject) => {
+    settlers.push({ name: file.name, resolve, reject });
+  });
+};
+
+/**
+ * Handles for the seeded uploads, so a test can finish them on demand.
+ *
+ * Exposed on window rather than through a test-only prop: the point is to
+ * drive the REAL store through the REAL component, not a parallel harness.
+ */
+const settlers: { name: string; resolve: () => void; reject: (e: Error) => void }[] = [];
+(window as unknown as Record<string, unknown>).__settleUpload = (
+  name: string,
+  outcome: 'done' | 'error' = 'done',
+) => {
+  const s = settlers.find((x) => x.name.startsWith(name));
+  if (!s) return false;
+  if (outcome === 'done') s.resolve();
+  else s.reject(new Error('A drive refused the upload.'));
+  return true;
 };
 
 function SeedTransfers() {

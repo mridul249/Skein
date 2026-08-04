@@ -30,7 +30,7 @@ function label(job: UploadJob): string {
 }
 
 export function UploadList() {
-  const { jobs, cancel, dismiss } = useUploads();
+  const { jobs, cancel, dismiss, clearSettled, settledCount } = useUploads();
   if (jobs.length === 0) return null;
 
   const live = jobs.filter(isActive).length;
@@ -39,11 +39,26 @@ export function UploadList() {
     <section className="card mb-6 p-4" aria-label="Transfers">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h2 className="text-label font-semibold text-text">Transfers</h2>
-        {live > 0 && (
-          <span className="tabular text-data-sm text-muted">
-            {live} in progress
-          </span>
-        )}
+        <div className="flex items-baseline gap-3">
+          {live > 0 && (
+            <span className="tabular text-data-sm text-muted">
+              {live} in progress
+            </span>
+          )}
+          {settledCount > 0 && (
+            <button
+              type="button"
+              className="rounded px-2 py-1 text-caption text-muted
+                         transition-colors duration-hover hover:bg-raised hover:text-text"
+              onClick={clearSettled}
+              // Named rather than a bare "Clear" so it is obvious that a
+              // running upload is not about to be cancelled.
+              aria-label={`Clear ${settledCount} finished ${settledCount === 1 ? 'transfer' : 'transfers'}`}
+            >
+              Clear finished
+            </button>
+          )}
+        </div>
       </div>
 
       <ul className="space-y-3">

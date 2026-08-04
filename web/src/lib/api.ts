@@ -87,11 +87,40 @@ export interface Quota {
 }
 
 /** ApiError carries the server's typed error shape. */
+/** One file's outcome in a bulk operation. */
+export interface BulkResult {
+  file_id: string;
+  ok: boolean;
+  code?: string;
+  error?: string;
+}
+
+export interface BulkResponse {
+  results: BulkResult[];
+  succeeded: number;
+  failed: number;
+}
+
+/**
+ * The server caps one bulk request. Mirrored here so the client can chunk
+ * rather than let a large selection fail opaquely.
+ */
+export const BULK_LIMIT = 200;
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly requestId?: string;
   readonly fields?: Record<string, string>;
+  /**
+   * Which connected account a drive_needs_reauth error is about.
+   *
+   * Present only on that code. provider_misconfigured deliberately omits it:
+   * a broken OAuth client is not any one drive's fault, and badging a healthy
+   * account would put a Reconnect button in front of a user who can never
+   * succeed with it. See the server's httpx.ErrorBody.
+   */
+  readonly accountId?: string;
 
   constructor(
     status: number,
@@ -99,6 +128,7 @@ export class ApiError extends Error {
     message: string,
     requestId?: string,
     fields?: Record<string, string>,
+    accountId?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -106,6 +136,7 @@ export class ApiError extends Error {
     this.code = code;
     this.requestId = requestId;
     this.fields = fields;
+    this.accountId = accountId;
   }
 }
 
@@ -220,6 +251,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
       message?: string;
       request_id?: string;
       fields?: Record<string, string>;
+      account_id?: string;
     };
     if (res.status === 401) clearSession();
     throw new ApiError(
@@ -228,6 +260,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
       e.message ?? 'Something went wrong.',
       e.request_id,
       e.fields,
+      e.account_id,
     );
   }
 
@@ -235,6 +268,34 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 }
 
 export const api = {
+  /**
+   * Changes the signed-in user's password.
+   *
+   * OTHER DEVICES ARE NOT SIGNED OUT. The server verifies, validates and
+   * rehashes, but does not revoke other sessions — that needs the per-user
+   * epoch from known issue #18, which is schema work. The Settings copy says
+   * so plainly; do not add a spinner or a message implying revocation.
+   */
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await request<void>('/api/auth/change-password', {
+      method: 'POST',
+      body: { current_password: currentPassword, new_password: newPassword },
+    });
+  },
+
+  /** Deletes many files at once, returning one result per file. */
+  async bulkDelete(fileIds: string[]): Promise<BulkResponse> {
+    return request<BulkResponse>('/api/files/bulk-delete', {
+      method: 'POST',
+      body: { file_ids: fileIds },
+    });
+  },
+
+  /** Permanently deletes every trashed file. */
+  async emptyTrash(): Promise<BulkResponse> {
+    return request<BulkResponse>('/api/trash/empty', { method: 'POST' });
+  },
+
   /** Called once on load. A failure just means nobody is signed in. */
   async bootstrap(): Promise<User | null> {
     const ok = await refresh();
