@@ -2,8 +2,12 @@ package files
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 
@@ -120,6 +124,22 @@ type readSegment struct {
 	// offset arithmetic needs to locate the short final frame.
 	plainSize int64
 	index     int32
+	// sha256 is the digest of this shard's whole plaintext, recorded at
+	// upload. Compared on read only when the segment covers the entire shard
+	// -- see wholeShard.
+	sha256 []byte
+}
+
+// wholeShard reports whether this segment covers its shard completely.
+//
+// A stored digest is over the WHOLE shard plaintext, so a partial read cannot
+// verify it: there is nothing to compare a prefix against. Rather than hashing
+// what we have and silently skipping the comparison, verification is defined
+// as applying to full-shard reads only, and range reads are documented as
+// unverified at the digest level. Encrypted files remain AEAD-protected on
+// every path including ranges, so this is a gap only for plaintext ranges.
+func (seg readSegment) wholeShard() bool {
+	return seg.offset == 0 && seg.length == seg.plainSize && len(seg.sha256) > 0
 }
 
 // planRead selects the shards intersecting [start, start+length) and the slice
@@ -151,6 +171,7 @@ func planRead(shards []Shard, start, length int64) []readSegment {
 			length:    to - from,
 			plainSize: sh.PlainSize,
 			index:     sh.Index,
+			sha256:    sh.SHA256,
 		})
 	}
 	return out
@@ -173,6 +194,14 @@ type shardReader struct {
 	// resources of its own, so this is what has to be closed.
 	closer io.Closer
 	closed bool
+
+	// digest hashes the PLAINTEXT of the shard in hand as it streams past,
+	// fed by a TeeReader wrapped around whatever body Read consumes. It is
+	// nil when the current segment is not a whole shard, which is what makes
+	// range reads skip verification explicitly rather than by accident.
+	digest hash.Hash
+	// want is the digest recorded at upload for the shard in hand.
+	want []byte
 }
 
 func (r *shardReader) Read(p []byte) (int, error) {
@@ -194,8 +223,16 @@ func (r *shardReader) Read(p []byte) (int, error) {
 			return n, nil
 		}
 		if errors.Is(err, io.EOF) {
-			// This shard is done; move to the next one. The loop
-			// continues rather than returning 0, nil, which callers
+			// This shard is done. Compare the digest BEFORE moving on, so a
+			// corrupt shard fails the read rather than being concatenated
+			// into the output. Encrypted shards are already AEAD-protected;
+			// this is what protects the plaintext path, which had no
+			// integrity check at all.
+			if verr := r.verifyCurrent(); verr != nil {
+				r.closeCurrent()
+				return 0, verr
+			}
+			// The loop continues rather than returning 0, nil, which callers
 			// are allowed to treat as a stall.
 			r.closeCurrent()
 			continue
@@ -274,7 +311,53 @@ func (r *shardReader) openNext() error {
 		r.body = dec
 	}
 
+	// ONE TeeReader, feeding the hasher as the caller consumes the body.
+	// Nothing is buffered and nothing is read twice: the digest is computed
+	// from the same bytes that are handed out, which is what makes it a check
+	// on what the caller actually receives rather than on a second read that
+	// might succeed where the first did not.
+	//
+	// Only whole-shard segments are hashed. See readSegment.wholeShard.
+	if seg.wholeShard() {
+		r.digest = sha256.New()
+		r.want = seg.sha256
+		r.body = io.TeeReader(r.body, r.digest)
+	}
+
 	return nil
+}
+
+// verifyCurrent compares the streamed plaintext against the digest recorded at
+// upload. It is a no-op when the segment was not a whole shard.
+//
+// Rules.md: a failed integrity check refuses the data. It does not log and
+// continue -- the caller would receive corrupt bytes with a success status,
+// which is the failure mode this exists to prevent.
+func (r *shardReader) verifyCurrent() error {
+	if r.digest == nil || len(r.want) == 0 {
+		return nil
+	}
+	got := r.digest.Sum(nil)
+	r.digest = nil
+	want := r.want
+	r.want = nil
+
+	if subtle.ConstantTimeCompare(got, want) == 1 {
+		return nil
+	}
+
+	seg := r.segments[r.current]
+	r.svc.log.ErrorContext(r.ctx, "shard failed its integrity check",
+		slog.String("file_id", r.fileID.String()),
+		slog.Int("shard_index", int(seg.index)),
+		slog.String("provider_object_id", seg.shard.ProviderID),
+		slog.String("want_sha256", hex.EncodeToString(want)),
+		slog.String("got_sha256", hex.EncodeToString(got)))
+
+	return skerr.Public(skerr.ErrIntegrity,
+		"Shard %d of this file failed its integrity check. "+
+			"The copy stored on that drive has changed since it was uploaded.",
+		seg.index)
 }
 
 // closeCurrent releases the provider stream for the shard in hand. The
@@ -290,6 +373,8 @@ func (r *shardReader) closeCurrent() {
 	}
 	r.closer = nil
 	r.body = nil
+	r.digest = nil
+	r.want = nil
 }
 
 // Close releases the shard currently open. It is safe to call more than once.

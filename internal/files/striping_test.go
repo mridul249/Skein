@@ -411,6 +411,84 @@ func TestCorruptShardIsDetectedOnRead(t *testing.T) {
 	}
 }
 
+// THE SAME PROPERTY WITHOUT ENCRYPTION, WHICH IS WHERE IT WAS MISSING.
+//
+// An encrypted shard is protected by AEAD: a flipped byte fails the Poly1305
+// tag and the read errors out, which the test above proves. An UNENCRYPTED
+// shard had no integrity check at all — file_shards.sha256 is computed and
+// stored on upload (upload.go) and was never compared on read, so corruption
+// surfaced as wrong bytes handed to the user with a 200.
+//
+// TestStripingWithoutEncryption proves that path is live, so this is not a
+// hypothetical configuration.
+func TestCorruptShardIsDetectedOnReadWithoutEncryption(t *testing.T) {
+	f := newStriped(t, 2, 8<<20, 1<<20, false)
+
+	data := make([]byte, 3<<20)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	file := f.upload(t, "plain.bin", data)
+	if file.IsEncrypted {
+		t.Fatal("fixture built an encrypted file; this test must exercise the plaintext path")
+	}
+
+	// Corrupt one byte of stored plaintext. No header to skip past.
+	sh := file.Shards[0]
+	backend := f.backends[*sh.AccountID]
+	rc, _, err := backend.Get(context.Background(),
+		storage.ObjectRef{ProviderID: sh.ProviderID, Size: sh.SizeBytes}, nil)
+	if err != nil {
+		t.Fatalf("Get() = %v", err)
+	}
+	stored, err := io.ReadAll(rc)
+	if cerr := rc.Close(); cerr != nil {
+		t.Errorf("Close() = %v", cerr)
+	}
+	if err != nil {
+		t.Fatalf("read shard: %v", err)
+	}
+
+	stored[100] ^= 0xff
+	if derr := backend.Delete(context.Background(),
+		storage.ObjectRef{ProviderID: sh.ProviderID}); derr != nil {
+		t.Fatalf("Delete() = %v", derr)
+	}
+	if _, perr := backend.Put(context.Background(), bytes.NewReader(stored), storage.ObjectSpec{
+		Name: sh.ProviderID, Size: int64(len(stored)),
+	}); perr != nil {
+		t.Fatalf("Put() = %v", perr)
+	}
+
+	content, err := f.svc.Open(context.Background(), f.userID, file.ID, nil)
+	if err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+	defer func() { _ = content.Body.Close() }()
+
+	got, rerr := io.ReadAll(content.Body)
+	if rerr == nil {
+		t.Fatalf("a corrupted unencrypted shard was served without error; "+
+			"%d bytes returned, %d of which differ from the original",
+			len(got), countDiff(got, data))
+	}
+	if !errors.Is(rerr, skerr.ErrIntegrity) {
+		t.Errorf("error = %v, want ErrIntegrity", rerr)
+	}
+}
+
+// countDiff reports how many bytes differ, so a failure says how much damage
+// was handed to the caller rather than merely that it happened.
+func countDiff(a, b []byte) int {
+	n := 0
+	for i := range a {
+		if i < len(b) && a[i] != b[i] {
+			n++
+		}
+	}
+	return n
+}
+
 // The unencrypted path still works, so a development deployment with
 // SKEIN_ENCRYPTION_ENABLED=false is not silently broken.
 func TestStripingWithoutEncryption(t *testing.T) {
@@ -454,5 +532,110 @@ func TestPerShardChecksumsAreRecorded(t *testing.T) {
 	}
 	if offset != int64(len(data)) {
 		t.Errorf("shards cover %d bytes, want %d", offset, len(data))
+	}
+}
+
+// Range reads: the digest covers a whole shard, so a partial read cannot
+// verify it. That is DEFINED behaviour, not an oversight — see
+// readSegment.wholeShard. This test pins both halves: a range read still
+// succeeds, and a full read of the same corrupt file still fails.
+//
+// The exposure this documents: a plaintext RANGE read is not digest-verified.
+// Encrypted files stay AEAD-protected on every path, ranges included, so the
+// gap exists only for SKEIN_ENCRYPTION_ENABLED=false plus a range request.
+func TestRangeReadSkipsWholeShardDigestVerification(t *testing.T) {
+	f := newStriped(t, 2, 8<<20, 1<<20, false)
+
+	data := make([]byte, 3<<20)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	file := f.upload(t, "plain.bin", data)
+
+	// Corrupt a byte late in the first shard.
+	sh := file.Shards[0]
+	backend := f.backends[*sh.AccountID]
+	rc, _, err := backend.Get(context.Background(),
+		storage.ObjectRef{ProviderID: sh.ProviderID, Size: sh.SizeBytes}, nil)
+	if err != nil {
+		t.Fatalf("Get() = %v", err)
+	}
+	stored, _ := io.ReadAll(rc)
+	_ = rc.Close()
+	corruptAt := len(stored) - 10
+	stored[corruptAt] ^= 0xff
+	if derr := backend.Delete(context.Background(),
+		storage.ObjectRef{ProviderID: sh.ProviderID}); derr != nil {
+		t.Fatalf("Delete() = %v", derr)
+	}
+	if _, perr := backend.Put(context.Background(), bytes.NewReader(stored), storage.ObjectSpec{
+		Name: sh.ProviderID, Size: int64(len(stored)),
+	}); perr != nil {
+		t.Fatalf("Put() = %v", perr)
+	}
+
+	// A range covering only the first 1 KiB is served: it does not span the
+	// shard, so there is no whole-shard digest to compare it against.
+	content, err := f.svc.Open(context.Background(), f.userID, file.ID,
+		&storage.ByteRange{Start: 0, Length: 1024})
+	if err != nil {
+		t.Fatalf("Open(range) = %v", err)
+	}
+	got, rerr := io.ReadAll(content.Body)
+	_ = content.Body.Close()
+	if rerr != nil {
+		t.Fatalf("a partial read failed: %v; ranges are not digest-verified "+
+			"and this one does not touch the corrupted byte", rerr)
+	}
+	if !bytes.Equal(got, data[:1024]) {
+		t.Error("the range read returned the wrong bytes")
+	}
+
+	// The full read of the same file still fails, which is the guarantee that
+	// matters: corruption cannot be laundered by reading the whole file.
+	full, err := f.svc.Open(context.Background(), f.userID, file.ID, nil)
+	if err != nil {
+		t.Fatalf("Open(full) = %v", err)
+	}
+	defer func() { _ = full.Body.Close() }()
+	if _, ferr := io.ReadAll(full.Body); ferr == nil {
+		t.Error("the full read of a corrupted file succeeded")
+	}
+}
+
+// PRD.md:139 requires refusing partial reassembly. A file whose shards no
+// longer cover its recorded size must not be served at all — not served short,
+// and not served with a gap silently skipped.
+//
+// Driven through Open rather than the unexported checker, so it asserts what a
+// caller actually gets.
+func TestPartialReassemblyIsRefused(t *testing.T) {
+	f := newStriped(t, 2, 8<<20, 1<<20, false)
+
+	data := make([]byte, 3<<20)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	file := f.upload(t, "plain.bin", data)
+	if len(file.Shards) < 2 {
+		t.Fatalf("fixture produced %d shards; need at least 2", len(file.Shards))
+	}
+
+	// Punch a hole in the manifest: shrink one shard so the recorded shards
+	// no longer cover the file's size.
+	f.store.CorruptShard(file.ID, 0, func(sh *files.Shard) {
+		sh.PlainSize -= 4096
+	})
+
+	content, err := f.svc.Open(context.Background(), f.userID, file.ID, nil)
+	if err == nil {
+		defer func() { _ = content.Body.Close() }()
+		got, rerr := io.ReadAll(content.Body)
+		t.Fatalf("a file with an incomplete shard map was served: "+
+			"%d bytes, read error %v; partial reassembly must be refused",
+			len(got), rerr)
+	}
+	if !errors.Is(err, skerr.ErrIntegrity) {
+		t.Errorf("error = %v, want ErrIntegrity", err)
 	}
 }
