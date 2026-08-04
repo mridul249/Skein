@@ -99,7 +99,7 @@ func (rt *rewrite) RoundTrip(req *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(clone)
 }
 
-func newFolderService(t *testing.T) (*Service, *MemoryStore, StoredAccount) {
+func newFolderService(t *testing.T) (*Service, conformanceStore, StoredAccount) {
 	t.Helper()
 
 	master := make([]byte, skcrypto.KeyLen)
@@ -111,7 +111,7 @@ func newFolderService(t *testing.T) (*Service, *MemoryStore, StoredAccount) {
 		t.Fatalf("NewKeyring() = %v", err)
 	}
 
-	store := NewMemoryStore()
+	store := newConformanceStore(t)
 	svc := NewService(store, ring, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	acct, err := store.CreateAccount(context.Background(), NewAccount{
