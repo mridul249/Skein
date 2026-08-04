@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Skein</title>
+</head>
+<body>
+<main role="main">
+  <h1>{{.Heading}}</h1>
+  <p>{{.Body}}</p>
+  <p><small>{{.Fallback}}</small></p>
+</main>
+<script>
+// Close the tab once the desktop app has what it needs. Pop-up and tab
+// policies block window.close() for tabs the script did not itself open,
+// which is the common case here — the fallback copy above is always
+// rendered, so a blocked close leaves a page that still tells the user what
+// to do rather than one that appears stuck.
+setTimeout(function () { window.close(); }, 1500);
+</script>
+</body>
+</html>

@@ -88,22 +88,29 @@ func (l *LoopbackListener) RedirectURL() string {
 }
 
 func (l *LoopbackListener) handleCallback(w http.ResponseWriter, r *http.Request) {
+	oauthErr := r.URL.Query().Get("error")
+
 	select {
 	case l.resultCh <- LoopbackResult{
 		State: r.URL.Query().Get("state"),
 		Code:  r.URL.Query().Get("code"),
-		Err:   r.URL.Query().Get("error"),
+		Err:   oauthErr,
 	}:
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		_, _ = fmt.Fprint(w, "Skein: authorisation received. You can close this tab.")
+		// The page says which happened. Note that oauthErr is passed as a
+		// LOOKUP KEY, never as text: failureLanding maps it to one of a fixed
+		// set of messages. This URL carries the authorization code and the
+		// state, so echoing any part of it into the HTML would be reflected
+		// XSS on the desktop app's own loopback origin.
+		if oauthErr != "" {
+			writeLanding(w, http.StatusOK, failureLanding(oauthErr))
+			return
+		}
+		writeLanding(w, http.StatusOK, successLanding())
 	default:
 		// resultCh already holds its one buffered value: this is a second
 		// request, a duplicate tab or a retried redirect. Nothing more to
 		// record and nothing to unblock a second time.
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		_, _ = fmt.Fprint(w, "Skein: this authorisation was already received. You can close this tab.")
+		writeLanding(w, http.StatusOK, duplicateLanding())
 	}
 }
 
