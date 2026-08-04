@@ -21,6 +21,17 @@ var (
 	ErrUnavailable    = errors.New("unavailable")
 	ErrNotImplemented = errors.New("not implemented")
 	ErrIntegrity      = errors.New("integrity check failed")
+
+	// ErrDriveNeedsReconnect is a connected provider account whose grant is
+	// dead and which only the user can fix by re-authorising.
+	//
+	// It is deliberately NOT ErrUnauthorized. The frontend treats any 401 as
+	// "the Skein session died" — it clears the session and retries once after
+	// a refresh — so returning 401 because a *Google* grant expired would log
+	// the user out of Skein for someone else's problem. This maps to 409
+	// instead: the request was well-formed and the caller is who they say
+	// they are, but an account is in a state that blocks it.
+	ErrDriveNeedsReconnect = errors.New("drive needs reconnection")
 )
 
 // PublicError carries a message that is safe to show a user, plus optional

@@ -338,12 +338,31 @@ func (b *Backend) apiError(resp *http.Response, what string) error {
 	detail := strings.TrimSpace(string(snippet))
 
 	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		// No reason string on a 429; the status is the whole signal.
+		return fmt.Errorf("%s: %w", what, storage.ErrRateLimited)
 	case http.StatusUnauthorized, http.StatusForbidden:
-		// 403 is overloaded at Drive: it covers both a revoked grant and
-		// a quota refusal, distinguishable only by the reason string.
-		if strings.Contains(detail, "storageQuotaExceeded") ||
-			strings.Contains(detail, "quotaExceeded") {
+		// 403 is overloaded at Drive: a revoked grant, a quota refusal and a
+		// rate limit all arrive as 403, distinguishable only by the reason
+		// string. Switching on the status alone gets two of the three wrong.
+		//
+		// Order matters. Check the transient reasons FIRST: a 401 is
+		// unambiguous, but a 403 is only a credential failure once quota and
+		// throttling are excluded.
+		switch {
+		case strings.Contains(detail, "storageQuotaExceeded") ||
+			strings.Contains(detail, "quotaExceeded"):
+			// Note: "quotaExceeded" is a prefix of nothing else here, but
+			// "userRateLimitExceeded" must be tested before any looser
+			// contains-check on "RateLimit" would matter.
 			return fmt.Errorf("%s: %w", what, storage.ErrQuota)
+		case strings.Contains(detail, "rateLimitExceeded") ||
+			strings.Contains(detail, "userRateLimitExceeded") ||
+			strings.Contains(detail, "sharingRateLimitExceeded"):
+			// Transient. Reporting this as ErrUnauthorized would make
+			// accounts.recordSyncFailure mark a working account
+			// needs_reauth for the crime of being busy.
+			return fmt.Errorf("%s: %w", what, storage.ErrRateLimited)
 		}
 		return fmt.Errorf("%s: %w (%s)", what, storage.ErrUnauthorized, detail)
 	case http.StatusNotFound:

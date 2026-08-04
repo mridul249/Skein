@@ -322,6 +322,43 @@ func TestPutFailsWhenSessionCannotOpen(t *testing.T) {
 			setup:   func(s *stubDrive) { s.sessionStatus = http.StatusInsufficientStorage },
 			wantErr: storage.ErrQuota,
 		},
+		// 403 is overloaded at Drive. A rate limit is transient and must NOT
+		// be reported as a credential failure: accounts.recordSyncFailure
+		// turns ErrUnauthorized into needs_reauth, so mapping a throttle to
+		// it marks a perfectly good account as needing re-authorisation the
+		// first time the user uploads quickly.
+		{
+			name: "rate limit reported as 403",
+			setup: func(s *stubDrive) {
+				s.sessionStatus = http.StatusForbidden
+				s.forbiddenBody = `{"error":{"errors":[{"reason":"rateLimitExceeded"}]}}`
+			},
+			wantErr: storage.ErrRateLimited,
+		},
+		{
+			name: "per-user rate limit reported as 403",
+			setup: func(s *stubDrive) {
+				s.sessionStatus = http.StatusForbidden
+				s.forbiddenBody = `{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}`
+			},
+			wantErr: storage.ErrRateLimited,
+		},
+		// 429 carries no reason body at all; the status alone is the signal.
+		{
+			name:    "too many requests",
+			setup:   func(s *stubDrive) { s.sessionStatus = http.StatusTooManyRequests },
+			wantErr: storage.ErrRateLimited,
+		},
+		// A genuine revoked grant must still reach ErrUnauthorized, or the
+		// needs_reauth path stops working entirely.
+		{
+			name: "revoked grant reported as 403",
+			setup: func(s *stubDrive) {
+				s.sessionStatus = http.StatusForbidden
+				s.forbiddenBody = `{"error":{"errors":[{"reason":"authError"}]}}`
+			},
+			wantErr: storage.ErrUnauthorized,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

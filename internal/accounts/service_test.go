@@ -694,3 +694,38 @@ func TestSyncKeepsAccountActiveOnATransientError(t *testing.T) {
 		t.Errorf("status = %q, want %q for a transient failure", after.Status, StatusActive)
 	}
 }
+
+// A rate limit is not a dead token. Drive reports both as 403, and marking a
+// working account needs_reauth because the user uploaded quickly would send
+// them through a pointless re-consent — after which the next burst would do it
+// again.
+//
+// The mutation for this: map ErrRateLimited back to ErrUnauthorized in
+// gdrive.apiError and this goes red while the revoked-grant test stays green.
+func TestSyncDoesNotMarkReauthOnARateLimit(t *testing.T) {
+	svc, store, _ := newTestService(t, true)
+	userID := uuid.New()
+	ctx := context.Background()
+
+	acct, err := svc.linkGoogleAccount(ctx, userID,
+		&oauth2.Token{AccessToken: "tok"},
+		googleProfile{Sub: "sub", Email: "a@example.com"})
+	if err != nil {
+		t.Fatalf("link = %v", err)
+	}
+	stored, _ := store.GetAccount(ctx, userID, acct.ID)
+
+	if rerr := svc.recordSyncFailure(ctx, stored, storage.ErrRateLimited); rerr == nil {
+		t.Fatal("recordSyncFailure() returned nil; it must still report the cause")
+	}
+
+	after, _ := store.GetAccount(ctx, userID, acct.ID)
+	if after.Status == StatusNeedsReauth {
+		t.Error("a rate limit marked the account needs_reauth; " +
+			"the user would be asked to re-authorise a perfectly good grant")
+	}
+	if after.Status != StatusActive {
+		t.Errorf("status = %q, want %q — a rate limit is transient",
+			after.Status, StatusActive)
+	}
+}
