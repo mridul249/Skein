@@ -36,16 +36,38 @@ type BulkResult struct {
 	Code string `json:"code,omitempty"`
 }
 
-// BulkDelete deletes many files, returning one result per file.
+// BulkDelete moves many files to the trash, returning one result per file.
+//
+// TRASHES BY DEFAULT, exactly as DELETE /api/files/{id} does. Permanent
+// destruction requires BulkPurge, which is the analogue of ?permanent=true.
+// The first version of this method called Delete directly and destroyed shards
+// with no way back — a multi-select in the file list is not a request to
+// permanently erase anything, and the single-file route has always made that
+// distinction.
 //
 // Ownership is checked per file. Block 3c established that scoping is sound —
 // every store read takes userID and returns ErrNotFound otherwise — so this is
 // applying an existing property rather than establishing one: each file goes
-// through the same Delete path a single-file request would.
-//
-// Shard deletions run through the shared Drive pool, so a fifty-file bulk
-// delete is bounded and retries 429s rather than stampeding.
+// through the same path a single-file request would.
 func (s *Service) BulkDelete(ctx context.Context, userID uuid.UUID, fileIDs []uuid.UUID) ([]BulkResult, error) {
+	return s.bulk(ctx, userID, fileIDs, s.Trash)
+}
+
+// BulkPurge permanently deletes many files, removing their shards from the
+// drives. This is the trash view's "delete permanently" and empty-trash path.
+//
+// Shard deletions run through the shared Drive pool, so a fifty-file purge is
+// bounded and retries 429s rather than stampeding.
+func (s *Service) BulkPurge(ctx context.Context, userID uuid.UUID, fileIDs []uuid.UUID) ([]BulkResult, error) {
+	return s.bulk(ctx, userID, fileIDs, s.Delete)
+}
+
+func (s *Service) bulk(
+	ctx context.Context,
+	userID uuid.UUID,
+	fileIDs []uuid.UUID,
+	op func(ctx context.Context, userID, fileID uuid.UUID) error,
+) ([]BulkResult, error) {
 	if len(fileIDs) == 0 {
 		return nil, skerr.Invalid(map[string]string{
 			"file_ids": "Select at least one file.",
@@ -75,7 +97,7 @@ func (s *Service) BulkDelete(ctx context.Context, userID uuid.UUID, fileIDs []uu
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i] = s.deleteOne(ctx, userID, id)
+			results[i] = s.applyOne(ctx, userID, id, op)
 		}()
 	}
 	wg.Wait()
@@ -83,22 +105,26 @@ func (s *Service) BulkDelete(ctx context.Context, userID uuid.UUID, fileIDs []uu
 	return results, nil
 }
 
-// deleteOne runs one file's delete and converts the outcome to a result.
+// applyOne runs one file's operation and converts the outcome to a result.
 //
 // Errors are classified rather than stringified: the client needs to tell "you
 // do not own that" from "a drive is rate limiting, try again" from "the grant
 // died", and only the last two are worth retrying.
-func (s *Service) deleteOne(ctx context.Context, userID, fileID uuid.UUID) BulkResult {
+func (s *Service) applyOne(
+	ctx context.Context,
+	userID, fileID uuid.UUID,
+	op func(ctx context.Context, userID, fileID uuid.UUID) error,
+) BulkResult {
 	res := BulkResult{FileID: fileID}
 
-	err := s.Delete(ctx, userID, fileID)
+	err := op(ctx, userID, fileID)
 	if err == nil {
 		res.OK = true
 		return res
 	}
 
 	// Deliberately logs the file ID and never the name.
-	s.log.WarnContext(ctx, "bulk delete: file failed",
+	s.log.WarnContext(ctx, "bulk operation: file failed",
 		slog.String("file_id", fileID.String()),
 		slog.String("error", err.Error()))
 
@@ -133,5 +159,6 @@ func (s *Service) EmptyTrash(ctx context.Context, userID uuid.UUID) ([]BulkResul
 	for _, f := range trashed {
 		ids = append(ids, f.ID)
 	}
-	return s.BulkDelete(ctx, userID, ids)
+	// Purge, not trash: these files are already trashed.
+	return s.BulkPurge(ctx, userID, ids)
 }

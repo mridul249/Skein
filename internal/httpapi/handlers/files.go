@@ -803,6 +803,10 @@ type bulkResponse struct {
 
 // BulkDelete handles POST /api/files/bulk-delete.
 //
+// TRASHES by default, matching DELETE /api/files/{id}. `?permanent=true`
+// purges, matching the same flag on the single-file route — a multi-select in
+// the file list is not a request to permanently erase anything.
+//
 // 200 with per-file results, even when some files failed. A single aggregate
 // status cannot express "three of five worked": the client would not know
 // which rows to drop, and retrying the whole set would re-delete what already
@@ -831,7 +835,11 @@ func (h *Files) BulkDelete(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, id)
 	}
 
-	results, err := h.svc.BulkDelete(r.Context(), userID, ids)
+	op := h.svc.BulkDelete
+	if r.URL.Query().Get("permanent") == "true" {
+		op = h.svc.BulkPurge
+	}
+	results, err := op(r.Context(), userID, ids)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

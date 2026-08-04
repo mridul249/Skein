@@ -151,7 +151,7 @@ export function HeaderCheckbox({
   return (
     <input
       type="checkbox"
-      className="h-4 w-4 cursor-pointer accent-accent"
+      className="checkbox"
       aria-label={label}
       checked={state === 'all'}
       ref={(el) => {

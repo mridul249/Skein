@@ -63,7 +63,8 @@ export function Trash() {
     setBulkBusy(true);
     setBulkOutcome(null);
     try {
-      const outcome = await runBulkDelete(ids);
+      // Permanent: these files are already in the trash.
+      const outcome = await runBulkDelete(ids, { permanent: true });
       setBulkOutcome(outcome);
       setSelection(sel.replace(outcome.failedIds));
       await qc.invalidateQueries({ queryKey: ['trash'] });
@@ -213,7 +214,7 @@ export function Trash() {
                 <td className="w-10 pl-4">
                   <input
                     type="checkbox"
-                    className="h-4 w-4 cursor-pointer accent-accent"
+                    className="checkbox"
                     aria-label={`Select ${file.name}`}
                     checked={sel.isSelected(selection, file.id)}
                     onChange={(e) => {

@@ -26,6 +26,85 @@ func (f *sharedDriveFixture) uploadN(t *testing.T, userID uuid.UUID, n int) []fi
 	return out
 }
 
+// THE BUG THIS EXISTS TO PREVENT, found 2026-08-05 in review.
+//
+// BulkDelete originally called Service.Delete, which destroys shards
+// permanently. The single-file route has always trashed by default and
+// required ?permanent=true to destroy — so a multi-select Delete in the file
+// list was silently a permanent erase with no way back.
+//
+// Bulk delete must land the files in the trash, recoverable, with their shards
+// intact on the drives.
+func TestBulkDeleteTrashesRatherThanDestroying(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	uploaded := f.uploadN(t, f.user1, 2)
+	ids := []uuid.UUID{uploaded[0].ID, uploaded[1].ID}
+
+	results, err := f.svc.BulkDelete(ctx, f.user1, ids)
+	if err != nil {
+		t.Fatalf("BulkDelete() = %v", err)
+	}
+	for _, r := range results {
+		if !r.OK {
+			t.Fatalf("file %s failed: %s", r.FileID, r.Error)
+		}
+	}
+
+	// Gone from the listing...
+	live, _ := f.svc.List(ctx, f.user1, files.ListParams{Limit: 100})
+	if len(live) != 0 {
+		t.Errorf("%d files still in the listing after a bulk delete", len(live))
+	}
+
+	// ...but in the trash, not destroyed.
+	trashed, terr := f.svc.ListTrashed(ctx, f.user1, 100)
+	if terr != nil {
+		t.Fatalf("ListTrashed() = %v", terr)
+	}
+	if len(trashed) != 2 {
+		t.Fatalf("%d files in the trash, want 2; bulk delete destroyed them", len(trashed))
+	}
+
+	// And recoverable: restore one and read it back.
+	if rerr := f.svc.Restore(ctx, f.user1, ids[0]); rerr != nil {
+		t.Fatalf("Restore() = %v; a bulk-deleted file must be recoverable", rerr)
+	}
+	restored, gerr := f.svc.Get(ctx, f.user1, ids[0])
+	if gerr != nil {
+		t.Fatalf("the restored file is unreadable: %v", gerr)
+	}
+	if len(restored.Shards) == 0 {
+		t.Error("the restored file has no shards; they were destroyed")
+	}
+	content, oerr := f.svc.Open(ctx, f.user1, ids[0], nil)
+	if oerr != nil {
+		t.Fatalf("the restored file cannot be opened: %v", oerr)
+	}
+	_ = content.Body.Close()
+}
+
+// BulkPurge is the permanent one, and it really does destroy.
+func TestBulkPurgeDestroysPermanently(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	uploaded := f.uploadN(t, f.user1, 2)
+	ids := []uuid.UUID{uploaded[0].ID, uploaded[1].ID}
+
+	if _, err := f.svc.BulkPurge(ctx, f.user1, ids); err != nil {
+		t.Fatalf("BulkPurge() = %v", err)
+	}
+
+	if trashed, _ := f.svc.ListTrashed(ctx, f.user1, 100); len(trashed) != 0 {
+		t.Errorf("%d files in the trash after a purge, want 0", len(trashed))
+	}
+	if _, err := f.svc.Get(ctx, f.user1, ids[0]); err == nil {
+		t.Error("a purged file is still readable")
+	}
+}
+
 func TestBulkDeleteRemovesEveryFile(t *testing.T) {
 	f := newSharedDrive(t)
 	ctx := context.Background()
