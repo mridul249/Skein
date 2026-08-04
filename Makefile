@@ -189,6 +189,10 @@ backup:
 	echo "both. Keep the key somewhere this dump is not."; \
 	echo "Restore is a three-step procedure, not one pipe. See README \"Backups\"."
 
+## backup-memory: snapshot PLAN/Memory.md (gitignored, so git will not save it)
+backup-memory:
+	@scripts/backup-memory.sh
+
 ## clean: remove build output
 clean:
 	rm -rf bin $(WEB_DIST)/* web/node_modules
