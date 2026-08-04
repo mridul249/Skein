@@ -34,8 +34,21 @@ const (
 	// sessions, and a signing oracle for one must never be a signing oracle
 	// for the other.
 	InfoCapability = "skein-capability-v1"
-	infoKeyID      = "skein-key-id-v1"
-	keyIDLength    = 4
+	// InfoAppFolder namespaces the per-user suffix on the provider app folder
+	// name. Two Skein users who connect the SAME Google account would
+	// otherwise share one physical "Skein" folder: drive.file scope is
+	// per-OAuth-client, so the second user's folder probe finds and adopts the
+	// first user's folder (measured 2026-08-05: creates=1).
+	//
+	// The derived value is a name, not a key. It is truncated to 8 hex
+	// characters, which is far below what would be needed for secrecy — that
+	// is fine, because it is not protecting anything. It only has to be
+	// deterministic (so the same user resolves the same folder every time) and
+	// non-identifying (so the folder name in a user's Drive does not expose
+	// their Skein user id).
+	InfoAppFolder = "skein-app-folder-v1"
+	infoKeyID     = "skein-key-id-v1"
+	keyIDLength   = 4
 )
 
 // ErrKeyLength reports a master key that is not 32 bytes.
