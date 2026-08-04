@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/mridul249/Skein/internal/storage/gdrive"
 
 	skcrypto "github.com/mridul249/Skein/internal/crypto"
 )
@@ -278,4 +281,164 @@ func TestEnsureAppFolderYieldsToTheStoreWinner(t *testing.T) {
 	if fake.creates.Load() != 0 {
 		t.Error("a folder was created despite one already being persisted")
 	}
+}
+
+// ADOPTION AFTER THE PER-USER FOLDER CHANGE (2026-08-05).
+//
+// Two rules, and the tension between them is the whole design:
+//
+//   - An EXISTING single-user install must keep working. Its folder is named
+//     the bare "Skein", and re-probing must adopt it rather than stranding
+//     every shard already inside it.
+//   - A SECOND user on the same Google account must NOT inherit the first
+//     user's folder, which is what the bare name caused (creates=1).
+//
+// Resolved by making the bare name adoptable only when no per-user folder
+// exists. The first user through adopts "Skein"; the second finds no folder of
+// their own AND finds "Skein" already claimed, so they create their own.
+func TestExistingBareSkeinFolderIsStillAdopted(t *testing.T) {
+	fake := &fakeDrive{folderID: "made-before-the-change"}
+	svc, store, acct := newFolderService(t)
+
+	id, err := svc.ensureAppFolder(context.Background(), acct, fake.client(t))
+	if err != nil {
+		t.Fatalf("ensureAppFolder() = %v", err)
+	}
+	if id != "made-before-the-change" {
+		t.Errorf("folder = %q, want the pre-existing bare Skein folder", id)
+	}
+	if got := fake.creates.Load(); got != 0 {
+		t.Errorf("%d folders created; an existing install must adopt, not migrate", got)
+	}
+	stored, _ := store.GetAppFolderID(context.Background(), acct.ID)
+	if stored != "made-before-the-change" {
+		t.Errorf("stored = %q, want the adopted folder", stored)
+	}
+}
+
+// THE FIX ITSELF. Two Skein users, one Google account, no stored folder for
+// either. They must end up in different folders.
+func TestSecondUserDoesNotInheritTheFirstUsersFolder(t *testing.T) {
+	fake := &perNameDrive{folders: map[string]string{}}
+	svc, store, ring := newTestService(t, false)
+	client := fake.client(t)
+
+	mkAccount := func(userID uuid.UUID, sub string) StoredAccount {
+		enc, err := ring.SealString(skcrypto.InfoToken, userID[:], "access-token")
+		if err != nil {
+			t.Fatalf("SealString() = %v", err)
+		}
+		acct, err := store.CreateAccount(context.Background(), NewAccount{
+			ID: uuid.New(), UserID: userID, Kind: "gdrive",
+			ProviderAccountID: sub, Email: "shared@example.com",
+			AccessTokenEnc: enc, Ordinal: 1,
+		})
+		if err != nil {
+			t.Fatalf("CreateAccount() = %v", err)
+		}
+		return acct
+	}
+
+	// Same provider_account_id: the SAME Google account, connected twice.
+	// connected_accounts is UNIQUE (user_id, kind, provider_account_id), so
+	// two users produce two rows.
+	user1, user2 := uuid.New(), uuid.New()
+	acct1 := mkAccount(user1, "the-same-google-account")
+	acct2 := mkAccount(user2, "the-same-google-account")
+
+	folder1, err := svc.ensureAppFolder(context.Background(), acct1, client)
+	if err != nil {
+		t.Fatalf("user1 ensureAppFolder() = %v", err)
+	}
+	folder2, err := svc.ensureAppFolder(context.Background(), acct2, client)
+	if err != nil {
+		t.Fatalf("user2 ensureAppFolder() = %v", err)
+	}
+
+	if folder1 == folder2 {
+		t.Fatalf("both users resolved to folder %q; the second user inherited "+
+			"the first user's folder and can see their shard objects", folder1)
+	}
+	if got := fake.creates.Load(); got != 2 {
+		t.Errorf("creates = %d, want 2 (one folder per user)", got)
+	}
+
+	// And the names are the per-user form, not the bare one.
+	for _, name := range fake.created {
+		if name == gdrive.AppFolderName {
+			t.Errorf("a bare %q folder was created; the name must be per-user",
+				gdrive.AppFolderName)
+		}
+	}
+}
+
+// perNameDrive is fakeDrive with per-NAME folder tracking, which is what the
+// per-user naming needs: the plain fake has a single folderID and cannot tell
+// two folder names apart.
+type perNameDrive struct {
+	mu      sync.Mutex
+	folders map[string]string
+	created []string
+	creates atomic.Int32
+	lists   atomic.Int32
+}
+
+func (f *perNameDrive) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.Method == http.MethodGet && strings.Contains(r.URL.RawQuery, "mimeType"):
+		f.lists.Add(1)
+		name := nameFromQuery(r.URL.Query().Get("q"))
+		f.mu.Lock()
+		id := f.folders[name]
+		f.mu.Unlock()
+		if id == "" {
+			_, _ = io.WriteString(w, `{"files":[]}`)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"files": []map[string]string{{"id": id, "createdTime": "2026-01-01T00:00:00Z"}},
+		})
+
+	case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/upload/"):
+		_, _ = io.WriteString(w, `{"id":"readme-1"}`)
+
+	case r.Method == http.MethodPost:
+		var body struct {
+			Name string `json:"name"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		n := f.creates.Add(1)
+		f.mu.Lock()
+		id := fmt.Sprintf("folder-%d", n)
+		f.folders[body.Name] = id
+		f.created = append(f.created, body.Name)
+		f.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
+
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+func (f *perNameDrive) client(t *testing.T) *http.Client {
+	t.Helper()
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	return &http.Client{Transport: &rewrite{base: srv.URL}}
+}
+
+// nameFromQuery pulls the folder name out of a Drive q= expression of the form
+// `name = 'Skein (a1b2c3d4)' and mimeType = ...`.
+func nameFromQuery(q string) string {
+	const prefix = "name = '"
+	i := strings.Index(q, prefix)
+	if i < 0 {
+		return ""
+	}
+	rest := q[i+len(prefix):]
+	j := strings.Index(rest, "'")
+	if j < 0 {
+		return ""
+	}
+	return strings.ReplaceAll(rest[:j], `\'`, `'`)
 }
