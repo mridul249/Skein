@@ -31,6 +31,10 @@ interface UploadsValue {
   start: (file: File, folderId: string | null) => void;
   cancel: (id: string) => void;
   dismiss: (id: string) => void;
+  /** Removes every terminal card, leaving in-flight uploads running. */
+  clearSettled: () => void;
+  /** How many cards Clear would remove. */
+  settledCount: number;
 }
 
 const UploadsContext = createContext<UploadsValue | null>(null);
@@ -96,6 +100,8 @@ export function UploadsProvider({
       start: (file, folderId) => store.start(file, folderId),
       cancel: (id) => store.cancel(id),
       dismiss: (id) => store.dismiss(id),
+      clearSettled: () => store.dismissSettled(),
+      settledCount: jobs.filter((job) => !isActive(job)).length,
     }),
     [jobs, store],
   );

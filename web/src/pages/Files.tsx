@@ -17,6 +17,13 @@ import { Modal } from '../components/Modal';
 import { FileDetail } from '../components/FileDetail';
 import { bytes, relativeTime } from '../lib/format';
 import { useUploads } from '../lib/uploads-context';
+import {
+  BulkOutcomeNotice,
+  HeaderCheckbox,
+  SelectionToolbar,
+} from '../components/SelectionToolbar';
+import { runBulkDelete, runBulkDownload, type BulkOutcome } from '../lib/bulk';
+import * as sel from '../lib/selection';
 import { useDownloads } from '../lib/downloads-context';
 
 export function Files() {
@@ -29,6 +36,13 @@ export function Files() {
   const [deleting, setDeleting] = useState<Folder | null>(null);
   /** The file whose detail drawer is open, by id. */
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Bulk selection, distinct from `selectedId` (which drives the detail
+  // drawer). A set of ids rather than indices, so sorting and filtering cannot
+  // reassign it to different files.
+  const [selection, setSelection] = useState<sel.SelectionState>(sel.EMPTY);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkOutcome, setBulkOutcome] = useState<BulkOutcome | null>(null);
   // Focus returns to the row that opened the drawer. The row is found by id
   // rather than held as a node, because the listing re-renders underneath and
   // a captured element can be detached by the time it is needed — focusing a
@@ -60,6 +74,20 @@ export function Files() {
   const drives = drivesData?.accounts ?? [];
   const folders = foldersData?.folders ?? [];
   const files = filesData?.files ?? [];
+  const visibleIds = files.map((f) => f.id);
+
+  // Ids that have left the listing are dropped, so a file deleted elsewhere
+  // cannot linger in the selection and reappear in the next bulk request.
+  useEffect(() => {
+    setSelection((s) => sel.keepOnly(s, visibleIds));
+    // visibleIds is derived; joining it gives a stable dependency.
+  }, [visibleIds.join(',')]);
+
+  // Navigating between folders clears the selection: acting on rows the user
+  // can no longer see is never what they meant.
+  useEffect(() => {
+    setSelection(sel.clear());
+  }, [folderId]);
   const children = folders.filter((f) => f.parent_id === folderId);
 
   const refresh = useCallback(() => {
@@ -170,6 +198,56 @@ export function Files() {
       const message = err instanceof ApiError ? err.message : 'Could not download that file.';
       failDownloadJob(jobId, message);
       setBanner(message);
+    }
+  }
+
+  const selectedIds = [...selection.ids];
+
+  /** Runs a bulk delete and keeps the failures selected for a one-click retry. */
+  async function bulkDelete(ids: string[]) {
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setBulkOutcome(null);
+    try {
+      const outcome = await runBulkDelete(ids);
+      setBulkOutcome(outcome);
+      // The successes are gone; the failures stay selected so Retry acts on
+      // exactly the ones that did not go.
+      setSelection(sel.replace(outcome.failedIds));
+      await qc.invalidateQueries({ queryKey: ['files'] });
+      await qc.invalidateQueries({ queryKey: ['quota'] });
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  /**
+   * Downloads the selection one file at a time.
+   *
+   * Sequential and staggered: Chrome treats a rapid burst of programmatic
+   * downloads as an abuse pattern and silently blocks all but the first.
+   */
+  async function bulkDownload(ids: string[]) {
+    const chosen = files.filter((f) => ids.includes(f.id));
+    if (chosen.length === 0) return;
+
+    setBulkBusy(true);
+    setBanner(
+      chosen.length === 1
+        ? ''
+        : `Starting ${chosen.length} downloads, one at a time…`,
+    );
+    try {
+      const { failed } = await runBulkDownload(chosen, (f) =>
+        download(files.find((x) => x.id === f.id) as FileItem),
+      );
+      setBanner(
+        failed.length === 0
+          ? ''
+          : `${failed.length} of ${chosen.length} downloads could not be started.`,
+      );
+    } finally {
+      setBulkBusy(false);
     }
   }
 
@@ -298,10 +376,39 @@ export function Files() {
         the *document's* scrollable width — the whole page scrolled sideways
         by 305px at 375px while the table looked correctly clipped.
       */}
+      {bulkOutcome && (
+        <BulkOutcomeNotice
+          outcome={bulkOutcome}
+          onDismiss={() => setBulkOutcome(null)}
+          onRetry={
+            bulkOutcome.failedIds.length > 0
+              ? () => void bulkDelete(bulkOutcome.failedIds)
+              : undefined
+          }
+        />
+      )}
+
+      <SelectionToolbar
+        count={selectedIds.length}
+        busy={bulkBusy}
+        onDelete={() => void bulkDelete(selectedIds)}
+        onDownload={() => void bulkDownload(selectedIds)}
+        onClear={() => setSelection(sel.clear())}
+      />
+
       <div className="card relative md:overflow-x-auto">
         <table className="hidden w-full min-w-[34rem] border-collapse md:table">
           <thead>
             <tr className="border-b border-border text-left">
+              <th scope="col" className="th w-10 pl-4">
+                <HeaderCheckbox
+                  state={sel.headerState(selection, visibleIds)}
+                  label="Select all files"
+                  onChange={(checked) =>
+                    setSelection(checked ? sel.selectAll(visibleIds) : sel.clear())
+                  }
+                />
+              </th>
               <th scope="col" className="th ">
                 Name
               </th>
@@ -325,6 +432,11 @@ export function Files() {
                 key={folder.id}
                 className="h-row border-b border-line transition-colors duration-hover last:border-0 hover:bg-raised"
               >
+                {/* Folders are not bulk-selectable: deleting one is a
+                    recursive operation with its own confirmation, not the
+                    same action as deleting a set of files. The empty cell
+                    keeps the columns aligned with the file rows. */}
+                <td className="w-10 pl-4" />
                 <td className="px-4">
                   <button
                     type="button"
@@ -364,6 +476,24 @@ export function Files() {
                   file.id === selectedId && 'bg-raised',
                 )}
               >
+                <td className="w-10 pl-4" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 cursor-pointer accent-accent"
+                    aria-label={`Select ${file.name}`}
+                    checked={sel.isSelected(selection, file.id)}
+                    onChange={(e) => {
+                      // Shift extends from the anchor; a plain click toggles
+                      // and moves the anchor here.
+                      const native = e.nativeEvent as unknown as { shiftKey?: boolean };
+                      setSelection((cur) =>
+                        native.shiftKey
+                          ? sel.selectRange(cur, file.id, visibleIds)
+                          : sel.toggle(cur, file.id),
+                      );
+                    }}
+                  />
+                </td>
                 <td className="max-w-0 truncate px-4 text-body text-text">
                   {/* A real button, so the row is reachable and activatable by
                       keyboard rather than click-only. */}

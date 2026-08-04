@@ -1,9 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RotateCcw, Trash2 } from 'lucide-react';
 
 import { ApiError, api, type FileItem } from '../lib/api';
 import { bytes, relativeTime } from '../lib/format';
+import {
+  BulkOutcomeNotice,
+  HeaderCheckbox,
+  SelectionToolbar,
+} from '../components/SelectionToolbar';
+import { runBulkDelete, runEmptyTrash, type BulkOutcome } from '../lib/bulk';
+import * as sel from '../lib/selection';
 import { Modal } from '../components/Modal';
 
 /**
@@ -15,6 +22,10 @@ export function Trash() {
   const [banner, setBanner] = useState('');
   /** The file awaiting a permanent-delete confirmation, if any. */
   const [erasing, setErasing] = useState<FileItem | null>(null);
+  const [selection, setSelection] = useState<sel.SelectionState>(sel.EMPTY);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkOutcome, setBulkOutcome] = useState<BulkOutcome | null>(null);
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
 
   const { data, isLoading } = useQuery({ queryKey: ['trash'], queryFn: api.listTrash });
 
@@ -39,6 +50,44 @@ export function Trash() {
   });
 
   const files = data?.files ?? [];
+  const visibleIds = files.map((f) => f.id);
+  const selectedIds = [...selection.ids];
+
+  useEffect(() => {
+    setSelection((cur) => sel.keepOnly(cur, visibleIds));
+  }, [visibleIds.join(',')]);
+
+  /** Permanently deletes the selection, keeping failures selected for retry. */
+  async function purgeSelected(ids: string[]) {
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setBulkOutcome(null);
+    try {
+      const outcome = await runBulkDelete(ids);
+      setBulkOutcome(outcome);
+      setSelection(sel.replace(outcome.failedIds));
+      await qc.invalidateQueries({ queryKey: ['trash'] });
+      await qc.invalidateQueries({ queryKey: ['quota'] });
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  /** Empties the whole trash in one server call. */
+  async function emptyTrash() {
+    setBulkBusy(true);
+    setBulkOutcome(null);
+    setConfirmEmpty(false);
+    try {
+      const outcome = await runEmptyTrash();
+      setBulkOutcome(outcome);
+      setSelection(sel.replace(outcome.failedIds));
+      await qc.invalidateQueries({ queryKey: ['trash'] });
+      await qc.invalidateQueries({ queryKey: ['quota'] });
+    } finally {
+      setBulkBusy(false);
+    }
+  }
   const shardCount = erasing?.shards.length ?? 0;
 
   return (
@@ -84,10 +133,66 @@ export function Trash() {
         the *document's* scrollable width — the whole page scrolled sideways
         by 305px at 375px while the table looked correctly clipped.
       */}
+      {bulkOutcome && (
+        <BulkOutcomeNotice
+          outcome={bulkOutcome}
+          verb="Permanently deleted"
+          onDismiss={() => setBulkOutcome(null)}
+          onRetry={
+            bulkOutcome.failedIds.length > 0
+              ? () => void purgeSelected(bulkOutcome.failedIds)
+              : undefined
+          }
+        />
+      )}
+
+      <SelectionToolbar
+        count={selectedIds.length}
+        busy={bulkBusy}
+        showDownload={false}
+        deleteLabel="Delete permanently"
+        onDelete={() => void purgeSelected(selectedIds)}
+        onClear={() => setSelection(sel.clear())}
+      />
+
+      {files.length > 0 && selectedIds.length === 0 && (
+        <div className="mb-4">
+          <button
+            type="button"
+            className="btn-danger"
+            disabled={bulkBusy}
+            onClick={() => setConfirmEmpty(true)}
+          >
+            Empty trash
+          </button>
+        </div>
+      )}
+
+      <Modal
+        open={confirmEmpty}
+        title="Empty the trash?"
+        confirmLabel="Delete everything"
+        intent="danger"
+        onConfirm={() => void emptyTrash()}
+        onCancel={() => setConfirmEmpty(false)}
+      >
+        This permanently deletes every file in the trash and removes their
+        shards from your drives. It cannot be undone.
+      </Modal>
+
       <div className="card relative md:overflow-x-auto">
         <table className="hidden w-full min-w-[32rem] border-collapse md:table">
           <thead>
             <tr className="border-b border-border text-left">
+              <th scope="col" className="th w-10 pl-4">
+                <HeaderCheckbox
+                  state={sel.headerState(selection, visibleIds)}
+                  label="Select all trashed files"
+                  onChange={(checked) =>
+                    setSelection(checked ? sel.selectAll(visibleIds) : sel.clear())
+                  }
+                />
+              </th>
               <th scope="col" className="th">
                 Name
               </th>
@@ -105,6 +210,22 @@ export function Trash() {
           <tbody>
             {files.map((file) => (
               <tr key={file.id} className="h-row border-b border-line transition-colors duration-hover last:border-0 hover:bg-raised">
+                <td className="w-10 pl-4">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 cursor-pointer accent-accent"
+                    aria-label={`Select ${file.name}`}
+                    checked={sel.isSelected(selection, file.id)}
+                    onChange={(e) => {
+                      const native = e.nativeEvent as unknown as { shiftKey?: boolean };
+                      setSelection((cur) =>
+                        native.shiftKey
+                          ? sel.selectRange(cur, file.id, visibleIds)
+                          : sel.toggle(cur, file.id),
+                      );
+                    }}
+                  />
+                </td>
                 <td className="max-w-0 truncate px-4 text-body text-text">{file.name}</td>
                 <td className="tabular px-4 text-right text-data text-muted">
                   {bytes(file.size_bytes)}

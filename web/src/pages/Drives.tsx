@@ -6,6 +6,12 @@ import clsx from 'clsx';
 import { ApiError, api, type Drive } from '../lib/api';
 import { DRIVE_BG, bytes, driveColor, percent, usageTone } from '../lib/format';
 import { Modal } from '../components/Modal';
+import {
+  DriveStatusBadge,
+  ProviderMisconfiguredBanner,
+} from '../components/DriveHealth';
+import { Settings } from '../components/Settings';
+import { useSession } from '../lib/session';
 import { AccountChip } from '../components/AccountChip';
 
 /** Drives: connect, sync and disconnect the accounts that hold the bytes. */
@@ -13,6 +19,17 @@ export function Drives() {
   const qc = useQueryClient();
   const [banner, setBanner] = useState('');
   const [tone, setTone] = useState<'error' | 'ok'>('ok');
+  const { user } = useSession();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  /**
+   * Set when any request reports provider_misconfigured.
+   *
+   * Held at page level rather than per drive on purpose: a broken OAuth client
+   * is not any one drive's fault, and the server deliberately omits account_id
+   * on that code so the UI cannot badge a healthy account with it.
+   */
+  const [configError, setConfigError] = useState<string | null>(null);
+
   /** The drive awaiting a disconnect confirmation, if any. */
   const [confirming, setConfirming] = useState<Drive | null>(null);
 
@@ -46,6 +63,14 @@ export function Drives() {
       window.location.href = res.authorize_url;
     },
     onError: (err: unknown) => {
+      // A misconfigured client is a SERVER fault, not this drive's. It renders
+      // as a page-level banner with no Reconnect affordance, because
+      // reconnecting can never fix it — the exchange would fail identically
+      // and the user would loop.
+      if (err instanceof ApiError && err.code === 'provider_misconfigured') {
+        setConfigError(err.message);
+        return;
+      }
       setTone('error');
       setBanner(err instanceof ApiError ? err.message : 'Could not start the connection.');
     },
@@ -104,6 +129,18 @@ export function Drives() {
         files and this drive is kept.
       </Modal>
 
+      {configError && (
+        <ProviderMisconfiguredBanner message={configError} className="mb-4" />
+      )}
+
+      <Settings
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        email={user?.email ?? ''}
+        driveCount={drives.length}
+        onManageDrives={() => setSettingsOpen(false)}
+      />
+
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         {/* Capped in characters, not pixels. At a monospace body face this
             sentence is ~85 cells wide and pushed the primary action onto its
@@ -115,7 +152,15 @@ export function Drives() {
             Skein sees only the files it created. It cannot read anything already in your Drive.
           </p>
         </div>
-        <button
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => setSettingsOpen(true)}
+          >
+            Settings
+          </button>
+          <button
           type="button"
           className="btn-primary"
           disabled={connect.isPending}
@@ -124,6 +169,7 @@ export function Drives() {
           <Plus size={15} aria-hidden />
           Connect Google Drive
         </button>
+        </div>
       </header>
 
       {banner && (
@@ -223,9 +269,22 @@ export function Drives() {
               </div>
 
               {drive.status !== 'active' && (
-                <p className="mt-2 text-caption text-warning">
-                  {drive.last_error || 'This drive needs attention.'}
-                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <DriveStatusBadge
+                    status={drive.status}
+                    busy={connect.isPending}
+                    // Reconnect runs the ordinary connect flow: on desktop
+                    // that is the loopback listener, on web the redirect.
+                    onReconnect={
+                      drive.status === 'needs_reauth'
+                        ? () => connect.mutate()
+                        : undefined
+                    }
+                  />
+                  <span className="text-caption text-muted">
+                    {drive.last_error || 'This drive needs attention.'}
+                  </span>
+                </div>
               )}
             </li>
           );
