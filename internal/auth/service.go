@@ -184,7 +184,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, current,
 	// input length past maxPasswordLen, so an unbounded current password is a
 	// cheap way to make the server do expensive work.
 	if utf8.RuneCountInString(current) > maxPasswordLen {
-		return errInvalidCredentials()
+		return errWrongCurrentPassword()
 	}
 
 	user, err := s.store.GetUserByID(ctx, userID)
@@ -201,12 +201,12 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, current,
 	if err != nil {
 		s.log.ErrorContext(ctx, "stored password hash is malformed",
 			slog.String("user_id", user.ID.String()))
-		return errInvalidCredentials()
+		return errWrongCurrentPassword()
 	}
 	if !ok {
 		s.record(ctx, &user.ID, EventLoginFailed,
 			map[string]any{"reason": "bad_password", "op": "change_password"}, meta)
-		return errInvalidCredentials()
+		return errWrongCurrentPassword()
 	}
 
 	// The same validator registration uses, applied after verification so a
@@ -530,6 +530,23 @@ func (s *Service) record(ctx context.Context, userID *uuid.UUID, kind string, de
 
 func errInvalidCredentials() error {
 	return skerr.Public(skerr.ErrUnauthorized, "Email or password is incorrect.")
+}
+
+// errWrongCurrentPassword reports a bad current password on an AUTHENTICATED
+// request.
+//
+// Deliberately NOT ErrUnauthorized. The caller's Skein session is valid; one
+// field of their input was not. The frontend clears the session on any 401 and
+// retries once after a refresh, so returning 401 here signs the user out over
+// a typo and spends two of the 5/min credential budget doing it. Third
+// instance of this defect class — see the rule in Memory.md.
+//
+// A field error, so the modal can render it against the Current Password box
+// rather than as a floating banner.
+func errWrongCurrentPassword() error {
+	return skerr.Invalid(map[string]string{
+		"current_password": "That is not your current password.",
+	})
 }
 
 func errInvalidRefresh() error {

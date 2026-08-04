@@ -218,6 +218,7 @@ function SecurityPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
+  const [currentError, setCurrentError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
   // Mismatch is decided here, not by the server: it is a property of the two
@@ -233,6 +234,7 @@ function SecurityPanel() {
     setBusy(true);
     setError(null);
     setFieldError(null);
+    setCurrentError(null);
     setDone(false);
     try {
       await api.changePassword(current, next);
@@ -245,8 +247,16 @@ function SecurityPanel() {
         // Surfaced as-is. The server owns the strength rule (12 characters,
         // no composition requirements) and its message is the one that
         // matches what it actually enforced.
+        //
+        // current_password is rendered against its own field rather than as a
+        // banner: a wrong current password is a typo in one box, and the user
+        // should be looking at that box. The server returns it as a field
+        // error precisely so this is possible — it used to return 401, which
+        // signed the user out before any of this could render.
+        setCurrentError(err.fields?.current_password ?? null);
         setFieldError(err.fields?.password ?? null);
-        setError(err.fields?.password ? null : err.message);
+        const handled = err.fields?.current_password || err.fields?.password;
+        setError(handled ? null : err.message);
       } else {
         setError('Could not change your password.');
       }
@@ -263,7 +273,14 @@ function SecurityPanel() {
           value={current}
           onChange={setCurrent}
           autoComplete="current-password"
+          invalid={Boolean(currentError)}
+          describedBy={currentError ? 'current-password-error' : undefined}
         />
+        {currentError && (
+          <p id="current-password-error" className="text-caption text-danger">
+            {currentError}
+          </p>
+        )}
         <PasswordField
           label="New password"
           value={next}

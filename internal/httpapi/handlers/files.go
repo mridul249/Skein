@@ -275,7 +275,14 @@ func (h *Files) ContentURL(w http.ResponseWriter, r *http.Request) {
 	// Ownership is proved before a credential is handed out, not only when
 	// it is spent. Get filters by user_id, so a file belonging to someone
 	// else is a not-found here rather than a grant that fails later.
-	if _, err := h.svc.Get(r.Context(), userID, fileID); err != nil {
+	//
+	// CheckReadable additionally asks the drives whether every shard is still
+	// there. Get does not — it only reads the database — which is why this
+	// route used to return 200 for a file whose shard had been deleted out of
+	// band. The browser then followed the link, the server refused, and
+	// WebKitGTK saved the ERROR RESPONSE to the Downloads folder as the file.
+	// A damaged file must never receive a download link.
+	if err := h.svc.CheckReadable(r.Context(), userID, fileID); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}

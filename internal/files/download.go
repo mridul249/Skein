@@ -281,8 +281,11 @@ func (r *shardReader) openNext() error {
 			// is a corrupt file, and saying so is the only honest
 			// answer: never hand back the shards that do exist as if
 			// they were the whole thing.
-			return skerr.Public(skerr.ErrIntegrity,
-				"Shard %d of this file is missing from its drive.", seg.index)
+			//
+			// Typed rather than a bare message so the client can name the
+			// missing shard and offer purge, instead of the download button
+			// that used to be offered here and fails identically.
+			return newDamagedFileError(r.fileID, []int32{seg.index}, len(r.segments))
 		}
 		return fmt.Errorf("open shard %d: %w", seg.index, err)
 	}

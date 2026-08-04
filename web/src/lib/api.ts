@@ -121,6 +121,16 @@ export class ApiError extends Error {
    * succeed with it. See the server's httpx.ErrorBody.
    */
   readonly accountId?: string;
+  /**
+   * Set on a `file_shards_missing` error: the file whose shards are gone, and
+   * which indexes are missing.
+   *
+   * The indexes are what let the UI say "shard 2 of 5 is missing" instead of
+   * "something went wrong", and what makes it obvious that offering a download
+   * would be pointless — the download fails identically.
+   */
+  readonly fileId?: string;
+  readonly missingShards?: number[];
 
   constructor(
     status: number,
@@ -129,6 +139,8 @@ export class ApiError extends Error {
     requestId?: string,
     fields?: Record<string, string>,
     accountId?: string,
+    fileId?: string,
+    missingShards?: number[],
   ) {
     super(message);
     this.name = 'ApiError';
@@ -137,6 +149,13 @@ export class ApiError extends Error {
     this.requestId = requestId;
     this.fields = fields;
     this.accountId = accountId;
+    this.fileId = fileId;
+    this.missingShards = missingShards;
+  }
+
+  /** True when the file is damaged: shards recorded but not present. */
+  get isDamagedFile(): boolean {
+    return this.code === 'file_shards_missing';
   }
 }
 
@@ -252,6 +271,8 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
       request_id?: string;
       fields?: Record<string, string>;
       account_id?: string;
+      file_id?: string;
+      missing_shard_indexes?: number[];
     };
     if (res.status === 401) clearSession();
     throw new ApiError(
@@ -261,6 +282,8 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
       e.request_id,
       e.fields,
       e.account_id,
+      e.file_id,
+      e.missing_shard_indexes,
     );
   }
 

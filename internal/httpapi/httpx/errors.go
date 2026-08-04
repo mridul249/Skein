@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/mridul249/Skein/internal/files"
 	"github.com/mridul249/Skein/internal/httpapi/middleware"
 	"github.com/mridul249/Skein/internal/skerr"
 )
@@ -23,6 +24,11 @@ type ErrorBody struct {
 	// Fields carries per-field validation messages. It is populated only
 	// for validation errors and never contains internal detail.
 	Fields map[string]string `json:"fields,omitempty"`
+	// FileID and MissingShards describe a damaged file: shards recorded in the
+	// manifest that are no longer at their provider. The indexes are included
+	// so the client can name them rather than saying "something is wrong".
+	FileID        string  `json:"file_id,omitempty"`
+	MissingShards []int32 `json:"missing_shard_indexes,omitempty"`
 	// AccountID names the connected account a drive_needs_reauth error is
 	// about, so the client can badge the right drive and offer Reconnect for
 	// it rather than making the user guess which of several went dead.
@@ -49,6 +55,15 @@ func statusFor(err error) (int, string, string) {
 	// Before ErrUnauthorized: a dead Drive grant must never surface as 401.
 	// The frontend clears the Skein session on any 401, so a revoked *Google*
 	// token would sign the user out of the app entirely.
+	// A file whose shards were deleted out of band is NOT a server error: the
+	// server behaved correctly by refusing to serve a partial file. 500 tells
+	// the user to retry, which can never work. 409 — the file is in a state
+	// that blocks the request, and the user has a real decision to make.
+	//
+	// Checked before ErrIntegrity's generic mapping so the specific code wins.
+	case isDamagedFile(err):
+		return http.StatusConflict, "file_shards_missing",
+			"Some of this file's shards are missing from their drives."
 	case errors.Is(err, skerr.ErrDriveNeedsReconnect):
 		return http.StatusConflict, "drive_needs_reauth",
 			"A drive needs to be reconnected before this can run."
@@ -121,16 +136,30 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	// which drive to badge, which is not a per-field validation message and
 	// should not have to be dug out of a map meant for form errors.
 	accountID := fields["account_id"]
-	if accountID != "" && len(fields) == 1 {
+	fileID := fields["file_id"]
+	// Promoted out of Fields to top-level keys: these identify a resource, not
+	// a form field, and should not have to be dug out of a map meant for
+	// validation messages.
+	if len(fields) == 1 && (accountID != "" || fileID != "") {
 		fields = nil
 	}
 
+	var missingShards []int32
+	if d := damagedFileFrom(err); d != nil {
+		missingShards = d.MissingShards
+		if fileID == "" {
+			fileID = d.FileID.String()
+		}
+	}
+
 	WriteJSON(w, r, status, ErrorBody{
-		Error:     code,
-		Message:   msg,
-		RequestID: reqID,
-		Fields:    fields,
-		AccountID: accountID,
+		Error:         code,
+		Message:       msg,
+		RequestID:     reqID,
+		Fields:        fields,
+		AccountID:     accountID,
+		FileID:        fileID,
+		MissingShards: missingShards,
 	})
 }
 
@@ -156,3 +185,19 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
 
 // WriteNoContent writes a 204.
 func WriteNoContent(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) }
+
+// damagedFileFrom recovers the damaged-file detail from an error chain.
+//
+// A direct import of internal/files: there is no cycle, because files does not
+// import the HTTP layer. An earlier version matched the shape through an
+// interface to avoid a cycle that does not exist, which bought nothing and
+// made the mapping harder to follow.
+func damagedFileFrom(err error) *files.DamagedFileError {
+	var d *files.DamagedFileError
+	if errors.As(err, &d) {
+		return d
+	}
+	return nil
+}
+
+func isDamagedFile(err error) bool { return damagedFileFrom(err) != nil }

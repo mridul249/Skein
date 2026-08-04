@@ -83,12 +83,17 @@ export function FilePreview({ file }: { file: FileItem }) {
   };
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
+  // A damaged file is not a preview failure. Its shards are gone, so neither
+  // preview NOR download can work — offering "download it instead" here would
+  // be the second lie in a row.
+  const [damaged, setDamaged] = useState<{ message: string; shards: number[] } | null>(null);
 
   useEffect(() => {
     if (!kind || tooBigToDecode) return;
     let live = true;
     setUrl(null);
     setError('');
+    setDamaged(null);
 
     api
       .contentURL(file.id)
@@ -99,6 +104,10 @@ export function FilePreview({ file }: { file: FileItem }) {
       })
       .catch((err: unknown) => {
         if (!live) return;
+        if (err instanceof ApiError && err.isDamagedFile) {
+          setDamaged({ message: err.message, shards: err.missingShards ?? [] });
+          return;
+        }
         setError(err instanceof ApiError ? err.message : 'Could not load a preview.');
       });
 
@@ -149,7 +158,24 @@ export function FilePreview({ file }: { file: FileItem }) {
           </p>
         )}
 
-        {!error && !url && (
+        {damaged && (
+          <div role="alert" className="p-4">
+            <p className="text-body text-danger">This file is damaged</p>
+            <p className="mt-1 text-caption text-muted">
+              {damaged.shards.length === 1
+                ? `Shard ${damaged.shards[0]} is missing from its drive.`
+                : `Shards ${damaged.shards.join(', ')} are missing from their drives.`}{' '}
+              It cannot be previewed or downloaded. The shards were most likely
+              deleted from Google Drive outside Skein.
+            </p>
+            <p className="mt-2 text-caption text-faint">
+              Reconnect the drive if it was disconnected, or delete this file to
+              clear the record.
+            </p>
+          </div>
+        )}
+
+        {!error && !damaged && !url && (
           <p className="p-4 text-caption text-muted">Loading preview…</p>
         )}
 
