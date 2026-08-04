@@ -130,6 +130,39 @@ func (h *Auth) Me(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, r, http.StatusOK, toUserResponse(user))
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// ChangePassword handles POST /api/auth/change-password.
+//
+// Mounted behind the credential rate limiter rather than the general API one:
+// it verifies a password, which makes it an online guessing oracle, and it
+// shares that budget with register and login so an attacker cannot spread
+// guesses across endpoints.
+//
+// 204 rather than a session payload — the current session is unaffected, and
+// no other device is signed out (see auth.ChangePassword and known issue #18).
+func (h *Auth) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	userID, err := middleware.MustUserID(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req changePasswordRequest
+	if derr := decodeJSON(r, &req); derr != nil {
+		httpx.WriteError(w, r, derr)
+		return
+	}
+	if cerr := h.svc.ChangePassword(r.Context(), userID,
+		req.CurrentPassword, req.NewPassword, metaFrom(r)); cerr != nil {
+		httpx.WriteError(w, r, cerr)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Auth) writeSession(w http.ResponseWriter, r *http.Request, status int, pair auth.TokenPair) {
 	h.setRefreshCookie(w, pair.RefreshToken, pair.RefreshTTL)
 	httpx.WriteJSON(w, r, status, sessionResponse{

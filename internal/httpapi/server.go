@@ -201,6 +201,16 @@ func (s *Server) mountAuth(api chi.Router) {
 
 		a.Post("/logout", h.Logout)
 
+		// Signed in, but on the CREDENTIAL budget rather than the general
+		// API one: change-password verifies a password, so it is an online
+		// guessing oracle in exactly the way register and login are, and it
+		// shares their budget so guesses cannot be spread across endpoints.
+		a.Group(func(cred chi.Router) {
+			cred.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
+			cred.Use(middleware.RateLimit(authLimiter))
+			cred.Post("/change-password", h.ChangePassword)
+		})
+
 		a.Group(func(priv chi.Router) {
 			priv.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
 			priv.Use(middleware.RateLimit(middleware.NewLimiter(apiRatePerMin)))
