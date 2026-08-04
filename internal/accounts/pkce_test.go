@@ -122,12 +122,10 @@ func TestPKCEVerifierIsNeverReusedAcrossAttempts(t *testing.T) {
 	// Both verifiers must actually have been persisted (so a stolen state
 	// hash cannot be completed with an attacker-supplied verifier), and they
 	// must be the two distinct values generated above, not a shared one.
-	store.mu.Lock()
 	seen := make(map[string]bool)
-	for _, st := range store.states {
-		seen[st.pending.PKCEVerifier] = true
+	for _, v := range store.PendingVerifiers() {
+		seen[v] = true
 	}
-	store.mu.Unlock()
 	if !seen[v1] || !seen[v2] {
 		t.Fatal("both per-attempt verifiers should be present in stored state")
 	}

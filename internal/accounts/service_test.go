@@ -21,7 +21,7 @@ import (
 	"github.com/mridul249/Skein/internal/storage"
 )
 
-func newTestService(t *testing.T, withOAuth bool) (*Service, *MemoryStore, *skcrypto.Keyring) {
+func newTestService(t *testing.T, withOAuth bool) (*Service, conformanceStore, *skcrypto.Keyring) {
 	t.Helper()
 
 	master := make([]byte, skcrypto.KeyLen)
@@ -38,7 +38,7 @@ func newTestService(t *testing.T, withOAuth bool) (*Service, *MemoryStore, *skcr
 		cfg = GoogleOAuthConfig("client-id", "client-secret", "http://localhost:8080/cb")
 	}
 
-	store := NewMemoryStore()
+	store := newConformanceStore(t)
 	svc := NewService(store, ring, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return svc, store, ring
 }
@@ -86,10 +86,8 @@ func TestBeginGoogleConnectStoresOnlyAStateHash(t *testing.T) {
 		t.Fatalf("pending states = %d, want 1", store.PendingStateCount())
 	}
 	sum := sha256.Sum256([]byte(state))
-	store.mu.Lock()
-	_, hashed := store.states[string(sum[:])]
-	_, raw := store.states[state]
-	store.mu.Unlock()
+	hashed := store.HasStateHash(sum[:])
+	raw := store.HasStateHash([]byte(state))
 	if !hashed {
 		t.Error("the state was not stored under its SHA-256")
 	}
