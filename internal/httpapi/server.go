@@ -302,6 +302,12 @@ func (s *Server) mountFiles(api chi.Router) {
 		g.Post("/files/{id}/restore", h.Restore)
 		g.Get("/trash", h.Trash)
 
+		// Bulk operations. One request, many provider calls — bounded and
+		// 429-retried through the shared Drive pool rather than fanning out
+		// unbounded.
+		g.Post("/files/bulk-delete", h.BulkDelete)
+		g.Post("/trash/empty", h.EmptyTrash)
+
 		g.Get("/folders", h.ListFolders)
 		g.Post("/folders", h.CreateFolder)
 		g.Patch("/folders/{id}", h.UpdateFolder)

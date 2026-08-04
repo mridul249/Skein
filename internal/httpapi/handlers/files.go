@@ -788,3 +788,83 @@ func hexString(b []byte) string {
 	}
 	return string(out)
 }
+
+type bulkDeleteRequest struct {
+	FileIDs []string `json:"file_ids"`
+}
+
+type bulkResponse struct {
+	Results []files.BulkResult `json:"results"`
+	// Counts save every client re-deriving them, and make the common
+	// "did it all work?" check a single field.
+	Succeeded int `json:"succeeded"`
+	Failed    int `json:"failed"`
+}
+
+// BulkDelete handles POST /api/files/bulk-delete.
+//
+// 200 with per-file results, even when some files failed. A single aggregate
+// status cannot express "three of five worked": the client would not know
+// which rows to drop, and retrying the whole set would re-delete what already
+// succeeded. Transport-level failures still return an error status.
+func (h *Files) BulkDelete(w http.ResponseWriter, r *http.Request) {
+	userID, err := middleware.MustUserID(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req bulkDeleteRequest
+	if derr := decodeJSON(r, &req); derr != nil {
+		httpx.WriteError(w, r, derr)
+		return
+	}
+
+	ids := make([]uuid.UUID, 0, len(req.FileIDs))
+	for _, raw := range req.FileIDs {
+		id, perr := uuid.Parse(raw)
+		if perr != nil {
+			httpx.WriteError(w, r, skerr.Invalid(map[string]string{
+				"file_ids": "One of the file ids is not a valid identifier.",
+			}))
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	results, err := h.svc.BulkDelete(r.Context(), userID, ids)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, r, http.StatusOK, summarise(results))
+}
+
+// EmptyTrash handles POST /api/trash/empty.
+func (h *Files) EmptyTrash(w http.ResponseWriter, r *http.Request) {
+	userID, err := middleware.MustUserID(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	results, err := h.svc.EmptyTrash(r.Context(), userID)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, r, http.StatusOK, summarise(results))
+}
+
+func summarise(results []files.BulkResult) bulkResponse {
+	out := bulkResponse{Results: results}
+	for _, r := range results {
+		if r.OK {
+			out.Succeeded++
+		} else {
+			out.Failed++
+		}
+	}
+	if out.Results == nil {
+		out.Results = []files.BulkResult{}
+	}
+	return out
+}

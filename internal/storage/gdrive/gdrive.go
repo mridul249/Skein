@@ -339,8 +339,13 @@ func (b *Backend) apiError(resp *http.Response, what string) error {
 
 	switch resp.StatusCode {
 	case http.StatusTooManyRequests:
-		// No reason string on a 429; the status is the whole signal.
-		return fmt.Errorf("%s: %w", what, storage.ErrRateLimited)
+		// No reason string on a 429; the status is the whole signal. The
+		// provider's Retry-After, when present, is carried through so the
+		// worker pool can honour it rather than guessing.
+		return &RateLimitError{
+			RetryAfter: parseRetryAfter(resp.Header, time.Now()),
+			cause:      fmt.Errorf("%s: drive returned 429", what),
+		}
 	case http.StatusUnauthorized, http.StatusForbidden:
 		// 403 is overloaded at Drive: a revoked grant, a quota refusal and a
 		// rate limit all arrive as 403, distinguishable only by the reason
@@ -362,7 +367,10 @@ func (b *Backend) apiError(resp *http.Response, what string) error {
 			// Transient. Reporting this as ErrUnauthorized would make
 			// accounts.recordSyncFailure mark a working account
 			// needs_reauth for the crime of being busy.
-			return fmt.Errorf("%s: %w", what, storage.ErrRateLimited)
+			return &RateLimitError{
+				RetryAfter: parseRetryAfter(resp.Header, time.Now()),
+				cause:      fmt.Errorf("%s: %s", what, detail),
+			}
 		}
 		return fmt.Errorf("%s: %w (%s)", what, storage.ErrUnauthorized, detail)
 	case http.StatusNotFound:

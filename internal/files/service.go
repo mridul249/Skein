@@ -64,6 +64,31 @@ type Service struct {
 
 	encrypt        bool
 	maxUploadBytes int64
+
+	// pool bounds and retries provider calls made in bulk. Nil means run
+	// inline, which is what the single-file paths did before bulk existed and
+	// what tests without a pool get.
+	pool WorkPool
+}
+
+// WorkPool bounds concurrency and retries rate-limited provider calls.
+//
+// An interface rather than *gdrive.Pool so this package does not import a
+// provider: files is provider-agnostic, and a concrete Drive type here would
+// make it not so. accounts.Service.Pool() satisfies it.
+type WorkPool interface {
+	Do(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+// SetWorkPool installs the shared provider pool. Called during wiring.
+func (s *Service) SetWorkPool(p WorkPool) { s.pool = p }
+
+// runPooled runs fn through the pool when one is installed, inline otherwise.
+func (s *Service) runPooled(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.pool == nil {
+		return fn(ctx)
+	}
+	return s.pool.Do(ctx, fn)
 }
 
 // Config configures the files service.
@@ -286,7 +311,12 @@ func (s *Service) deleteWithShards(ctx context.Context, userID uuid.UUID, file F
 			continue
 		}
 		ref := storage.ObjectRef{ProviderID: sh.ProviderID, Size: sh.SizeBytes}
-		if err := backend.Delete(ctx, ref); err != nil {
+		// Through the shared pool: a bulk delete of fifty files is fifty-plus
+		// provider calls, and unbounded they are exactly the burst that earns
+		// a 429.
+		if err := s.runPooled(ctx, func(pctx context.Context) error {
+			return backend.Delete(pctx, ref)
+		}); err != nil {
 			s.log.ErrorContext(ctx, "could not delete shard from its drive",
 				slog.String("file_id", file.ID.String()),
 				slog.Int("shard", int(sh.Index)),

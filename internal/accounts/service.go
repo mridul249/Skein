@@ -30,10 +30,6 @@ const (
 	// state captured from a browser history is useless.
 	OAuthStateTTL = 10 * time.Minute
 
-	// syncConcurrency caps parallel quota refreshes. Rules.md §2.12: bounded
-	// parallelism, never one goroutine per row.
-	syncConcurrency = 4
-
 	// providerTimeout bounds a single provider metadata call.
 	providerTimeout = 30 * time.Second
 )
@@ -73,13 +69,22 @@ type Service struct {
 	desktopClientID     string
 	desktopClientSecret string
 
+	// pool bounds and retries every Drive call this service makes. Shared
+	// with the bulk operations in internal/files so the concurrency cap is
+	// global rather than per-caller. It replaces the old local
+	// syncConcurrency errgroup limit.
+	pool *gdrive.Pool
+
 	now func() time.Time
 }
 
 // NewService wires the accounts service. oauthCfg may be nil, in which case
 // connecting a Drive account returns a clear error instead of a panic.
 func NewService(store Store, keyring *skcrypto.Keyring, oauthCfg *oauth2.Config, log *slog.Logger) *Service {
-	return &Service{store: store, keyring: keyring, oauth: oauthCfg, log: log, now: time.Now}
+	return &Service{
+		store: store, keyring: keyring, oauth: oauthCfg, log: log,
+		pool: gdrive.NewPool(), now: time.Now,
+	}
 }
 
 // GoogleOAuthConfig builds the OAuth config for the drive.file scope.
@@ -567,14 +572,20 @@ func (s *Service) SyncAll(ctx context.Context) error {
 		return fmt.Errorf("list accounts: %w", err)
 	}
 
+	// Bounded through the SHARED Drive pool rather than a local errgroup
+	// limit. Two independent bulk operations each politely capped at 4 still
+	// present 8 to Google; one pool means the cap is global, and quota sync
+	// picks up 429 retry with Retry-After for free.
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(syncConcurrency)
 
 	for _, a := range accts {
 		g.Go(func() error {
 			// One failing provider must not abort the others, so the
 			// error is recorded against the account and swallowed here.
-			if err := s.syncAccount(gctx, a); err != nil {
+			err := s.pool.Do(gctx, func(pctx context.Context) error {
+				return s.syncAccount(pctx, a)
+			})
+			if err != nil {
 				s.log.WarnContext(gctx, "quota sync failed",
 					slog.String("account_id", a.ID.String()),
 					slog.String("kind", string(a.Kind)),
@@ -872,3 +883,10 @@ func (p *persistingSource) Token() (*oauth2.Token, error) {
 	p.acct = updated
 	return tok, nil
 }
+
+// Pool exposes the shared Drive worker pool so bulk operations in other
+// packages route through the same concurrency cap and the same retry
+// behaviour. One pool per process is the point: a per-caller pool would let
+// two bulk operations each stay politely under the cap while together
+// exceeding it.
+func (s *Service) Pool() *gdrive.Pool { return s.pool }
