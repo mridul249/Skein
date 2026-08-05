@@ -54,7 +54,7 @@ func TestDesktopDownloadWritesTheFile(t *testing.T) {
 	file := f.uploadAs(t, f.user1, "holiday.bin", data)
 
 	dir := t.TempDir()
-	dl, err := mgr.Start(ctx, f.user1, file.ID, dir)
+	dl, err := mgr.Start(ctx, f.user1, file.ID, dir, "")
 	if err != nil {
 		t.Fatalf("Start() = %v", err)
 	}
@@ -114,7 +114,7 @@ func TestDesktopDownloadVerifiesShardDigests(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	dl, err := mgr.Start(ctx, f.user1, file.ID, dir)
+	dl, err := mgr.Start(ctx, f.user1, file.ID, dir, "")
 	if err != nil {
 		t.Fatalf("Start() = %v", err)
 	}
@@ -145,7 +145,7 @@ func TestDesktopDownloadCancelRemovesThePartialFile(t *testing.T) {
 	file := f.uploadAs(t, f.user1, "big.bin", data)
 
 	dir := t.TempDir()
-	dl, err := mgr.Start(ctx, f.user1, file.ID, dir)
+	dl, err := mgr.Start(ctx, f.user1, file.ID, dir, "")
 	if err != nil {
 		t.Fatalf("Start() = %v", err)
 	}
@@ -192,7 +192,7 @@ func TestDesktopDownloadRefusesADamagedFile(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	_, err := mgr.Start(ctx, f.user1, file.ID, dir)
+	_, err := mgr.Start(ctx, f.user1, file.ID, dir, "")
 	if err == nil {
 		t.Fatal("Start() = nil for a file with a missing shard")
 	}
@@ -217,7 +217,7 @@ func TestDesktopDownloadValidatesTheTargetDirectoryUpFront(t *testing.T) {
 	file := f.uploadAs(t, f.user1, "x.bin", data)
 
 	t.Run("missing directory", func(t *testing.T) {
-		_, err := mgr.Start(ctx, f.user1, file.ID, filepath.Join(t.TempDir(), "nope"))
+		_, err := mgr.Start(ctx, f.user1, file.ID, filepath.Join(t.TempDir(), "nope"), "")
 		if err == nil {
 			t.Fatal("Start() = nil for a nonexistent directory")
 		}
@@ -236,13 +236,13 @@ func TestDesktopDownloadValidatesTheTargetDirectoryUpFront(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-		if _, err := mgr.Start(ctx, f.user1, file.ID, dir); err == nil {
+		if _, err := mgr.Start(ctx, f.user1, file.ID, dir, ""); err == nil {
 			t.Fatal("Start() = nil for a read-only directory")
 		}
 	})
 
 	t.Run("empty directory", func(t *testing.T) {
-		if _, err := mgr.Start(ctx, f.user1, file.ID, ""); err == nil {
+		if _, err := mgr.Start(ctx, f.user1, file.ID, "", ""); err == nil {
 			t.Fatal("Start() = nil with no directory configured")
 		}
 	})
@@ -260,7 +260,7 @@ func TestResolveTargetRejectsTraversal(t *testing.T) {
 		"foo/../../bar.bin",
 	} {
 		t.Run(name, func(t *testing.T) {
-			target, err := files.ResolveTarget(dir, name)
+			target, err := files.ResolveTarget(dir, "", name)
 			if err != nil {
 				return // refusing outright is also correct
 			}
@@ -276,7 +276,7 @@ func TestResolveTargetRejectsTraversal(t *testing.T) {
 func TestResolveTargetSuffixesCollisions(t *testing.T) {
 	dir := t.TempDir()
 
-	first, err := files.ResolveTarget(dir, "report.pdf")
+	first, err := files.ResolveTarget(dir, "", "report.pdf")
 	if err != nil {
 		t.Fatalf("ResolveTarget() = %v", err)
 	}
@@ -284,7 +284,7 @@ func TestResolveTargetSuffixesCollisions(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	second, err := files.ResolveTarget(dir, "report.pdf")
+	second, err := files.ResolveTarget(dir, "", "report.pdf")
 	if err != nil {
 		t.Fatalf("ResolveTarget() = %v", err)
 	}
@@ -329,7 +329,7 @@ func TestDesktopDownloadPeakRSSIsFlat(t *testing.T) {
 	runtime.ReadMemStats(&before)
 
 	dir := t.TempDir()
-	dl, err := mgr.Start(ctx, f.user1, file.ID, dir)
+	dl, err := mgr.Start(ctx, f.user1, file.ID, dir, "")
 	if err != nil {
 		t.Fatalf("Start() = %v", err)
 	}
@@ -398,7 +398,7 @@ func TestCancelReportsCancelledNotFailed(t *testing.T) {
 	file := f.uploadAs(t, f.user1, "cancelme.bin", data)
 
 	dir := t.TempDir()
-	dl, err := mgr.Start(ctx, f.user1, file.ID, dir)
+	dl, err := mgr.Start(ctx, f.user1, file.ID, dir, "")
 	if err != nil {
 		t.Fatalf("Start() = %v", err)
 	}

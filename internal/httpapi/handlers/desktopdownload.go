@@ -82,15 +82,14 @@ func (h *DesktopDownloads) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir := req.Dir
-	if dir == "" {
-		dir = h.defaultDir()
-	}
+	// The configured root and the REQUESTED directory are passed separately
+	// and never collapsed: the root is trusted configuration, req.Dir is
+	// caller-supplied and must be confined inside it.
 
 	// Every precondition — ownership, shard reachability, and that the target
 	// directory exists and is writable — is checked inside Start, before a
 	// byte moves or a file is created.
-	dl, serr := h.mgr.Start(r.Context(), userID, fileID, dir)
+	dl, serr := h.mgr.Start(r.Context(), userID, fileID, h.defaultDir(), req.Dir)
 	if serr != nil {
 		httpx.WriteError(w, r, serr)
 		return

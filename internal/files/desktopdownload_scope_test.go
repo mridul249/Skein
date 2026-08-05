@@ -40,7 +40,7 @@ func TestDesktopDownloadsAreScopedToTheirOwner(t *testing.T) {
 	}
 	file := f.uploadAs(t, f.user1, "user1-private-name.bin", data)
 
-	dl, err := mgr.Start(ctx, f.user1, file.ID, t.TempDir())
+	dl, err := mgr.Start(ctx, f.user1, file.ID, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Start() = %v", err)
 	}
@@ -122,7 +122,7 @@ func TestACrossUserCancelDoesNotStopTheTransfer(t *testing.T) {
 	}
 	file := f.uploadAs(t, f.user1, "big.bin", data)
 
-	dl, err := mgr.Start(ctx, f.user1, file.ID, t.TempDir())
+	dl, err := mgr.Start(ctx, f.user1, file.ID, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Start() = %v", err)
 	}
