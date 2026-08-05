@@ -50,10 +50,26 @@ type sharedDriveFixture struct {
 	// upload" requirement can be exercised.
 	refuseManifests *bool
 	// ring is the fixture's keyring, needed to open a sealed manifest.
-	ring     *skcrypto.Keyring
+	ring *skcrypto.Keyring
+	// rebuild replaces svc and store with a fresh, EMPTY database, leaving
+	// every provider object untouched. See destroyDatabase.
+	rebuild  func(t *testing.T)
 	accounts []uuid.UUID
 	user1    uuid.UUID
 	user2    uuid.UUID
+}
+
+// destroyDatabase replaces the store with a brand new empty one, exactly as
+// losing the database and starting from a fresh migrated schema would.
+//
+// THE PROVIDER OBJECTS ARE DELIBERATELY UNTOUCHED. That is the premise of
+// reconstruction: the database died, the bytes did not. A fixture that also
+// wiped the backends would be destroying the thing being recovered FROM, and
+// every recovery assertion afterwards would be vacuous —
+// TestTheFixtureActuallyDestroysTheDatabase checks both halves for that reason.
+func (f *sharedDriveFixture) destroyDatabase(t *testing.T) {
+	t.Helper()
+	f.rebuild(t)
 }
 
 // objects returns everything present on one backend, name to contents, read
@@ -125,22 +141,32 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 
 	throttled := map[uuid.UUID]bool{}
 	refuse := new(bool)
-	store := files.NewConformanceStore(t)
-	svc := files.NewService(
-		store,
-		files.NewStripingPlanner(planner, reserver),
-		multiResolver{backends: backends, throttled: throttled, refuseManifests: refuse},
-		ring,
-		files.Config{Encrypt: false, MaxUploadBytes: 1 << 40},
-		logger,
-	)
 
-	return &sharedDriveFixture{
+	newSvc := func(t *testing.T) (files.ConformanceStore, *files.Service) {
+		t.Helper()
+		st := files.NewConformanceStore(t)
+		return st, files.NewService(
+			st,
+			files.NewStripingPlanner(planner, reserver),
+			multiResolver{backends: backends, throttled: throttled, refuseManifests: refuse},
+			ring,
+			files.Config{Encrypt: false, MaxUploadBytes: 1 << 40},
+			logger,
+		)
+	}
+	store, svc := newSvc(t)
+
+	f := &sharedDriveFixture{
 		svc: svc, store: store, router: routerStore,
 		backends: backends, roots: roots, accounts: ids,
 		throttled: throttled, refuseManifests: refuse, ring: ring,
 		user1: uuid.New(), user2: uuid.New(),
 	}
+	f.rebuild = func(t *testing.T) {
+		t.Helper()
+		f.store, f.svc = newSvc(t)
+	}
+	return f
 }
 
 // throttle makes one drive report rate limiting on every read, exactly as an
