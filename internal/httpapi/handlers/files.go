@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"strconv"
@@ -377,6 +378,16 @@ func (h *Files) Content(w http.ResponseWriter, r *http.Request) {
 		middleware.LoggerFrom(r.Context()).Debug("download interrupted",
 			"file_id", fileID.String(), "error", werr.Error())
 	}
+}
+
+// logTruncatedTransfer reports a transfer that stopped short.
+//
+// STUB: current behaviour, pending the fix.
+func logTruncatedTransfer(lg *slog.Logger, fileID string, written, expected int64, cause error) {
+	if cause == nil {
+		return
+	}
+	lg.Debug("download interrupted", "file_id", fileID, "error", cause.Error())
 }
 
 func statusFor(rng *storage.ByteRange) int {
