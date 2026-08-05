@@ -259,6 +259,8 @@ func (s *Server) mountSystem(api chi.Router) {
 	}
 	h := handlers.NewSystem(s.deps.Dumper, s.deps.Config.BackupToken,
 		s.deps.DumpDB, s.deps.Logger)
+	// Nil leaves the key-export route reporting 404, like an unset token.
+	h.SetKeyring(s.deps.Keyring)
 
 	api.Route("/system", func(g chi.Router) {
 		// A Skein session is required on top of the operator token. Neither
@@ -268,6 +270,9 @@ func (s *Server) mountSystem(api chi.Router) {
 		// Its own budget, not apiRatePerMin. See backupRatePerMin.
 		g.Use(middleware.RateLimit(middleware.NewLimiter(backupRatePerMin)))
 		g.Get("/backup", h.Backup)
+		// Same budget and the same operator token as the dump. The key is a
+		// smaller payload but a larger secret.
+		g.Get("/key-export", h.ExportKey)
 	})
 }
 
