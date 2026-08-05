@@ -131,7 +131,28 @@ if (params.has('desktop')) {
   // is installed for the same reason: authedFetch refreshes before it calls
   // fetch, and without a token it never issues the request at all. That is
   // precisely the bug this fixture mode exists to pin.
-  __setAccessTokenForTests('fixture-token');
+  // `latelogin` reproduces the REAL sequence from the running app: the
+  // provider mounts with no session, the probe fires and is refused, and the
+  // login lands afterwards. Without this the fixture installs a token before
+  // mount and the probe never sees the unauthenticated state — which is
+  // exactly why the browser test passed while the desktop drawer stayed dead.
+  const lateLogin = params.has('latelogin');
+  if (!lateLogin) {
+    __setAccessTokenForTests('fixture-token');
+  } else {
+    __setAccessTokenForTests(null);
+    // Sign in shortly after mount, as a user would.
+    setTimeout(
+      () =>
+        __setAccessTokenForTests('fixture-token', {
+          id: 'u1',
+          email: 'fixture@example.com',
+          email_verified: true,
+          created_at: now,
+        }),
+      150,
+    );
+  }
   const realFetch = window.fetch.bind(window);
   window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(typeof input === 'string' || input instanceof URL ? input : input.url);

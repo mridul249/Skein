@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 
+import { onSessionChange } from './api';
 import { DownloadStore, type DownloadJob } from './downloads';
 import {
   DesktopDownloadStore,
@@ -65,19 +66,38 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
 
   const [desktop, setDesktop] = useState(false);
 
-  // Probe once on mount. Until it answers, `desktop` is false — so a slow or
-  // failed probe leaves the browser path in place rather than a half-state.
+  // Probe on mount AND whenever a session appears.
+  //
+  // Mount alone is not enough: this provider sits above the router so it
+  // mounts before login, and /api/desktop/capabilities requires a session.
+  // Measured in the running app — the probe fired at 16:47:24 and the login
+  // landed at 16:47:33, so the only probe of the page's life was the one that
+  // could not succeed, and every download went down the browser path.
+  //
+  // Until a probe answers, `desktop` is false: a slow or failed probe leaves
+  // the browser path in place rather than a half-state.
   useEffect(() => {
     let live = true;
-    void desktopDownloadsAvailable().then((available) => {
-      if (!live || !available) return;
-      setDesktop(true);
-      // Re-attach to anything already running: a window reload must not
-      // orphan a transfer the server is still performing.
-      void desktopStore.resync();
+
+    const attempt = () => {
+      void desktopDownloadsAvailable().then((available) => {
+        if (!live || !available) return;
+        setDesktop(true);
+        // Re-attach to anything already running: a window reload must not
+        // orphan a transfer the server is still performing.
+        void desktopStore.resync();
+      });
+    };
+
+    attempt();
+    // A sign-in is the event that makes the pre-auth probe answerable.
+    const off = onSessionChange((user) => {
+      if (user) attempt();
     });
+
     return () => {
       live = false;
+      off();
     };
   }, [desktopStore]);
 

@@ -1053,3 +1053,38 @@ test('without the capability the browser list is what renders', async () => {
     assert.equal(which, 'browser', 'the browser build rendered the desktop drawer');
   });
 });
+
+// THE SEQUENCE THAT ACTUALLY SHIPPED BROKEN.
+//
+// The provider mounts above the router, so the capability probe fires BEFORE
+// login. From the running app's log:
+//
+//   16:47:24.419  GET /api/desktop/capabilities  status=401
+//   16:47:33.024  POST /api/auth/login           status=200
+//
+// The probe failed closed on a request that could not succeed, cached that,
+// and every download for the rest of the session took the browser path. The
+// test above did not catch it because the fixture installed a session before
+// mount — so the probe never saw the unauthenticated state. This one does not.
+test('the drawer appears when the session arrives after the probe', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/') + '&desktop=1&latelogin=1');
+
+    const which = await p.eval(`(async () => {
+      for (let i = 0; i < 80; i++) {
+        const el = document.querySelector('[data-download-ui]');
+        if (el && el.dataset.downloadUi === 'desktop') return 'desktop';
+        await new Promise((r) => setTimeout(r, 40));
+      }
+      const el = document.querySelector('[data-download-ui]');
+      return el ? el.dataset.downloadUi : 'absent';
+    })()`);
+
+    assert.equal(
+      which,
+      'desktop',
+      'the desktop path stayed disabled after login: the pre-auth 401 was cached, ' +
+        'or nothing re-probed when the session appeared',
+    );
+  });
+});
