@@ -65,17 +65,29 @@ It logs the key ID at startup:
 level=INFO msg="keyring ready" key_id=723bcc0a
 ```
 
-**Check that against the `Key ID:` line in your key file before going any
-further.** If they differ, stop - you have the wrong file, and no amount of
-retrying will fix it.
+**Skein checks this for you.** The instance records its own key ID the first
+time it starts, and compares it on every start after that. Supply a key that
+belongs to a different instance and Skein **refuses to start**, before it
+opens a port and before it reads any of your data:
 
-> **This comparison is currently manual, and that is an interim measure.**
-> Skein does not yet store its own key ID, so it cannot check the key you
-> supplied against the instance at startup - it can only tell you what the key
-> you gave it derives to. A `key_id` column is planned so that a mismatched key
-> is refused at boot rather than left for you to spot. Until then, comparing
-> the two strings is a step you have to take yourself, and it is worth taking
-> carefully: everything downstream assumes you got it right.
+```
+level=INFO msg="keyring ready" key_id=0e63f6ad
+skein: this key belongs to a different Skein instance: this database was
+created with master key id 3fabd5e4, but the supplied SKEIN_MASTER_KEY
+derives 0e63f6ad. Your data is intact - this is the wrong key file.
+```
+
+The process exits non-zero and never begins serving. Nothing is written, so
+correcting `SKEIN_MASTER_KEY` and starting again is all that is needed -
+a rejected start does not poison the instance.
+
+> **The manual comparison is now a fallback, not the procedure.** Comparing
+> the logged `key_id` against the `Key ID:` line in your key file is still a
+> reasonable sanity check, and it is the only check available for a database
+> created before this landed - such an instance has no recorded key ID, so the
+> first start under any key records that key's ID rather than refusing. If you
+> are recovering an older instance, compare the two strings yourself once, and
+> the automatic check takes over from the next start onwards.
 
 **A wrong key does not corrupt anything, and Skein says so rather than
 letting you guess.** Every ciphertext stores its key ID in the clear, and
@@ -90,7 +102,7 @@ Be clear-eyed about the boundaries:
 
 | Lost | Recoverable? |
 |---|---|
-| The database, key file survives | **No, not yet.** The shard-to-file mapping lives only in the database until sidecar manifests ship. Restore from `make backup`. |
+| The database, key file survives | **No, not yet.** The shard-to-file mapping lives only in the database until sidecar manifests ship. Restore from `make backup`. Note a restored database carries its recorded key ID with it, so the startup check keeps working across a restore. |
 | The key, database survives | **No. Permanently.** Every shard is unreadable. There is no vendor, no support path and no backdoor - this is the design working as intended. |
 | Both | No. |
 | One drive of several | Yes, if the file was striped across others *and* you have the key and database - but any file with a shard on the lost drive is incomplete. See `POST /api/system/reconcile`. |
