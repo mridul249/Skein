@@ -77,6 +77,11 @@ type DownloadManager struct {
 }
 
 type downloadEntry struct {
+	// userID is the user who started this transfer, and the only one who may
+	// see, watch or cancel it. Start already had this and discarded it, so
+	// every later operation keyed on the download id alone — and those ids are
+	// sequential, so they are guessed rather than discovered.
+	userID   uuid.UUID
 	snapshot DesktopDownload
 	// ctx is the download's own context. Cancellation is decided by asking
 	// it, not by inspecting the error: the provider's HTTP stack replaces a
@@ -210,6 +215,7 @@ func (m *DownloadManager) Start(ctx context.Context, userID, fileID uuid.UUID, d
 	m.seq++
 	id := fmt.Sprintf("dl-%d", m.seq)
 	entry := &downloadEntry{
+		userID: userID,
 		snapshot: DesktopDownload{
 			ID: id, FileID: fileID, Name: file.Name, Path: target,
 			State: DownloadRunning, Total: file.SizeBytes, ETASeconds: -1,
@@ -387,11 +393,25 @@ func (m *DownloadManager) finishRunning(id string) {
 	m.mu.Unlock()
 }
 
+// lookup resolves a download the caller owns.
+//
+// A download belonging to somebody else is reported exactly as one that does
+// not exist. NOT a 403: a 403 confirms the transfer is there, which is the
+// fact being protected — the same rule Get/Open/Delete follow for files.
+//
+// The caller must hold m.mu.
+func (m *DownloadManager) lookup(userID uuid.UUID, id string) (*downloadEntry, bool) {
+	entry, ok := m.downloads[id]
+	if !ok || entry.userID != userID {
+		return nil, false
+	}
+	return entry, true
+}
+
 // Cancel stops a transfer. The partial file is removed by run's failure path.
 func (m *DownloadManager) Cancel(userID uuid.UUID, id string) error {
-	_ = userID
 	m.mu.Lock()
-	entry, ok := m.downloads[id]
+	entry, ok := m.lookup(userID, id)
 	m.mu.Unlock()
 	if !ok {
 		return skerr.ErrNotFound
@@ -402,23 +422,24 @@ func (m *DownloadManager) Cancel(userID uuid.UUID, id string) error {
 
 // Get returns one download's current state.
 func (m *DownloadManager) Get(userID uuid.UUID, id string) (DesktopDownload, bool) {
-	_ = userID
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	entry, ok := m.downloads[id]
+	entry, ok := m.lookup(userID, id)
 	if !ok {
 		return DesktopDownload{}, false
 	}
 	return entry.snapshot, true
 }
 
-// List returns every download this process knows about, newest last.
+// List returns the caller's own downloads, newest last. Never anybody else's.
 func (m *DownloadManager) List(userID uuid.UUID) []DesktopDownload {
-	_ = userID
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]DesktopDownload, 0, len(m.downloads))
 	for _, e := range m.downloads {
+		if e.userID != userID {
+			continue
+		}
 		out = append(out, e.snapshot)
 	}
 	return out
@@ -433,9 +454,8 @@ func (m *DownloadManager) List(userID uuid.UUID) []DesktopDownload {
 // samples while disconnected is immediately correct rather than replaying
 // history it does not need.
 func (m *DownloadManager) Subscribe(userID uuid.UUID, id string) (<-chan DesktopDownload, func(), bool) {
-	_ = userID
 	m.mu.Lock()
-	entry, ok := m.downloads[id]
+	entry, ok := m.lookup(userID, id)
 	if !ok {
 		m.mu.Unlock()
 		return nil, nil, false
