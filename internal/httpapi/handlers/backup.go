@@ -37,11 +37,10 @@ const BackupTokenHeader = "X-Skein-Backup-Token" //nolint:gosec // header name, 
 // endpoint exists and is merely locked, which tells a scanner where to come
 // back to; 404 is indistinguishable from a build without the route at all.
 type System struct {
-	dumper  *db.Dumper
-	token   string
-	sqlDB   *sql.DB
-	version func() (int64, error)
-	log     *slog.Logger
+	dumper *db.Dumper
+	token  string
+	sqlDB  *sql.DB
+	log    *slog.Logger
 }
 
 // NewSystem wires the operator endpoints. token may be empty, which disables

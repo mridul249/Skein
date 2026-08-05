@@ -84,7 +84,10 @@ type Deps struct {
 	// filename. Nil is tolerated: the version reports 0.
 	DumpDB *sql.DB
 	// desktopDeps carries build-tagged desktop-only dependencies. Empty on
-	// the server build.
+	// the server build, which is why `unused` flags it there; the desktop
+	// build reads it from mountDesktop. See desktopdeps_server.go.
+	//
+	//nolint:unused // read by the desktop build's mountDesktop
 	desktopDeps
 
 	// DesktopConnect is nil on the server build. When set, the accounts

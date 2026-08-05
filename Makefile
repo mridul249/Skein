@@ -105,11 +105,22 @@ test-short:
 bench:
 	go test -run '^$$' -bench . -benchmem ./internal/uploads/... ./internal/shard/...
 
-## lint: gofmt check, go vet, golangci-lint
+## lint: gofmt check, go vet and golangci-lint, in BOTH build configurations
+##
+## Both tag sets are linted because a single-configuration run structurally
+## cannot see the other's code. Measured 2026-08-05 (issue #44): the default
+## run reports `desktopDeps` (the type and the embedded field) as unused —
+## they are, in the server build, and are used in the desktop build — while
+## the desktop run cannot see them at all and instead finds a gosec issue in
+## desktopdownload.go that the default run never compiles. Neither run alone
+## is the answer, and //nolint on the difference would suppress a real signal
+## rather than resolve it.
 lint:
 	@gofmt -l . | grep -v '^web/' | grep -v '^third_party/' | (! grep .) || (echo "gofmt needed on the files above"; exit 1)
 	go vet $(PKG)
+	go vet -tags desktop $(PKG)
 	$(GOBIN)/golangci-lint run
+	$(GOBIN)/golangci-lint run --build-tags desktop
 
 ## sqlc: regenerate internal/db/gen from queries (never hand-edit the output)
 sqlc:

@@ -295,6 +295,9 @@ func (m *DownloadManager) run(ctx context.Context, id string, userID, fileID uui
 	}
 	defer func() { _ = content.Body.Close() }()
 
+	// #nosec G304 -- target comes from ResolveTarget, which confines it inside
+	// the configured root after symlink resolution and reduces the filename to
+	// its base. O_EXCL additionally refuses to follow an existing file.
 	f, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		m.fail(id, target, fmt.Errorf("create download file: %w", err))
