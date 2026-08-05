@@ -301,6 +301,54 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   return payload as T;
 }
 
+/**
+ * fetch with the access token attached, for callers that need the raw
+ * Response rather than a decoded body.
+ *
+ * The desktop download routes sit behind the ordinary Auth middleware, so a
+ * bare fetch() gets a 401 — and the capability probe reads a 401 as "this is
+ * not the desktop build" and silently falls back to the browser path. That is
+ * how the whole Go-side download feature shipped unreachable: every piece was
+ * built and tested, and every request went out with no credential.
+ *
+ * Unlike request(), this does NOT decode, does not throw on a non-2xx, and
+ * does not clear the session on a 401 — the probe legitimately expects a 404
+ * on the browser build, and turning that into a session event would be wrong.
+ * It does retry once after a refresh, for the same reason request() does.
+ */
+export async function authedFetch(
+  path: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  const token = await ensureToken();
+  const withAuth = (t: string): RequestInit => {
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', `Bearer ${t}`);
+    return { ...init, credentials: 'same-origin', headers };
+  };
+
+  if (!token) return fetch(path, { ...init, credentials: 'same-origin' });
+
+  const res = await fetch(path, withAuth(token));
+  if (res.status !== 401) return res;
+
+  // The token may have expired between the check and the request.
+  if (!(await refresh()) || !accessToken) return res;
+  return fetch(path, withAuth(accessToken));
+}
+
+/**
+ * Returns a currently-valid access token, refreshing if needed.
+ *
+ * For EventSource, which cannot set an Authorization header and so must carry
+ * the token in the query string. Nothing else should use this: every other
+ * caller has authedFetch or request(), both of which keep the token in a
+ * header where it does not land in a URL.
+ */
+export function accessTokenForStreamURL(): Promise<string | null> {
+  return ensureToken();
+}
+
 export const api = {
   /**
    * Changes the signed-in user's password.

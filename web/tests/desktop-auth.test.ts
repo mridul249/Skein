@@ -38,12 +38,23 @@ function recordingFetch(body: unknown = { desktop_downloads: true, download_dir:
   return { seen, impl };
 }
 
+// Calls probeDesktop with NO fetch argument, so it exercises the DEFAULT.
+// Passing a fake fetch in would bypass the very thing under test: the eight
+// existing probe tests all inject one, which is why none of them noticed the
+// default was unauthenticated.
 test('the capability probe sends the access token', async () => {
   resetDesktopProbe();
   __setAccessTokenForTests(TOKEN);
 
   const { seen, impl } = recordingFetch();
-  const caps = await probeDesktop(impl);
+  const original = globalThis.fetch;
+  globalThis.fetch = impl;
+  let caps;
+  try {
+    caps = await probeDesktop();
+  } finally {
+    globalThis.fetch = original;
+  }
 
   const probeReq = seen[0];
   if (!probeReq) throw new Error('the probe did not issue a request');

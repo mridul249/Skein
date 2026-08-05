@@ -32,6 +32,9 @@ func StreamAuth(v TokenVerifier, writeErr ErrorWriter) func(http.Handler) http.H
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			raw := bearerToken(r)
 			if raw == "" {
+				raw = r.URL.Query().Get("access_token")
+			}
+			if raw == "" {
 				writeErr(w, r, skerr.Public(skerr.ErrUnauthorized, "Sign in to continue."))
 				return
 			}
