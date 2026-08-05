@@ -69,6 +69,14 @@ level=INFO msg="keyring ready" key_id=723bcc0a
 further.** If they differ, stop - you have the wrong file, and no amount of
 retrying will fix it.
 
+> **This comparison is currently manual, and that is an interim measure.**
+> Skein does not yet store its own key ID, so it cannot check the key you
+> supplied against the instance at startup - it can only tell you what the key
+> you gave it derives to. A `key_id` column is planned so that a mismatched key
+> is refused at boot rather than left for you to spot. Until then, comparing
+> the two strings is a step you have to take yourself, and it is worth taking
+> carefully: everything downstream assumes you got it right.
+
 **A wrong key does not corrupt anything, and Skein says so rather than
 letting you guess.** Every ciphertext stores its key ID in the clear, and
 that ID is compared *before* decryption is attempted, so restoring the
