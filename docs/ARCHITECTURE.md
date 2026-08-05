@@ -220,12 +220,28 @@ object's integrity without downloading and decrypting it first.
 
 ### Recovery
 
-**Status: database-dependent today, self-describing drives planned.** An
-encrypted sidecar manifest written alongside every file's shards - making
-each drive independently reconstructable without the database - is
-specified for Phase 7 Task 5.1 and **not implemented**. Until it lands, the
-database is the only record of which shard belongs to which file; see
-[BACKUP.md](BACKUP.md) for what that means for your backup strategy.
+**Status: manifests written, reconstruction not built.** Every upload writes
+an encrypted `.skein_manifest_<file_id>.enc` beside its shards, carrying the
+file's name, size, folder path and the full per-shard layout (index, offset,
+both sizes, digest, provider object id).
+
+**One copy per account holding a shard, not one copy total.** A single-copy
+scheme means losing that one account loses the map to every other account, so
+any single surviving drive must be enough to bootstrap discovery of the rest.
+The writes go through the shared `gdrive.Pool`, which is where 429 handling
+and bounded concurrency already live.
+
+**A manifest write failure never fails the upload.** It is a redundancy layer;
+letting it break the primary path would mean a user cannot store a file
+because the thing protecting them from losing files did not work. Failures
+are logged and the file stays committed and readable.
+
+The command that rebuilds `folders`/`files`/`file_shards` from those manifests
+is the remaining half and is **not implemented**, so the database is still the
+operative record today. What has changed is that the information needed to
+rebuild it now lives durably on the drives. **Manifests address losing the
+DATABASE, never losing the KEY** - they are encrypted under a key derived from
+the same master key. See [BACKUP.md](BACKUP.md).
 
 ### Current tables
 
