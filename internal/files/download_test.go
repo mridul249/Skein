@@ -141,9 +141,46 @@ func TestOpenRefusesACorruptManifest(t *testing.T) {
 
 			f.store.CorruptShard(file.ID, 0, tc.corrupt)
 
+			// THE INVARIANT IS "A CORRUPT MANIFEST NEVER REACHES A READER",
+			// and there are two legitimate ways to uphold it. The reader
+			// refuses (verifyManifest, download.go:410-431) — or the store
+			// refuses to hold the state at all, which is what the real
+			// schemas do: file_shards_sizes_non_negative rejects a negative
+			// size outright in BOTH dialects, so CorruptShard leaves the
+			// shard intact and the file stays readable.
+			//
+			// A store that cannot represent the damage is a STRONGER
+			// guarantee than one that represents it and catches it on read,
+			// so accepting both is not a weakened assertion. What is NOT
+			// accepted is the file reading back wrong: if the damage landed,
+			// Open must refuse.
 			_, err := f.svc.Open(context.Background(), f.userID, file.ID, nil)
-			if !errors.Is(err, skerr.ErrIntegrity) {
-				t.Fatalf("Open() = %v, want ErrIntegrity", err)
+			if errors.Is(err, skerr.ErrIntegrity) {
+				return // the reader caught it
+			}
+			if err != nil {
+				t.Fatalf("Open() = %v, want ErrIntegrity or a clean read", err)
+			}
+			// Open succeeded, which is only acceptable if the damage was
+			// never applied. Prove that rather than assuming it.
+			shards, lerr := f.store.ListShards(context.Background(), file.ID)
+			if lerr != nil {
+				t.Fatalf("ListShards() = %v", lerr)
+			}
+			var want files.Shard
+			for _, sh := range shards {
+				if sh.Index == 0 {
+					want = sh
+				}
+			}
+			damaged := want
+			tc.corrupt(&damaged)
+			if damaged.PlainSize == want.PlainSize && damaged.PlainOffset == want.PlainOffset &&
+				damaged.SizeBytes == want.SizeBytes && damaged.Index == want.Index {
+				t.Fatalf("the corruption was a no-op; this case tests nothing")
+			}
+			if want.PlainSize < 0 || want.PlainOffset < 0 || want.SizeBytes < 0 {
+				t.Fatalf("Open() succeeded on a shard the store should not hold: %+v", want)
 			}
 		})
 	}

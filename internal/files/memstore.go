@@ -3,6 +3,7 @@ package files
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,10 @@ func (m *MemoryStore) CreateFolder(_ context.Context, id, userID uuid.UUID, pare
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// folders_name_not_blank, in both dialects.
+	if strings.TrimSpace(name) == "" {
+		return Folder{}, skerr.ErrValidation
+	}
 	for _, f := range m.folders {
 		if f.UserID == userID && f.DeletedAt == nil && f.Name == name && samePtr(f.ParentID, parentID) {
 			return Folder{}, skerr.ErrConflict
@@ -168,6 +173,10 @@ func (m *MemoryStore) CreateFile(_ context.Context, n NewFile) (File, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// files_size_non_negative and files_name_not_blank, in both dialects.
+	if n.SizeBytes < 0 || strings.TrimSpace(n.Name) == "" {
+		return File{}, skerr.ErrValidation
+	}
 	for _, f := range m.files {
 		if f.UserID == n.UserID && f.DeletedAt == nil && f.Name == n.Name &&
 			samePtr(f.FolderID, n.FolderID) && f.Status == StatusReady {
@@ -354,6 +363,14 @@ func (m *MemoryStore) CreateShard(_ context.Context, n NewShard) (Shard, error) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// file_shards_sizes_non_negative, in both real dialects
+	// (00004_files.sql:78, sqlite/00003_files.sql:60). A fake store more
+	// permissive than the schema lets a fixture build a state no real backend
+	// can hold, and the suite then passes on a fiction — see the rule in
+	// Memory.md.
+	if n.SizeBytes < 0 || n.PlainSize < 0 || n.PlainOffset < 0 {
+		return Shard{}, skerr.ErrValidation
+	}
 	for _, existing := range m.shards[n.FileID] {
 		if existing.Index == n.Index {
 			return Shard{}, skerr.ErrConflict
