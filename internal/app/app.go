@@ -140,6 +140,24 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	}
 	lg.Info("keyring ready", slog.String("key_id", keyring.KeyIDString()))
 
+	// Known issue #48. Refuse a key that does not belong to this database, and
+	// refuse it HERE — after the migrations, before any service exists and
+	// before a single byte of user data is read.
+	//
+	// The placement is the feature. Without it the wrong key starts the server
+	// perfectly and fails at the first download as a decryption error three
+	// layers down, which reads as data corruption; the user concludes their
+	// files are destroyed when they have simply restored the wrong key file.
+	// Block 2 shipped export and recovery with a documented instruction to
+	// compare two hex strings by eye, during a recovery, under stress. This is
+	// that comparison, performed by the program.
+	if wired.instance != nil {
+		if verr := wired.instance.VerifyMasterKeyID(ctx, keyring.KeyIDString()); verr != nil {
+			wired.close()
+			return nil, verr
+		}
+	}
+
 	authSvc := auth.NewService(
 		wired.authStore,
 		auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTokenTTL),
@@ -377,7 +395,13 @@ type persistence struct {
 	// and the pool is pgx rather than database/sql.
 	dumper *db.Dumper
 	dumpDB *sql.DB
-	close  func()
+	// instance verifies the master key against the one this database was
+	// created under (known issue #48). An interface so both engines' concrete
+	// stores satisfy it without app importing either.
+	instance interface {
+		VerifyMasterKeyID(ctx context.Context, keyID string) error
+	}
+	close func()
 }
 
 func loadConfig(o options) (*config.Config, error) {
@@ -409,6 +433,7 @@ func openSQLitePersistence(ctx context.Context, sqlitePath string, lg *slog.Logg
 		health:        sqliteHealth{db: sqlDB},
 		dumper:        db.NewDumper(db.DialectSQLite, "", path),
 		dumpDB:        sqlDB,
+		instance:      db.NewSQLiteInstanceStore(sqlDB),
 		close:         func() { _ = sqlDB.Close() },
 	}, nil
 }
@@ -433,6 +458,7 @@ func openPostgresPersistence(ctx context.Context, cfg *config.Config, lg *slog.L
 		filesStore:    files.NewPGStore(pool),
 		health:        pool,
 		dumper:        db.NewDumper(db.DialectPostgres, cfg.DatabaseURL, ""),
+		instance:      db.NewPostgresInstanceStore(pool.Pool),
 		close:         pool.Close,
 	}, nil
 }
