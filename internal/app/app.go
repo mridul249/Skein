@@ -227,7 +227,7 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 		desktopConnect = o.desktopConnect(accountsSvc, lg.With(slog.String("component", "desktopoauth")))
 	}
 
-	srv, err := httpapi.New(httpapi.Deps{
+	deps := httpapi.Deps{
 		Config:         cfg,
 		Logger:         lg,
 		Health:         wired.health,
@@ -238,7 +238,11 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 		Dumper:         wired.dumper,
 		DumpDB:         wired.dumpDB,
 		DesktopConnect: desktopConnect,
-	})
+	}
+	// Desktop only: compiled out of the server binary entirely.
+	wireDesktopDownloads(&deps, filesSvc, cfg.DownloadDir)
+
+	srv, err := httpapi.New(deps)
 	if err != nil {
 		wired.close()
 		return nil, fmt.Errorf("build server: %w", err)

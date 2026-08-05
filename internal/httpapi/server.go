@@ -78,6 +78,10 @@ type Deps struct {
 	// DumpDB is the handle the schema version is read from for the backup
 	// filename. Nil is tolerated: the version reports 0.
 	DumpDB *sql.DB
+	// desktopDeps carries build-tagged desktop-only dependencies. Empty on
+	// the server build.
+	desktopDeps
+
 	// DesktopConnect is nil on the server build. When set, the accounts
 	// handler runs the desktop OAuth flow (system browser, loopback
 	// listener, PKCE) instead of the web flow, and the server-hosted
@@ -172,6 +176,7 @@ func (s *Server) routes() {
 		s.mountAccounts(api)
 		s.mountFiles(api)
 		s.mountSystem(api)
+		s.mountDesktop(api)
 	})
 
 	s.mountUI(r)
