@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	skcrypto "github.com/mridul249/Skein/internal/crypto"
 	"github.com/mridul249/Skein/internal/db"
 	"github.com/mridul249/Skein/internal/httpapi/httpx"
 	"github.com/mridul249/Skein/internal/httpapi/middleware"
@@ -37,10 +38,22 @@ const BackupTokenHeader = "X-Skein-Backup-Token" //nolint:gosec // header name, 
 // endpoint exists and is merely locked, which tells a scanner where to come
 // back to; 404 is indistinguishable from a build without the route at all.
 type System struct {
-	dumper *db.Dumper
-	token  string
-	sqlDB  *sql.DB
-	log    *slog.Logger
+	dumper  *db.Dumper
+	token   string
+	sqlDB   *sql.DB
+	keyring *skcrypto.Keyring
+	log     *slog.Logger
+}
+
+// SetKeyring wires the master keyring for the key-export route. Nil leaves
+// that route reporting 404, exactly as an unset token does.
+func (h *System) SetKeyring(k *skcrypto.Keyring) { h.keyring = k }
+
+// ExportKey handles GET /api/system/key-export.
+//
+// STUB — pending implementation.
+func (h *System) ExportKey(w http.ResponseWriter, r *http.Request) {
+	_, _ = w, r
 }
 
 // NewSystem wires the operator endpoints. token may be empty, which disables
