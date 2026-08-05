@@ -12,7 +12,15 @@
  * all means `false`, and false means the ordinary browser a.click() path,
  * unchanged. There is deliberately no third state: a half-enabled UI that
  * shows a progress drawer nothing feeds is worse than either endpoint.
+ *
+ * THE PROBE MUST BE AUTHENTICATED. /api/desktop/capabilities sits behind the
+ * ordinary Auth middleware, so an unauthenticated probe gets a 401 — which
+ * this function correctly reads as "not the desktop build", disabling the
+ * feature in the very binary that has it. Defaulting to authedFetch rather
+ * than fetch is what makes the answer mean what it says.
  */
+import { authedFetch } from './api';
+
 export interface DesktopCapabilities {
   desktopDownloads: boolean;
   downloadDir: string;
@@ -32,7 +40,7 @@ let cached: Promise<DesktopCapabilities> | null = null;
  * which cannot change while it is running.
  */
 export function probeDesktop(
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = authedFetch,
   timeoutMs = PROBE_TIMEOUT_MS,
 ): Promise<DesktopCapabilities> {
   cached ??= runProbe(fetchImpl, timeoutMs);

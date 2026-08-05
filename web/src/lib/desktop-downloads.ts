@@ -6,6 +6,7 @@
  * mid-transfer. See internal/files/desktopdownload.go.
  */
 import { probeDesktop } from './desktop';
+import { accessTokenForStreamURL, authedFetch } from './api';
 
 export type DesktopDownloadState = 'running' | 'complete' | 'failed' | 'cancelled';
 
@@ -78,8 +79,25 @@ export class DesktopDownloadStore {
    */
   private watch(id: string): void {
     this.streams.get(id)?.();
+    void this.openStream(id);
+  }
 
-    const source = new EventSource(`/api/desktop/downloads/${id}/events`);
+  /**
+   * THE TOKEN GOES IN THE QUERY STRING because EventSource cannot set headers.
+   * StreamAuth accepts it there for GET-only streaming routes; see
+   * internal/httpapi/middleware/streamauth.go for why that is bounded.
+   */
+  private async openStream(id: string): Promise<void> {
+    const token = await accessTokenForStreamURL();
+    if (!token) return;
+
+    // A dismiss may have landed while the token was being fetched; do not
+    // open a stream for a job that is no longer on the list.
+    if (!this.jobs.some((j) => j.id === id)) return;
+
+    const source = new EventSource(
+      `/api/desktop/downloads/${id}/events?access_token=${encodeURIComponent(token)}`,
+    );
     let closed = false;
 
     const stop = () => {
@@ -111,7 +129,7 @@ export class DesktopDownloadStore {
 
   /** Re-attaches to everything the server still knows about. */
   async resync(): Promise<void> {
-    const res = await fetch('/api/desktop/downloads', {
+    const res = await authedFetch('/api/desktop/downloads', {
       headers: { Accept: 'application/json' },
     });
     if (!res.ok) return;
@@ -124,7 +142,7 @@ export class DesktopDownloadStore {
 
   /** Cancels a transfer. The server stops it and removes the partial file. */
   async cancel(id: string): Promise<void> {
-    await fetch(`/api/desktop/downloads/${id}`, { method: 'DELETE' });
+    await authedFetch(`/api/desktop/downloads/${id}`, { method: 'DELETE' });
   }
 
   /** Removes a terminal card. A view operation: it cancels nothing. */
@@ -167,7 +185,7 @@ export async function startDesktopDownload(
   fileId: string,
   dir?: string,
 ): Promise<DesktopDownloadJob> {
-  const res = await fetch('/api/desktop/downloads', {
+  const res = await authedFetch('/api/desktop/downloads', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ file_id: fileId, ...(dir ? { dir } : {}) }),

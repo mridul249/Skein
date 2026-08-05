@@ -26,16 +26,32 @@ func (s *Server) mountDesktop(api chi.Router) {
 	}
 	h := handlers.NewDesktopDownloads(s.deps.Downloads, s.deps.DownloadDir)
 
-	api.Route("/desktop", func(g chi.Router) {
-		g.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
-		g.Use(middleware.RateLimit(middleware.NewLimiter(apiRatePerMin)))
+	limiter := middleware.NewLimiter(apiRatePerMin)
 
-		g.Get("/capabilities", h.Capability)
-		g.Post("/downloads", h.Start)
-		g.Get("/downloads", h.List)
-		g.Delete("/downloads/{id}", h.Cancel)
+	api.Route("/desktop", func(g chi.Router) {
+		g.Group(func(hdr chi.Router) {
+			hdr.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
+			hdr.Use(middleware.RateLimit(limiter))
+
+			hdr.Get("/capabilities", h.Capability)
+			hdr.Post("/downloads", h.Start)
+			hdr.Get("/downloads", h.List)
+			hdr.Delete("/downloads/{id}", h.Cancel)
+		})
+
 		// The SSE stream. Long-lived by design, so it sits outside the JSON
 		// body limit and carries its own heartbeat.
-		g.Get("/downloads/{id}/events", h.Events)
+		//
+		// StreamAuth, not Auth: EventSource cannot set an Authorization
+		// header, so behind header-only Auth this route answers 401 and the
+		// browser retries it forever — the drawer renders with a frozen
+		// 0-byte row while the transfer underneath is running fine. It is
+		// GET-only and writes nothing.
+		g.Group(func(stream chi.Router) {
+			stream.Use(middleware.StreamAuth(s.deps.Auth, httpx.WriteError))
+			stream.Use(middleware.RateLimit(limiter))
+
+			stream.Get("/downloads/{id}/events", h.Events)
+		})
 	})
 }
