@@ -11,6 +11,7 @@ import {
   shardColor,
   shardOrdinal,
 } from '../lib/format';
+import { evidenceAge, isDamaged } from '../lib/health';
 import { SHARD_STATE, integritySummary, shardState } from '../lib/shards';
 import { AccountChip } from './AccountChip';
 import { FilePreview } from './FilePreview';
@@ -59,12 +60,15 @@ export function FileDetail({
   onClose,
   onDownload,
   onTrash,
+  onPurgeDamaged,
 }: {
   /** The selected file. Kept mounted while `open`, so contents can swap. */
   file: FileItem;
   drives: Drive[];
   open: boolean;
   onClose: () => void;
+  /** Permanently removes a file whose shards are confirmed gone. */
+  onPurgeDamaged: (file: FileItem) => void;
   onDownload: (file: FileItem) => void;
   onTrash: (file: FileItem) => void;
 }) {
@@ -78,6 +82,11 @@ export function FileDetail({
     if (open && !wasOpen.current) panelRef.current?.focus();
     wasOpen.current = open;
   }, [open]);
+
+  // Read from the PERSISTED status, so it survives a reload. Before the schema
+  // bundle this state existed only inside one reconcile response.
+  const damaged = isDamaged(file);
+  const checked = evidenceAge(file);
 
   const states = file.shards.map((s) => shardState(s.account_id, drives));
   const summary = integritySummary(states);
@@ -149,6 +158,27 @@ export function FileDetail({
       </header>
 
       <div className="flex-1 space-y-5 p-4">
+        {/* Stated before anything else in the drawer: the file's condition
+            changes what every control below it means. */}
+        {damaged && (
+          <section
+            data-damaged-panel
+            className="rounded border border-danger/40 bg-danger/10 p-3"
+          >
+            <p className="text-body text-danger">
+              <span aria-hidden="true">✕ </span>
+              {file.status === 'corrupted'
+                ? 'Every shard of this file is missing.'
+                : 'Some shards of this file are missing.'}
+            </p>
+            <p className="mt-1 text-caption text-muted">
+              They were most likely deleted from Drive outside Skein. The file
+              cannot be downloaded, and the missing shards cannot be rebuilt.
+              {checked ? ` Last checked ${checked}.` : ''}
+            </p>
+          </section>
+        )}
+
         <FilePreview file={file} />
 
         <section>
@@ -249,10 +279,27 @@ export function FileDetail({
       </div>
 
       <footer className="flex gap-2 border-t border-line p-4">
-        <button type="button" className="btn-ghost flex-1" onClick={() => onDownload(file)}>
-          <Download size={15} aria-hidden />
-          Download
-        </button>
+        {/* A damaged file gets NO download button. Its shards are gone, so the
+            server refuses to sign a URL for it and the button could only ever
+            fail — offering it is the UI lying twice, once by implying the file
+            is fetchable and once by blaming the failure on something else.
+            Purge takes its place, since removing the row is the only action
+            that can actually succeed. */}
+        {damaged ? (
+          <button
+            type="button"
+            className="btn-ghost flex-1 text-danger"
+            onClick={() => onPurgeDamaged(file)}
+          >
+            <Trash2 size={15} aria-hidden />
+            Remove permanently
+          </button>
+        ) : (
+          <button type="button" className="btn-ghost flex-1" onClick={() => onDownload(file)}>
+            <Download size={15} aria-hidden />
+            Download
+          </button>
+        )}
         <button
           type="button"
           className="btn-quiet"
