@@ -21,7 +21,75 @@ the database).
 1. **`SKEIN_MASTER_KEY`.** A password manager or a secrets vault, not a
    file next to the database dump. If an attacker gets both, they can
    decrypt everything; keeping them apart is the whole point.
+   **Export it as a file with the procedure below** - do not rely on it
+   existing only in a `.env` on one machine.
 2. **The database**, via `make backup`.
+
+## Exporting the master key
+
+`GET /api/system/key-export` returns a plain-text file containing the key,
+its key ID, the export date, and a description of what the file is. It is
+written to be recognisable months later by someone who has forgotten they
+made it - a bare key blob is the kind of file people delete in a cleanup.
+
+**The route is off unless `SKEIN_BACKUP_TOKEN` is set**, and reports 404
+when it is not - not 403, which would confirm the endpoint exists. It needs
+a valid session *and* the operator token, exactly like `make backup`:
+
+```bash
+curl -fsS \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "X-Skein-Backup-Token: $SKEIN_BACKUP_TOKEN" \
+  -o skein-master-key.txt \
+  http://localhost:8080/api/system/key-export
+```
+
+**Where to keep it.** Somewhere separate from the database dump and
+separate from the drives holding your shards. Storing it beside the
+database defeats the entire purpose: one lost disk, or one compromised
+backup location, then takes both halves. A password manager, a printed
+copy in a safe, or an encrypted volume on different hardware are all
+reasonable; the same directory as `backups/` is not.
+
+**What possession means.** Anyone holding that file can decrypt every file
+in the instance. No password is involved. Treat it exactly as you would
+treat the data itself, and delete any temporary copy your download left
+behind.
+
+## Recovering with an exported key
+
+Set `SKEIN_MASTER_KEY` to the `Key:` value from the file and start Skein.
+It logs the key ID at startup:
+
+```
+level=INFO msg="keyring ready" key_id=723bcc0a
+```
+
+**Check that against the `Key ID:` line in your key file before going any
+further.** If they differ, stop - you have the wrong file, and no amount of
+retrying will fix it.
+
+**A wrong key does not corrupt anything, and Skein says so rather than
+letting you guess.** Every ciphertext stores its key ID in the clear, and
+that ID is compared *before* decryption is attempted, so restoring the
+wrong key produces `crypto: encrypted with a different key` rather than a
+decryption failure that reads like data loss. Your data is intact; the file
+is simply the wrong one.
+
+### What is unrecoverable
+
+Be clear-eyed about the boundaries:
+
+| Lost | Recoverable? |
+|---|---|
+| The database, key file survives | **No, not yet.** The shard-to-file mapping lives only in the database until sidecar manifests ship. Restore from `make backup`. |
+| The key, database survives | **No. Permanently.** Every shard is unreadable. There is no vendor, no support path and no backdoor - this is the design working as intended. |
+| Both | No. |
+| One drive of several | Yes, if the file was striped across others *and* you have the key and database - but any file with a shard on the lost drive is incomplete. See `POST /api/system/reconcile`. |
+
+The second row is the reason this page exists. **`make backup` does not
+back up the key**, and never will: putting the key in the database dump
+would mean one stolen file loses everything.
 
 ## `make backup`
 
