@@ -152,9 +152,24 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	// compare two hex strings by eye, during a recovery, under stress. This is
 	// that comparison, performed by the program.
 	if wired.instance != nil {
-		if verr := wired.instance.VerifyMasterKeyID(ctx, keyring.KeyIDString()); verr != nil {
+		adopted, verr := wired.instance.VerifyMasterKeyID(ctx, keyring.KeyIDString())
+		if verr != nil {
 			wired.close()
 			return nil, verr
+		}
+		if adopted {
+			// Said out loud, because this is the ONE case the check cannot
+			// protect: a database with no recorded key id accepts whatever key
+			// it is first started with. That is unavoidable — you cannot
+			// retroactively fingerprint a database created before
+			// fingerprinting existed — so the defence is that an operator
+			// restoring an older instance watches it happen rather than
+			// finding out later. WARN rather than INFO: on a fresh install it
+			// is noise seen once, and on a restore it is the line that matters.
+			lg.Warn("no master key id was recorded; adopting the supplied key as this instance's",
+				slog.String("key_id", keyring.KeyIDString()),
+				slog.String("note", "expected on a first run; on a RESTORED database, "+
+					"check this matches the Key ID in your exported key file"))
 		}
 	}
 
@@ -399,7 +414,7 @@ type persistence struct {
 	// created under (known issue #48). An interface so both engines' concrete
 	// stores satisfy it without app importing either.
 	instance interface {
-		VerifyMasterKeyID(ctx context.Context, keyID string) error
+		VerifyMasterKeyID(ctx context.Context, keyID string) (adopted bool, err error)
 	}
 	close func()
 }

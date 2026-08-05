@@ -85,21 +85,29 @@ func (s *instanceDB) MasterKeyID(ctx context.Context) (string, bool, error) {
 // would make the second attempt with the wrong key succeed, turning a
 // permanent refusal into a one-time warning — and the second attempt is
 // exactly what a confused operator makes.
-func (s *instanceDB) VerifyMasterKeyID(ctx context.Context, keyID string) error {
+//
+// Returns adopted=true when it recorded an id rather than matching one. The
+// caller must say so out loud: a database created before this check existed
+// has no recorded id, so its FIRST start under ANY key adopts that key —
+// including the wrong one. That window cannot be closed retroactively (there
+// is nothing to fingerprint against), so the only defence is that an operator
+// restoring an old database SEES the adoption happen rather than discovering
+// months later that it silently accepted whatever they had to hand.
+func (s *instanceDB) VerifyMasterKeyID(ctx context.Context, keyID string) (adopted bool, err error) {
 	if keyID == "" {
-		return fmt.Errorf("refusing to record an empty master key id")
+		return false, fmt.Errorf("refusing to record an empty master key id")
 	}
 
 	stored, found, err := s.MasterKeyID(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if found {
 		if stored != keyID {
 			// Wording is load-bearing and is asserted by test. Someone reads
 			// this during a recovery and must conclude "wrong key file", not
 			// "my data is corrupt".
-			return fmt.Errorf(
+			return false, fmt.Errorf(
 				"%w: this database was created with master key id %s, but the "+
 					"supplied SKEIN_MASTER_KEY derives %s. Your data is intact — "+
 					"this is the wrong key file. Restore the key whose exported "+
@@ -107,9 +115,12 @@ func (s *instanceDB) VerifyMasterKeyID(ctx context.Context, keyID string) error 
 					"at the database this key belongs to",
 				ErrMasterKeyMismatch, stored, keyID, stored)
 		}
-		return nil
+		return false, nil
 	}
-	return s.recordMasterKeyID(ctx, keyID)
+	if rerr := s.recordMasterKeyID(ctx, keyID); rerr != nil {
+		return false, rerr
+	}
+	return true, nil
 }
 
 func (s *instanceDB) recordMasterKeyID(ctx context.Context, keyID string) error {
