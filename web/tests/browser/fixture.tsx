@@ -22,7 +22,14 @@ import { Drives } from '../../src/pages/Drives';
 import { Login } from '../../src/pages/Login';
 import { UploadsProvider, useUploads } from '../../src/lib/uploads-context';
 import { DownloadsProvider } from '../../src/lib/downloads-context';
-import { api, type Drive, type FileItem, type Folder, type Quota } from '../../src/lib/api';
+import {
+  api,
+  __setAccessTokenForTests,
+  type Drive,
+  type FileItem,
+  type Folder,
+  type Quota,
+} from '../../src/lib/api';
 
 const GB = 1024 ** 3;
 const now = new Date().toISOString();
@@ -112,6 +119,41 @@ if (params.has('preview')) {
   // request it issues, not the minting.
   api.contentURL = async (id: string) =>
     id === 'f-photo' ? './assets/photo.png' : './assets/clip.mp4';
+}
+
+if (params.has('desktop')) {
+  // Makes the capability probe answer "desktop build", so the drawer swap in
+  // Layout can be observed for real.
+  //
+  // Stubbed at window.fetch rather than at the module: what is under test is
+  // the whole chain — probe -> `desktop` -> which component Layout renders —
+  // and stubbing probeDesktop itself would skip the first two links. A session
+  // is installed for the same reason: authedFetch refreshes before it calls
+  // fetch, and without a token it never issues the request at all. That is
+  // precisely the bug this fixture mode exists to pin.
+  __setAccessTokenForTests('fixture-token');
+  const realFetch = window.fetch.bind(window);
+  window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(typeof input === 'string' || input instanceof URL ? input : input.url);
+    if (url.includes('/api/desktop/capabilities')) {
+      if (new Headers(init?.headers).get('Authorization') !== 'Bearer fixture-token') {
+        // Exactly what the real server does, and what shipped: an
+        // unauthenticated probe reads as "not the desktop build".
+        return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
+      }
+      return new Response(
+        JSON.stringify({ desktop_downloads: true, download_dir: '/home/x/Downloads' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (url.includes('/api/desktop/downloads')) {
+      return new Response(JSON.stringify({ downloads: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return realFetch(input as RequestInfo, init);
+  }) as typeof window.fetch;
 }
 
 const client = new QueryClient({
