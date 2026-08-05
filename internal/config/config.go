@@ -55,6 +55,12 @@ type Config struct {
 	// token exists on top of it. A real operator role is the eventual fix.
 	BackupToken string `env:"SKEIN_BACKUP_TOKEN"`
 
+	// DownloadDir overrides where the desktop build saves downloads. Empty
+	// uses the XDG Downloads directory, which is where the webview already
+	// wrote before the Go-side path existed — the Go path changes how files
+	// get there, not where they land.
+	DownloadDir string `env:"SKEIN_DOWNLOAD_DIR"`
+
 	GoogleClientID     string `env:"SKEIN_GOOGLE_CLIENT_ID"`
 	GoogleClientSecret string `env:"SKEIN_GOOGLE_CLIENT_SECRET"`
 	GoogleRedirectURL  string `env:"SKEIN_GOOGLE_REDIRECT_URL"`
