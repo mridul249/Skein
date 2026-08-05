@@ -1,19 +1,42 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
 
 import { DownloadStore, type DownloadJob } from './downloads';
+import {
+  DesktopDownloadStore,
+  desktopDownloadsAvailable,
+  startDesktopDownload,
+  type DesktopDownloadJob,
+} from './desktop-downloads';
 
 interface DownloadsValue {
+  /** Browser-path jobs: "handed to your browser", no byte tracking (#15). */
   jobs: DownloadJob[];
   start: (name: string) => string;
   fail: (id: string, error: string) => void;
   dismiss: (id: string) => void;
+
+  /**
+   * True when the Go-side download path is available, decided by probing the
+   * server. Fails closed: anything ambiguous is false, and false means the
+   * ordinary a.click() path.
+   */
+  desktop: boolean;
+  /** Go-side jobs, with real bytes. Empty in the browser. */
+  desktopJobs: DesktopDownloadJob[];
+  /** Starts a Go-side download. Throws if the server refuses. */
+  startDesktop: (fileId: string) => Promise<void>;
+  cancelDesktop: (id: string) => void;
+  dismissDesktop: (id: string) => void;
+  clearDesktopSettled: () => void;
 }
 
 const DownloadsContext = createContext<DownloadsValue | null>(null);
@@ -29,7 +52,34 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
   if (!storeRef.current) storeRef.current = new DownloadStore();
   const store = storeRef.current;
 
+  const desktopRef = useRef<DesktopDownloadStore | null>(null);
+  if (!desktopRef.current) desktopRef.current = new DesktopDownloadStore();
+  const desktopStore = desktopRef.current;
+
   const jobs = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  const desktopJobs = useSyncExternalStore(
+    desktopStore.subscribe,
+    desktopStore.getSnapshot,
+    desktopStore.getSnapshot,
+  );
+
+  const [desktop, setDesktop] = useState(false);
+
+  // Probe once on mount. Until it answers, `desktop` is false — so a slow or
+  // failed probe leaves the browser path in place rather than a half-state.
+  useEffect(() => {
+    let live = true;
+    void desktopDownloadsAvailable().then((available) => {
+      if (!live || !available) return;
+      setDesktop(true);
+      // Re-attach to anything already running: a window reload must not
+      // orphan a transfer the server is still performing.
+      void desktopStore.resync();
+    });
+    return () => {
+      live = false;
+    };
+  }, [desktopStore]);
 
   const value = useMemo<DownloadsValue>(
     () => ({
@@ -37,8 +87,17 @@ export function DownloadsProvider({ children }: { children: ReactNode }) {
       start: (name) => store.start(name),
       fail: (id, error) => store.fail(id, error),
       dismiss: (id) => store.dismiss(id),
+
+      desktop,
+      desktopJobs,
+      startDesktop: async (fileId) => {
+        desktopStore.track(await startDesktopDownload(fileId));
+      },
+      cancelDesktop: (id) => void desktopStore.cancel(id),
+      dismissDesktop: (id) => desktopStore.dismiss(id),
+      clearDesktopSettled: () => desktopStore.dismissSettled(),
     }),
-    [jobs, store],
+    [jobs, store, desktop, desktopJobs, desktopStore],
   );
 
   return <DownloadsContext.Provider value={value}>{children}</DownloadsContext.Provider>;

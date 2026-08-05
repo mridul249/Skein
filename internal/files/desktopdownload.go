@@ -78,7 +78,14 @@ type DownloadManager struct {
 
 type downloadEntry struct {
 	snapshot DesktopDownload
-	cancel   context.CancelFunc
+	// ctx is the download's own context. Cancellation is decided by asking
+	// it, not by inspecting the error: the provider's HTTP stack replaces a
+	// cancelled request's error with its own ("connection reset", "stream
+	// error"), so errors.Is(err, context.Canceled) is false by the time the
+	// copy returns. Observed live 2026-08-05 — a cancelled download reported
+	// "failed / check your connection" instead of "cancelled".
+	ctx    context.Context
+	cancel context.CancelFunc
 	// subs are the SSE listeners. A download with no listener keeps running:
 	// the transfer is not owned by the connection watching it.
 	subs map[chan DesktopDownload]struct{}
@@ -207,6 +214,7 @@ func (m *DownloadManager) Start(ctx context.Context, userID, fileID uuid.UUID, d
 			ID: id, FileID: fileID, Name: file.Name, Path: target,
 			State: DownloadRunning, Total: file.SizeBytes, ETASeconds: -1,
 		},
+		ctx:    dlCtx,
 		cancel: cancel,
 		subs:   map[chan DesktopDownload]struct{}{},
 	}
@@ -271,7 +279,14 @@ func (m *DownloadManager) fail(id, target string, cause error) {
 		m.mu.Unlock()
 		return
 	}
-	cancelled := errors.Is(cause, context.Canceled)
+	// Ask the context, then fall back to the error chain. The context is
+	// authoritative: it is cancelled iff the user asked, whatever the
+	// transport turned the error into on the way back.
+	// Ask the context, then fall back to the error chain. The context is
+	// authoritative: it is cancelled iff the user asked, whatever the
+	// transport turned the error into on the way back.
+	cancelled := errors.Is(cause, context.Canceled) ||
+		(entry.ctx != nil && entry.ctx.Err() != nil)
 	entry.snapshot.State = DownloadFailed
 	if cancelled {
 		entry.snapshot.State = DownloadCancelled

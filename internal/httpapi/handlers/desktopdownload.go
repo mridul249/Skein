@@ -133,12 +133,14 @@ func (h *DesktopDownloads) Events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		httpx.WriteError(w, r, skerr.Public(skerr.ErrNotImplemented,
-			"Streaming is not supported here."))
-		return
-	}
+	// http.ResponseController, NOT a w.(http.Flusher) type assertion.
+	//
+	// The middleware chain wraps the writer (middleware.statusRecorder, for
+	// the access log), and a direct assertion does not follow the Unwrap chain
+	// — so it failed and every SSE request 501'd. Found by running it, not by
+	// review. ResponseController is exactly the mechanism statusRecorder's
+	// Unwrap exists for.
+	rc := http.NewResponseController(w)
 
 	updates, unsubscribe, found := h.mgr.Subscribe(chi.URLParam(r, "id"))
 	if !found {
@@ -153,7 +155,13 @@ func (h *DesktopDownloads) Events(w http.ResponseWriter, r *http.Request) {
 	// Proxies that buffer would defeat the point of streaming these.
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
+	// Flush after the header, not before: flushing first would commit a 200
+	// and make an error response impossible. A flush failure here means the
+	// writer cannot stream, and the client sees a connection that closes
+	// rather than a stream that never updates.
+	if err := rc.Flush(); err != nil {
+		return
+	}
 
 	beat := time.NewTicker(heartbeatInterval)
 	defer beat.Stop()
@@ -178,7 +186,7 @@ func (h *DesktopDownloads) Events(w http.ResponseWriter, r *http.Request) {
 			if _, werr := fmt.Fprintf(w, "event: progress\ndata: %s\n\n", payload); werr != nil {
 				return
 			}
-			flusher.Flush()
+			_ = rc.Flush()
 
 			// Terminal states end the stream: there is nothing further to
 			// report, and holding the connection open would look like a
@@ -193,7 +201,7 @@ func (h *DesktopDownloads) Events(w http.ResponseWriter, r *http.Request) {
 			if _, werr := fmt.Fprint(w, ": heartbeat\n\n"); werr != nil {
 				return
 			}
-			flusher.Flush()
+			_ = rc.Flush()
 		}
 	}
 }
