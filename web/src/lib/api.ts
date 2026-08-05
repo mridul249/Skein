@@ -181,6 +181,17 @@ function clearSession() {
   announce(null);
 }
 
+/**
+ * Test seam: installs an access token without a login round trip.
+ *
+ * The token still lives only in this module's scope (Rules.md §2.15); this
+ * just sets it directly so a test can assert on what a request CARRIES.
+ */
+export function __setAccessTokenForTests(token: string | null): void {
+  accessToken = token;
+  expiresAt = token ? Date.now() + 60_000 : 0;
+}
+
 /** A single in-flight refresh, shared by every caller that needs one. */
 let refreshInFlight: Promise<boolean> | null = null;
 
