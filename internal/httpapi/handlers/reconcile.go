@@ -41,6 +41,35 @@ func (h *Files) Reconcile(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, r, http.StatusOK, report)
 }
 
+// Reconstruct handles POST /api/system/reconstruct.
+//
+// Rebuilds database rows from the sidecar manifests on the user's drives. The
+// recovery path for a lost database: the shards are still in Drive, and this
+// reads back the record of what they belong to.
+//
+// ADDITIVE ONLY, so it is safe to run against a live database — it inserts
+// what is missing and touches nothing that exists. That is what makes it
+// idempotent and what keeps it distinct from reconcile, which is the operation
+// allowed to conclude something is gone.
+//
+// 200 even when the run is incomplete, for the same reason Reconcile does: the
+// request succeeded, and the report says which drives could not be scanned. An
+// error status would discard the partial recovery the client just got.
+func (h *Files) Reconstruct(w http.ResponseWriter, r *http.Request) {
+	userID, err := middleware.MustUserID(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+
+	report, rerr := h.svc.ReconstructAll(r.Context(), userID)
+	if rerr != nil {
+		httpx.WriteError(w, r, rerr)
+		return
+	}
+	httpx.WriteJSON(w, r, http.StatusOK, report)
+}
+
 // PurgeDamaged handles DELETE /api/files/{id}/damaged.
 //
 // Its own route rather than a flag on the ordinary delete: it destroys data,

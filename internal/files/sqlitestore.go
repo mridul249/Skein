@@ -190,6 +190,76 @@ UPDATE files
 	return nil
 }
 
+// InsertReconstructedFile inserts a recovered file row. Additive only; the
+// ON CONFLICT DO NOTHING is the rule, not an optimisation.
+func (s *SQLiteStore) InsertReconstructedFile(ctx context.Context, n ReconstructedFile) (bool, error) {
+	created := n.CreatedAt
+	if created.IsZero() {
+		created = s.now()
+	}
+	res, err := s.db.ExecContext(ctx, `
+INSERT INTO files (id, user_id, folder_id, name, size_bytes, declared_mime,
+                   is_striped, is_encrypted, status, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+ON CONFLICT (id) DO NOTHING`,
+		n.ID.String(), n.UserID.String(), uuidPtrToString(n.FolderID), n.Name,
+		n.SizeBytes, n.DeclaredMime, boolInt(n.IsStriped), boolInt(n.IsEncrypted),
+		s.fmt(created), s.fmt(s.now()))
+	if err != nil {
+		return false, mapSQLiteWriteError(err, "insert reconstructed file")
+	}
+	rows, _ := res.RowsAffected()
+	return rows > 0, nil
+}
+
+// InsertReconstructedShard inserts one recovered shard row, idempotently on
+// (file_id, idx).
+func (s *SQLiteStore) InsertReconstructedShard(ctx context.Context, n NewShard) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+INSERT INTO file_shards (id, file_id, idx, connected_account_id,
+                         provider_object_id, size_bytes, plain_size_bytes,
+                         plain_offset, sha256, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (file_id, idx) DO NOTHING`,
+		n.ID.String(), n.FileID.String(), n.Index, uuidPtrToString(n.AccountID),
+		n.ProviderID, n.SizeBytes, n.PlainSize, n.PlainOffset, n.SHA256,
+		s.fmt(s.now()))
+	if err != nil {
+		return false, mapSQLiteWriteError(err, "insert reconstructed shard")
+	}
+	rows, _ := res.RowsAffected()
+	return rows > 0, nil
+}
+
+// EnsureFolder reuses a live folder of that name under that parent, creating
+// one only when none exists.
+func (s *SQLiteStore) EnsureFolder(ctx context.Context, userID uuid.UUID, parentID *uuid.UUID, name string) (uuid.UUID, error) {
+	var existing string
+	err := s.db.QueryRowContext(ctx, `
+SELECT id FROM folders
+ WHERE user_id = ?1
+   AND ((?2 IS NULL AND parent_id IS NULL) OR parent_id = ?2)
+   AND name = ?3
+   AND deleted_at IS NULL
+ LIMIT 1`, userID.String(), uuidPtrToString(parentID), name).Scan(&existing)
+	if err == nil {
+		id, perr := uuid.Parse(existing)
+		if perr != nil {
+			return uuid.Nil, fmt.Errorf("parse folder id %q: %w", existing, perr)
+		}
+		return id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return uuid.Nil, fmt.Errorf("find live folder: %w", err)
+	}
+
+	folder, cerr := s.CreateFolder(ctx, uuid.New(), userID, parentID, name)
+	if cerr != nil {
+		return uuid.Nil, cerr
+	}
+	return folder.ID, nil
+}
+
 func (s *SQLiteStore) MarkFileFailed(ctx context.Context, id uuid.UUID) error {
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE files
