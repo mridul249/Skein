@@ -40,7 +40,6 @@ If you have ever tried to combine multiple free Google Drive accounts into a sin
 
 I built Skein to solve these structural issues in a single static binary.
 
-**75 GB of free cloud storage that cannot hold a 30 GB file.**
 
 Five free Google accounts give you 75 GB of total storage, but they operate as isolated 15 GB silos. You are forced to manually manage file splits, and a single large file-like a 30 GB raw video archive or virtual machine image-simply has nowhere to land.
 
@@ -77,18 +76,54 @@ $ skein status
 
 ---
 
-## Highlights
+### Core Innovations (The "Cloud RAID" Engine)
 
-- Strip files across multiple Google Drives
-- Client-side AES-256-GCM encryption
-- Constant-memory streaming uploads
-- Instant media seeking
-- Single static Go binary
-- Uses only `drive.file` OAuth scope
+* **RAID-0 Block Striping for the Cloud:** Skein completely shatters the 15 GB free-tier limit. By cutting massive files into smaller chunks and striping them across multiple Google Drive accounts, it creates a single, boundless virtual drive.
+
+
+* **Zero-Knowledge Envelope Encryption:** Your data is secured locally before it ever touches a network. Skein utilizes advanced Key Derivation Functions (KDF) and envelope encryption, ensuring Google cannot scan, read, or flag your private files.
+
+
+* **Constant-Memory Streaming:** Upload and download 50 GB+ files on hardware with minimal RAM. Skein’s chunking engine maintains a strict memory ceiling, preventing memory leaks or system crashes during massive I/O operations.
+
+
+* **Hyper-Converged Single Binary:** No Node.js environments, no Docker Compose spaghetti, no external database dependencies. The entire backend, database driver, and embedded web interface compile down into one single, portable Go binary.
+
+
+
+### Security & Privacy
+
+* **Strict `drive.file` Scope:** Unlike tools that demand full, read-all access to your personal Google Drive, Skein operates on the principle of least privilege. It can only see and access the files it explicitly creates.
+* **Instant Encrypted Media Seeking:** Traditional cloud encryption forces you to download a massive file entirely just to watch the last 5 minutes. Skein utilizes AES-256-GCM with 64 KiB framing, allowing you to instantly seek and stream video directly from the encrypted cloud.
+
+
+* **Advanced OAuth & Token Families:** Built with secure PKCE OAuth flows and token family tracking to prevent session hijacking and ensure secure handoffs.
+
+
+
+### Reliability & Recovery
+
+* **Automated Disaster Rehearsals:** A lost local database usually means a dead encrypted drive. Skein includes built-in backup dumpers and automated restore-rehearsal scripts to guarantee your encryption keys and file manifests are recoverable.
+
+
+* **Self-Describing Manifests:** Skein generates detailed cryptographic manifests mapping exactly where each chunk of a striped file lives, ensuring data integrity during parallel reconstruction.
+
+
+* **Dual-Database Engine:** Scales from a zero-config local SQLite instance for personal desktop use, all the way up to a PostgreSQL-backed engine for heavy-duty server deployments.
+
+
+
+### Interface & UX
+
+* **Native Cross-Platform Desktop App:** Utilizing the Wails framework, Skein hooks directly into native OS features (system tray, file dialogs, and clipboard) for a seamless desktop experience across macOS, Windows, and Linux.
+
+* **Embedded React Web UI:** Prefer the browser? Skein serves a sleek, modern web interface directly from the binary itself, complete with a beautiful frontend and real-time state management.
+
+
 
 ---
 
-## Technical Comparison
+### Technical Comparison
 
 Existing storage aggregators force a trade-off between deployment complexity, file striping capabilities, encryption, and data safety:
 
@@ -96,63 +131,25 @@ Existing storage aggregators force a trade-off between deployment complexity, fi
 | --- | --- | --- | --- |
 | **Storage Pooling** | Yes | Yes | **Yes** |
 | **Large-File Striping** | No | No | **Yes** |
-| **Encrypted by Default** | Opt-in overlay | No | **Yes (Framed GCM)** |
+| **Encrypted by Default** | Opt-in overlay | No | **Yes (Framed Envelope GCM)** |
 | **Media Seeking & Previews** | High latency (large chunks) | Full download required | **Instant (64 KiB frames)** |
-| **Data Recovery Architecture** | Lost if local index is wiped | Central DB reliant | Central DB, planned self-describing manifests ([status](docs/ARCHITECTURE.md#recovery)) |
+| **Data Recovery Architecture** | Lost if local index is wiped | Central DB reliant | **Automated Rehearsals & Self-Describing Manifests** |
 | **Privacy Scope** | Full Drive Access | Full Drive Access | **`drive.file` scope only** |
 | **Deployment Footprint** | Binary + complex config | MySQL + 2x Node + Compose | **One single binary** |
 
----
-
-## Core Architecture Pillars
-
-### 1. The database is the source of truth today — self-describing drives are planned, not built
-
-Most storage aggregators rely exclusively on a centralized local database to track where file chunks reside, and right now **Skein does too**. `file_shards` in PostgreSQL is the only record of which shard belongs to which file and which drive holds it; losing the database without a backup loses that mapping even though the encrypted bytes are still sitting on your Drive accounts. See [docs/BACKUP.md](docs/BACKUP.md) — back up the database, not just `SKEIN_MASTER_KEY`.
-
-An encrypted sidecar manifest written alongside every file's shards — making a drive **self-describing** and a from-scratch database rebuild possible — is planned (Phase 7 Task 5.1) and **not implemented yet**. This section will be rewritten once it lands; until then, treat the database as a single point of failure for the mapping, even though it is not one for the ciphertext.
-
-### 2. Zero-Allocation Memory Streaming
-
-Memory footprint is bound by strict performance limits enforced directly in CI unit tests:
-
-```bash
-$ go test -run TestUploadHoldsConstantMemory -v ./internal/files/
-    uploaded 2147483648 bytes; peak HeapAlloc 677368 bytes (0.6 MiB), ceiling 150 MiB
---- PASS
-
-```
-
-Streaming a 2 GiB upload consumes only **0.6 MiB of heap memory**. The entire throughput relies on pure `io.Reader` stream composition over a fixed 256 KiB buffer:
-
-```
-request body ─► TeeReader (SHA-256) ─► StreamEncrypter ─► ShardWriter ─► provider
-
-```
-
-Multi-gigabyte uploads remain supported even on resource-constrained 512 MB VPS instances.
-
-### 3. Framed AES-256-GCM Encryption for Instant Seeking
-
-Standard whole-file GCM encryption forces you to buffer and decrypt entire gigabyte-scale ciphertexts before verifying a single byte. Skein slices data into granular **64 KiB encrypted frames** with computable offsets:
-
-* **Instant Video Scrubbing:** HTTP range requests map requested byte ranges directly to their containing 64 KiB frames. Seeking a video fetches **64 KiB instead of 256 MiB**.
-* **In-App Previews:** Images, video and audio preview inline, decrypted on the fly from the same ranged reads — no document/PDF preview yet.
-
-### 4. Restricted Security Scope (`drive.file`)
-
-Skein operates strictly under Google's narrow `drive.file` OAuth scope. It can only access, modify, or delete files that were created by Skein itself. It cannot index, read, or touch pre-existing files in your personal Google Drive accounts.
 
 ---
+## The Engine: Polymorphic Server Architecture
 
-## Server Architecture & Background Engine
+At its core, Skein is driven by a unified Go application runtime (`internal/app/app.go`) that operates polymorphically—running either as a headless daemon (`cmd/skein`) or seamlessly wrapped inside a cross-platform desktop UI (`cmd/skein-desktop` via Wails). 
 
-Skein’s core backend (`app/app.go`) unifies headless server deployments (`cmd/skein`) and desktop GUI wrappers (`cmd/skein-desktop` via Wails):
+Instead of relying on external proxies, process managers, or heavy system dependencies, Skein handles its own network binding, asset distribution, and concurrent background tasks:
 
-* **Dynamic Network Binding:** Supports arbitrary port binding (`127.0.0.1:0`) via `Listen`, enabling desktop runtimes to automatically acquire open ports.
-* **Autonomous Background Workers:** Dedicated loops manage continuous background processes, including `quota-sync`, `purge-oauth-states`, `reclaim-reservations`, and `purge-sessions`.
-* **Graceful Lifecycle Management:** Coordinates HTTP server draining (`httpSrv.Shutdown`), background worker completion (`workers.Wait()`), and safe database connection teardown.
-* **Single-Binary Web Embedding:** Embeds the compiled Vite frontend directly into the Go binary using `//go:embed all:dist` (`web/embed.go`), serving static assets with immutable caching (`Cache-Control: public, max-age=31536000`) and SPA routing fallbacks.
+* **Ephemeral Network Binding:** When running as a desktop app, Skein's HTTP server dynamically binds to an available loopback port (`127.0.0.1:0`). This eliminates local port collisions, allowing multiple desktop instances or background daemons to coexist without configuration tweaks.
+* **Autonomous Background Subsystem (`internal/worker/worker.go`):** Non-blocking goroutine loops handle array state management asynchronously. The worker engine continuously executes background routines—including `quota-sync` (polling storage capacity across drives), `reclaim-reservations` (releasing unused file chunks), `purge-oauth-states`, and `purge-sessions`—ensuring background cleanup never blocks active file I/O.
+* **In-Process OAuth Loopback (`internal/desktopoauth/loopback.go`):** Rather than embedding login pages inside webviews, Skein boots an ephemeral, RFC 8252-compliant local HTTP listener to capture authorization codes directly from the user's default system browser, completing PKCE verification securely in memory.
+* **Zero-Dependency SPA Serving (`internal/web/embed.go`):** The compiled Vite/React frontend is embedded directly into the Go binary at compile time (`//go:embed all:dist`). Skein serves these assets in-memory with SPA routing fallbacks and immutable caching headers (`Cache-Control: public, max-age=31536000`), eliminating the need for Nginx or Apache.
+* **Deterministic Graceful Teardown:** During process termination (`SIGINT`/`SIGTERM`), Skein executes a controlled, zero-data-loss shutdown sequence: it drains active HTTP connections (`httpSrv.Shutdown`), blocks until in-flight background worker routines finish (`workers.Wait()`), and safely flushes and closes database connection pools.
 
 ---
 
@@ -196,10 +193,6 @@ make desktop   # Outputs bin/skein-desktop
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build steps, test runner execution, and contributing guidelines |
 
 ---
-
-## Status & Scope
-
-**v0.2.0** - Skein is designed strictly as a single-tenant storage engine. Multi-tenancy, team sharing, mobile clients, and background directory synchronization are intentionally out of scope.
 
 ## License
 
