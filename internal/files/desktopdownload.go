@@ -105,24 +105,43 @@ func NewDownloadManager(svc *Service) *DownloadManager {
 // ResolveTarget validates a save location and returns the absolute file path
 // to write.
 //
-// dir is a SERVER-SIDE WRITE TARGET. Even though the server is the user's own
-// machine on desktop, the path arrives over HTTP and is treated as untrusted:
-// the name is reduced to its base, the result must stay inside dir after
-// symlink resolution, and dir itself must exist and be writable BEFORE any
-// byte moves — a transfer that fails on the final write has already spent the
-// whole download.
+// root is TRUSTED CONFIGURATION (SKEIN_DOWNLOAD_DIR, else XDG Downloads).
+// dir is CALLER-SUPPLIED and may be empty, meaning the root itself. Both the
+// directory and the name are treated as untrusted: dir is resolved relative to
+// root and must still resolve inside it after symlinks, and the name is
+// reduced to its base.
+//
+// Passing them separately is the whole point. They used to be collapsed into
+// one argument by the handler, so a caller could name any writable path on the
+// machine and have the server write a file into it — an arbitrary-write
+// primitive reachable by anyone who could register, which on a loopback
+// listener with open registration is anything running locally, including a
+// browser page.
+//
+// The directory must exist and be writable BEFORE any byte moves: a transfer
+// that fails on the final write has already spent the whole download.
 func ResolveTarget(root, dir, name string) (string, error) {
-	if dir == "" {
-		dir = root
-	}
-	if dir == "" {
+	if root == "" {
 		return "", skerr.Public(skerr.ErrValidation,
 			"No download folder is configured.")
 	}
 
-	absDir, err := filepath.Abs(dir)
+	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return "", skerr.Public(skerr.ErrValidation, "That download folder is not a valid path.")
+	}
+
+	// The requested directory is resolved RELATIVE TO THE ROOT, never against
+	// the process working directory. Otherwise ".." escapes without the caller
+	// even needing to know where the root is — measured: dir=".." wrote to
+	// the source tree.
+	absDir := absRoot
+	if dir != "" {
+		if filepath.IsAbs(dir) {
+			absDir = filepath.Clean(dir)
+		} else {
+			absDir = filepath.Clean(filepath.Join(absRoot, dir))
+		}
 	}
 
 	info, err := os.Stat(absDir)
@@ -138,6 +157,39 @@ func ResolveTarget(root, dir, name string) (string, error) {
 		return "", skerr.Public(skerr.ErrValidation,
 			"%s is not a folder.", absDir)
 	}
+
+	// CONFINEMENT, after symlink resolution and before anything is written.
+	//
+	// This is the check the filename hardening below never needed:
+	// filepath.Base cannot be fooled by a symlink because it never touches the
+	// filesystem, but a DIRECTORY can be — a link inside the root pointing out
+	// of it satisfies every lexical check and every os.Stat (it exists, it is
+	// a directory, it is writable) while resolving somewhere else entirely.
+	//
+	// Both sides are resolved: the root may legitimately be a symlink
+	// (~/Downloads often is), so comparing a resolved child against an
+	// unresolved root would reject a valid configuration.
+	realRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return "", skerr.Public(skerr.ErrValidation,
+			"The download folder %s cannot be read.", absRoot)
+	}
+	realDir, err := filepath.EvalSymlinks(absDir)
+	if err != nil {
+		return "", skerr.Public(skerr.ErrValidation,
+			"The download folder %s cannot be read.", absDir)
+	}
+	realRoot = filepath.Clean(realRoot)
+	realDir = filepath.Clean(realDir)
+	if realDir != realRoot && !strings.HasPrefix(realDir, realRoot+string(filepath.Separator)) {
+		// The message names neither path: it is the same refusal whether the
+		// target exists or not, so it cannot be used to probe the filesystem.
+		return "", skerr.Public(skerr.ErrValidation,
+			"That download location is not allowed.")
+	}
+	// Everything downstream uses the RESOLVED directory, so the containment
+	// just proved is the one the write actually happens in.
+	absDir = realDir
 
 	// Writability, checked up front rather than discovered at the end.
 	probe, err := os.CreateTemp(absDir, ".skein-write-probe-*")
@@ -159,14 +211,10 @@ func ResolveTarget(root, dir, name string) (string, error) {
 
 	target := uniquePath(filepath.Join(absDir, base))
 
-	// Belt and braces after symlink resolution: the directory may itself be a
-	// link, so compare resolved forms.
-	realDir, err := filepath.EvalSymlinks(absDir)
-	if err != nil {
-		realDir = absDir
-	}
-	if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(realDir)+string(filepath.Separator)) &&
-		filepath.Dir(target) != absDir {
+	// Belt and braces on the join itself. absDir is already the resolved,
+	// confined directory, so this catches only a filename that somehow
+	// reintroduced a separator.
+	if filepath.Dir(filepath.Clean(target)) != absDir {
 		return "", skerr.Public(skerr.ErrValidation,
 			"That download location is not allowed.")
 	}
