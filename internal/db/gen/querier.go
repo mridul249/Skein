@@ -150,6 +150,21 @@ type Querier interface {
 	//
 	MarkSessionUsed(ctx context.Context, id uuid.UUID) (Session, error)
 	NextAccountOrdinal(ctx context.Context, userID uuid.UUID) (int32, error)
+	// RecordReconciledHealth writes a COMPLETE reconcile run's finding for one
+	// file: the derived status and the moment the evidence was gathered.
+	//
+	// The status predicate is load-bearing twice over. It refuses to touch a row
+	// in an upload state ('pending'/'failed'), so a reconcile racing an upload
+	// cannot promote a half-written file to ready nor comment on a dead one. And
+	// it accepts only the three committed states as the NEW value, so a caller
+	// cannot write 'pending' back over a live file.
+	//
+	// Callers must not invoke this for a file with any indeterminate shard --
+	// reconciled_at asserts the evidence was gathered, and stamping it for an
+	// unchecked file is the failure mode persistence introduces. That gate lives
+	// in Service.Reconcile, per file rather than per run.
+	//
+	RecordReconciledHealth(ctx context.Context, arg RecordReconciledHealthParams) (int64, error)
 	RecordReservation(ctx context.Context, arg RecordReservationParams) error
 	RecordSecurityEvent(ctx context.Context, arg RecordSecurityEventParams) error
 	// ReleaseReservation gives bytes back. GREATEST(0, ...) is not decoration:

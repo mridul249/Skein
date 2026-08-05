@@ -53,18 +53,23 @@ func NewFiles(
 }
 
 type fileResponse struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	FolderID    *string         `json:"folder_id"`
-	SizeBytes   int64           `json:"size_bytes"`
-	IsStriped   bool            `json:"is_striped"`
-	IsEncrypted bool            `json:"is_encrypted"`
-	Status      string          `json:"status"`
-	SHA256      string          `json:"sha256,omitempty"`
-	CreatedAt   string          `json:"created_at"`
-	UpdatedAt   string          `json:"updated_at"`
-	DeletedAt   *string         `json:"deleted_at,omitempty"`
-	Shards      []shardResponse `json:"shards"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	FolderID    *string `json:"folder_id"`
+	SizeBytes   int64   `json:"size_bytes"`
+	IsStriped   bool    `json:"is_striped"`
+	IsEncrypted bool    `json:"is_encrypted"`
+	Status      string  `json:"status"`
+	SHA256      string  `json:"sha256,omitempty"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
+	DeletedAt   *string `json:"deleted_at,omitempty"`
+	// ReconciledAt is when this file's health was last established by a
+	// complete reconcile run. Null means never checked, which the UI must
+	// render differently from "checked and healthy" -- a badge that cannot say
+	// how old its evidence is invites trusting a stale one.
+	ReconciledAt *string         `json:"reconciled_at"`
+	Shards       []shardResponse `json:"shards"`
 }
 
 type shardResponse struct {
@@ -801,6 +806,10 @@ func toFileResponse(f files.File) fileResponse {
 	if f.DeletedAt != nil {
 		s := f.DeletedAt.UTC().Format(time.RFC3339)
 		out.DeletedAt = &s
+	}
+	if f.ReconciledAt != nil {
+		s := f.ReconciledAt.UTC().Format(time.RFC3339)
+		out.ReconciledAt = &s
 	}
 	if len(f.ContentSHA) > 0 {
 		out.SHA256 = hexString(f.ContentSHA)

@@ -363,7 +363,7 @@ const listFiles = `-- name: ListFiles :many
 SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at FROM files
  WHERE user_id = $1
    AND deleted_at IS NULL
-   AND status = 'ready'
+   AND status IN ('ready', 'partially_missing', 'corrupted')
    AND folder_id IS NOT DISTINCT FROM $3::uuid
    AND ($4::timestamptz IS NULL
         OR (created_at, id) < ($4::timestamptz,
@@ -597,6 +597,51 @@ func (q *Queries) MarkFileReady(ctx context.Context, arg MarkFileReadyParams) (F
 		&i.ReconciledAt,
 	)
 	return i, err
+}
+
+const recordReconciledHealth = `-- name: RecordReconciledHealth :execrows
+UPDATE files
+   SET status        = $3,
+       reconciled_at = $4,
+       updated_at    = now()
+ WHERE id = $1
+   AND user_id = $2
+   AND deleted_at IS NULL
+   AND status IN ('ready', 'partially_missing', 'corrupted')
+   AND $3 IN ('ready', 'partially_missing', 'corrupted')
+`
+
+type RecordReconciledHealthParams struct {
+	ID           uuid.UUID
+	UserID       uuid.UUID
+	Status       string
+	ReconciledAt pgtype.Timestamptz
+}
+
+// RecordReconciledHealth writes a COMPLETE reconcile run's finding for one
+// file: the derived status and the moment the evidence was gathered.
+//
+// The status predicate is load-bearing twice over. It refuses to touch a row
+// in an upload state ('pending'/'failed'), so a reconcile racing an upload
+// cannot promote a half-written file to ready nor comment on a dead one. And
+// it accepts only the three committed states as the NEW value, so a caller
+// cannot write 'pending' back over a live file.
+//
+// Callers must not invoke this for a file with any indeterminate shard --
+// reconciled_at asserts the evidence was gathered, and stamping it for an
+// unchecked file is the failure mode persistence introduces. That gate lives
+// in Service.Reconcile, per file rather than per run.
+func (q *Queries) RecordReconciledHealth(ctx context.Context, arg RecordReconciledHealthParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordReconciledHealth,
+		arg.ID,
+		arg.UserID,
+		arg.Status,
+		arg.ReconciledAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const renameFolder = `-- name: RenameFolder :one

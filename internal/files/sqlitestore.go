@@ -152,7 +152,7 @@ INSERT INTO files (id, user_id, folder_id, name, size_bytes, declared_mime,
                    is_striped, is_encrypted, status, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
 RETURNING id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
-          is_striped, is_encrypted, status, created_at, updated_at, deleted_at`,
+          is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at`,
 		n.ID.String(), n.UserID.String(), uuidPtrToString(n.FolderID), n.Name, n.SizeBytes,
 		n.DeclaredMime, boolInt(n.IsStriped), boolInt(n.IsEncrypted), now, now)
 	return s.scanFile(row, "insert file")
@@ -164,9 +164,30 @@ UPDATE files
    SET status = 'ready', size_bytes = ?3, content_sha256 = ?4, updated_at = ?5
  WHERE id = ?1 AND user_id = ?2 AND status = 'pending'
 RETURNING id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
-          is_striped, is_encrypted, status, created_at, updated_at, deleted_at`,
+          is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at`,
 		id.String(), userID.String(), size, sha, s.fmt(s.now()))
 	return s.scanFile(row, "mark file ready")
+}
+
+// RecordReconciledHealth writes a COMPLETE reconcile run's finding for one
+// file. Mirrors the Postgres query, including both halves of its status
+// predicate: an upload-state row is never touched, and only a committed status
+// may be written.
+func (s *SQLiteStore) RecordReconciledHealth(ctx context.Context, userID, id uuid.UUID, status string, at time.Time) error {
+	if !IsListable(status) {
+		return fmt.Errorf("refusing to record non-reconciled status %q", status)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE files
+   SET status = ?3, reconciled_at = ?4, updated_at = ?5
+ WHERE id = ?1
+   AND user_id = ?2
+   AND deleted_at IS NULL
+   AND status IN ('ready', 'partially_missing', 'corrupted')`,
+		id.String(), userID.String(), status, s.fmt(at), s.fmt(s.now())); err != nil {
+		return mapSQLiteWriteError(err, "record reconciled health")
+	}
+	return nil
 }
 
 func (s *SQLiteStore) MarkFileFailed(ctx context.Context, id uuid.UUID) error {
@@ -182,7 +203,7 @@ UPDATE files
 func (s *SQLiteStore) GetFile(ctx context.Context, userID, id uuid.UUID) (File, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
-       is_striped, is_encrypted, status, created_at, updated_at, deleted_at
+       is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at
   FROM files
  WHERE id = ? AND user_id = ? AND deleted_at IS NULL`, id.String(), userID.String())
 	return s.scanFile(row, "select file")
@@ -200,11 +221,11 @@ func (s *SQLiteStore) ListFiles(ctx context.Context, userID uuid.UUID, p ListPar
 	// #nosec G202 -- cursorSQL is selected from fixed SQL fragments, never user input.
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
-       is_striped, is_encrypted, status, created_at, updated_at, deleted_at
+       is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at
   FROM files
  WHERE user_id = ?
    AND deleted_at IS NULL
-   AND status = 'ready'
+   AND status IN ('ready', 'partially_missing', 'corrupted')
    AND ((? IS NULL AND folder_id IS NULL) OR folder_id = ?)
  `+cursorSQL+`
  ORDER BY created_at DESC, id DESC
@@ -223,7 +244,7 @@ SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
 func (s *SQLiteStore) ListTrashed(ctx context.Context, userID uuid.UUID, limit int32) ([]File, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
-       is_striped, is_encrypted, status, created_at, updated_at, deleted_at
+       is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at
   FROM files
  WHERE user_id = ? AND deleted_at IS NOT NULL
  ORDER BY deleted_at DESC
@@ -241,7 +262,7 @@ UPDATE files
    SET name = ?3, folder_id = ?4, updated_at = ?5
  WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL
 RETURNING id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
-          is_striped, is_encrypted, status, created_at, updated_at, deleted_at`,
+          is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at`,
 		id.String(), userID.String(), name, uuidPtrToString(folderID), s.fmt(s.now()))
 	return s.scanFile(row, "update file")
 }
@@ -350,7 +371,7 @@ func (s *SQLiteStore) scanFolders(rows *sql.Rows) ([]Folder, error) {
 func (s *SQLiteStore) scanFile(row interface{ Scan(...any) error }, what string) (File, error) {
 	var raw fileRow
 	if err := row.Scan(&raw.id, &raw.userID, &raw.folderID, &raw.name, &raw.sizeBytes, &raw.declaredMime,
-		&raw.contentSHA, &raw.isStriped, &raw.isEncrypted, &raw.status, &raw.createdAt, &raw.updatedAt, &raw.deletedAt); err != nil {
+		&raw.contentSHA, &raw.isStriped, &raw.isEncrypted, &raw.status, &raw.createdAt, &raw.updatedAt, &raw.deletedAt, &raw.reconciledAt); err != nil {
 		return File{}, mapSQLiteWriteError(err, what)
 	}
 	return raw.toFile()
@@ -443,7 +464,7 @@ func (r folderRow) toFolder() (Folder, error) {
 
 type fileRow struct {
 	id, userID, name, declaredMime, status, createdAt, updatedAt string
-	folderID, deletedAt                                          *string
+	folderID, deletedAt, reconciledAt                            *string
 	sizeBytes                                                    int64
 	contentSHA                                                   []byte
 	isStriped, isEncrypted                                       int64
@@ -474,11 +495,16 @@ func (r fileRow) toFile() (File, error) {
 	if err != nil {
 		return File{}, fmt.Errorf("parse file deleted_at: %w", err)
 	}
+	reconciledAt, err := parseSQLiteTimePtr(r.reconciledAt)
+	if err != nil {
+		return File{}, fmt.Errorf("parse file reconciled_at: %w", err)
+	}
 	return File{
 		ID: id, UserID: userID, FolderID: folderID, Name: r.name,
 		SizeBytes: r.sizeBytes, DeclaredMime: r.declaredMime, ContentSHA: r.contentSHA,
 		IsStriped: r.isStriped != 0, IsEncrypted: r.isEncrypted != 0, Status: r.status,
 		CreatedAt: createdAt, UpdatedAt: updatedAt, DeletedAt: deletedAt,
+		ReconciledAt: reconciledAt,
 	}, nil
 }
 
