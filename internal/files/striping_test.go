@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -35,6 +36,10 @@ type stripedFixture struct {
 // multiResolver routes each shard to the backend for its account.
 type multiResolver struct {
 	backends map[uuid.UUID]*local.Backend
+	// throttled drives return ErrRateLimited from every read, which is the
+	// shape an exhausted retry has (gdrive.Pool wraps the last error). Used to
+	// prove reconcile never flags what it could not check.
+	throttled map[uuid.UUID]bool
 }
 
 func (m multiResolver) For(_ context.Context, _ uuid.UUID, accountID *uuid.UUID) (storage.Backend, error) {
@@ -45,7 +50,18 @@ func (m multiResolver) For(_ context.Context, _ uuid.UUID, accountID *uuid.UUID)
 	if !ok {
 		return nil, errors.New("drive not connected")
 	}
+	if m.throttled != nil && m.throttled[*accountID] {
+		return throttlingBackend{Backend: b}, nil
+	}
 	return b, nil
+}
+
+// throttlingBackend reports rate limiting on every read, leaving writes alone
+// so a fixture can be built before throttling is switched on.
+type throttlingBackend struct{ storage.Backend }
+
+func (t throttlingBackend) Get(context.Context, storage.ObjectRef, *storage.ByteRange) (io.ReadCloser, int64, error) {
+	return nil, 0, fmt.Errorf("gave up after 5 attempts: %w", storage.ErrRateLimited)
 }
 
 // newStriped builds n drives of the given capacity each.
@@ -90,7 +106,7 @@ func newStriped(t *testing.T, drives int, capacityEach int64, shardSize int64, e
 	svc := files.NewService(
 		store,
 		files.NewStripingPlanner(planner, reserver),
-		multiResolver{backends},
+		multiResolver{backends: backends},
 		ring,
 		files.Config{Encrypt: encrypt, MaxUploadBytes: 1 << 40},
 		logger,

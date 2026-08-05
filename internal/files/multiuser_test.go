@@ -37,9 +37,11 @@ type sharedDriveFixture struct {
 	store    *files.MemoryStore
 	router   *router.MemoryStore
 	backends map[uuid.UUID]*local.Backend
-	accounts []uuid.UUID
-	user1    uuid.UUID
-	user2    uuid.UUID
+	// throttled drives return ErrRateLimited from every read.
+	throttled map[uuid.UUID]bool
+	accounts  []uuid.UUID
+	user1     uuid.UUID
+	user2     uuid.UUID
 }
 
 func newSharedDrive(t *testing.T) *sharedDriveFixture {
@@ -77,11 +79,12 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 	planner := router.NewPlanner(reserver, router.PolicyMostAvailable,
 		1<<20, func(n int64) int64 { return n })
 
+	throttled := map[uuid.UUID]bool{}
 	store := files.NewMemoryStore()
 	svc := files.NewService(
 		store,
 		files.NewStripingPlanner(planner, reserver),
-		multiResolver{backends},
+		multiResolver{backends: backends, throttled: throttled},
 		ring,
 		files.Config{Encrypt: false, MaxUploadBytes: 1 << 40},
 		logger,
@@ -90,8 +93,17 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 	return &sharedDriveFixture{
 		svc: svc, store: store, router: routerStore,
 		backends: backends, accounts: ids,
-		user1: uuid.New(), user2: uuid.New(),
+		throttled: throttled,
+		user1:     uuid.New(), user2: uuid.New(),
 	}
+}
+
+// throttle makes one drive report rate limiting on every read, exactly as an
+// exhausted retry does (pinned by gdrive/exhaustion_test.go: the pool wraps
+// the last error, so ErrRateLimited survives and ErrObjectNotFound never
+// appears). Used to prove reconcile flags nothing it could not check.
+func (f *sharedDriveFixture) throttle(accountID uuid.UUID) {
+	f.throttled[accountID] = true
 }
 
 func (f *sharedDriveFixture) uploadAs(t *testing.T, userID uuid.UUID, name string, data []byte) files.File {
