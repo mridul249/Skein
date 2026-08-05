@@ -20,9 +20,9 @@ const (
 	shard256 = 256 << 20
 )
 
-func newReserver(t *testing.T) (*Reserver, *MemoryStore) {
+func newReserver(t *testing.T) (*Reserver, conformanceStore) {
 	t.Helper()
-	store := NewMemoryStore()
+	store := newConformanceStore(t)
 	return NewReserver(store, slog.New(slog.NewTextHandler(io.Discard, nil))), store
 }
 
