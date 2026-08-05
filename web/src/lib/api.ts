@@ -187,9 +187,13 @@ function clearSession() {
  * The token still lives only in this module's scope (Rules.md §2.15); this
  * just sets it directly so a test can assert on what a request CARRIES.
  */
-export function __setAccessTokenForTests(token: string | null): void {
+export function __setAccessTokenForTests(token: string | null, user?: User | null): void {
   accessToken = token;
   expiresAt = token ? Date.now() + 60_000 : 0;
+  // Announce, exactly as setSession does. Without this a test cannot
+  // reproduce a real login, and anything listening for one — the capability
+  // probe's retry, for instance — is never woken.
+  if (user !== undefined) announce(user);
 }
 
 /** A single in-flight refresh, shared by every caller that needs one. */
