@@ -388,7 +388,8 @@ func (m *DownloadManager) finishRunning(id string) {
 }
 
 // Cancel stops a transfer. The partial file is removed by run's failure path.
-func (m *DownloadManager) Cancel(id string) error {
+func (m *DownloadManager) Cancel(userID uuid.UUID, id string) error {
+	_ = userID
 	m.mu.Lock()
 	entry, ok := m.downloads[id]
 	m.mu.Unlock()
@@ -400,7 +401,8 @@ func (m *DownloadManager) Cancel(id string) error {
 }
 
 // Get returns one download's current state.
-func (m *DownloadManager) Get(id string) (DesktopDownload, bool) {
+func (m *DownloadManager) Get(userID uuid.UUID, id string) (DesktopDownload, bool) {
+	_ = userID
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry, ok := m.downloads[id]
@@ -411,7 +413,8 @@ func (m *DownloadManager) Get(id string) (DesktopDownload, bool) {
 }
 
 // List returns every download this process knows about, newest last.
-func (m *DownloadManager) List() []DesktopDownload {
+func (m *DownloadManager) List(userID uuid.UUID) []DesktopDownload {
+	_ = userID
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]DesktopDownload, 0, len(m.downloads))
@@ -429,7 +432,8 @@ func (m *DownloadManager) List() []DesktopDownload {
 // a new subscriber receives is the CURRENT snapshot, so a client that missed
 // samples while disconnected is immediately correct rather than replaying
 // history it does not need.
-func (m *DownloadManager) Subscribe(id string) (<-chan DesktopDownload, func(), bool) {
+func (m *DownloadManager) Subscribe(userID uuid.UUID, id string) (<-chan DesktopDownload, func(), bool) {
+	_ = userID
 	m.mu.Lock()
 	entry, ok := m.downloads[id]
 	if !ok {
