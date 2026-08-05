@@ -44,7 +44,7 @@ I built Skein to solve these structural issues in a single static binary.
 Five free Google accounts give you 75 GB of total storage, but they operate as isolated 15 GB silos. You are forced to manually manage file splits, and a single large file-like a 30 GB raw video archive or virtual machine image-simply has nowhere to land.
 
 **Skein** pools your fragmented cloud drives into a unified storage array. It automatically stripes large files across multiple accounts when no single drive fits, encrypts everything client-side before it leaves your machine, and packages the entire runtime into a single Go binary with an embedded web interface.
-
+ 
 ```
 $ skein status
 ──────────────────────────────────────────────────────

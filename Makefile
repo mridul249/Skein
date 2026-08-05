@@ -8,16 +8,6 @@ WEB_DIST    := internal/web/dist
 
 export CGO_ENABLED := 0
 
-# LOADENV sources .env and then lets an explicitly-set shell environment win.
-#
-# Issue #20. The original order sourced .env last, so .env silently beat whatever
-# the caller had set — backwards from the convention every tool in this space
-# follows, and dangerous in both directions. An attempted override was ignored;
-# worse, an operator with a production .env in the working directory who ran a db
-# target aimed at a scratch database got production, with no override attempted
-# and no warning. Session 2 runs migrations against scratch databases repeatedly.
-#
-# src records which source won, so the target can say so out loud.
 LOADENV = pre_db="$$SKEIN_DATABASE_URL"; \
 	set -a; [ -f .env ] && . ./.env; set +a; \
 	if [ -n "$$pre_db" ]; then \
@@ -27,13 +17,6 @@ LOADENV = pre_db="$$SKEIN_DATABASE_URL"; \
 	fi
 
 # SHOWDB names the database a target is about to touch, host and name only.
-# Never the password: Rules.md §6, and this line ends up in terminal scrollback.
-# A destructive target that does not say what it is about to act on is the root
-# of #20, not the precedence order alone.
-#
-# The sed delimiter is | rather than a hash on purpose: make strips everything
-# from a literal hash onward, even inside a variable definition, which silently
-# truncated this expression mid-quote and produced an unrunnable recipe.
 SHOWDB = printf '\033[36m--> %s (from %s)\033[0m\n' \
 	"$$(printf '%s' "$$SKEIN_DATABASE_URL" | sed -E 's|^[a-z+]+://||; s|^[^@/]*@||; s|\?.*$$||')" \
 	"$$src"
@@ -61,25 +44,6 @@ build-go:
 
 ## desktop: build the native desktop binary via wails build (requires cgo;
 ## make web first, or ErrNoUI surfaces at launch instead of at build time)
-##
-## webkit2_41 is pinned here on purpose: Wails defaults to webkit2gtk-4.0,
-## which Ubuntu 26.04 does not ship in any form, so an untagged build fails
-## at cgo. wails.json lives in cmd/skein-desktop, not the repo root: the
-## Wails CLI always compiles "." in the directory holding wails.json (no
-## flag redirects it), and that directory must contain package main.
-## frontend:dir there points back at ../../web, and frontend:build/:install
-## are empty so Wails does not run a second, competing Vite build — `make
-## web` already produced internal/web/dist, which cmd/skein-desktop embeds
-## the same way cmd/skein does.
-##
-## DESKTOP_CLIENT_ID/_SECRET are the Google Desktop app OAuth credentials
-## baked into a distributed build. Both are optional: left unset, the binary
-## has no default and each user supplies SKEIN_GOOGLE_DESKTOP_CLIENT_ID and
-## _SECRET themselves. Google requires the secret at token exchange even for
-## this public client type, and it is not confidential — it ships inside the
-## binary, and PKCE is what secures the flow (docs/SECURITY.md). Set both or
-## neither; a half-set pair is rejected at connect time rather than silently
-## mixing credentials from two different clients.
 DESKTOP_CLIENT_ID ?=
 DESKTOP_CLIENT_SECRET ?=
 DESKTOP_LDFLAGS = -X main.version=$(VERSION) \
@@ -106,15 +70,6 @@ bench:
 	go test -run '^$$' -bench . -benchmem ./internal/uploads/... ./internal/shard/...
 
 ## lint: gofmt check, go vet and golangci-lint, in BOTH build configurations
-##
-## Both tag sets are linted because a single-configuration run structurally
-## cannot see the other's code. Measured 2026-08-05 (issue #44): the default
-## run reports `desktopDeps` (the type and the embedded field) as unused —
-## they are, in the server build, and are used in the desktop build — while
-## the desktop run cannot see them at all and instead finds a gosec issue in
-## desktopdownload.go that the default run never compiles. Neither run alone
-## is the answer, and //nolint on the difference would suppress a real signal
-## rather than resolve it.
 lint:
 	@gofmt -l . | grep -v '^web/' | grep -v '^third_party/' | (! grep .) || (echo "gofmt needed on the files above"; exit 1)
 	go vet $(PKG)
