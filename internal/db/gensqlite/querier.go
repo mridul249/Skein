@@ -9,6 +9,12 @@ import (
 )
 
 type Querier interface {
+	// BumpUserSessionEpoch invalidates every session the user currently has,
+	// including one a concurrent refresh is in the middle of creating. It does not
+	// enumerate rows, so there is no instant whose membership it could miss. See
+	// the Postgres original for the full reasoning (known issue #18).
+	//
+	BumpUserSessionEpoch(ctx context.Context, arg BumpUserSessionEpochParams) (int64, error)
 	// ClearAccountTokens wipes stored credentials without touching the row, so a
 	// disconnected account stops being usable while its id -- and therefore every
 	// file_shards.connected_account_id pointing at it -- survives. The Postgres
@@ -42,6 +48,11 @@ type Querier interface {
 	// damage reaches a keyword, so prose written in the house style (which uses
 	// em-dashes freely) breaks codegen at a distance. Use "--" for an em-dash and
 	// a plain apostrophe for a curly one. The Postgres files are unaffected.
+	// epoch is supplied by the caller and NEVER read from users here. On rotation
+	// it is copied from the parent row that was just claimed; on a fresh login it
+	// is the user's current epoch. Reading it in this statement would reintroduce
+	// known issue #18 one scope up -- see the Postgres original.
+	//
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	// CreateTokenFamily records a new login's family. Written before the session
 	// row, because sessions.family_id has a foreign key to it. Reversing the order

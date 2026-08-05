@@ -1,7 +1,16 @@
+-- CreateSession inserts one issued refresh token.
+--
+-- epoch is supplied by the caller and is NEVER read from users here. On
+-- rotation it is copied from the parent row that was just claimed; on a fresh
+-- login it is the user's current epoch. Reading it in this statement instead
+-- would reintroduce known issue #18 one scope up: a successor whose INSERT
+-- races a revocation would read the NEW epoch and be born valid, which is
+-- precisely the race the epoch exists to close.
+--
 -- name: CreateSession :one
 INSERT INTO sessions (id, user_id, family_id, prev_id, refresh_hash,
-                      user_agent, ip, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                      user_agent, ip, expires_at, epoch)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- GetSessionByRefreshHash looks a session up by the hash of the presented
@@ -32,6 +41,14 @@ SELECT * FROM sessions WHERE id = $1;
 -- revocation and the revocation cannot see the new row. Both commit and the bug
 -- is unchanged. A single statement is atomic; it is not serialisable.
 --
+-- The epoch predicate is the second half of the same idea, for user-level
+-- revocation (known issue #18). A session is valid only while the epoch it was
+-- born under still matches its user's current one, and this is the only place
+-- that is enforced. Reading users here, fresh, at claim time is what makes a
+-- session created before a password change unusable after it — including one
+-- inserted moments after the revocation by a refresh that was already in
+-- flight, since that successor inherited its parent's stale epoch.
+--
 -- name: MarkSessionUsed :one
 UPDATE sessions
    SET used_at = now()
@@ -43,6 +60,10 @@ UPDATE sessions
        SELECT 1 FROM token_families f
         WHERE f.id = sessions.family_id
           AND f.revoked_at IS NOT NULL)
+   AND EXISTS (
+       SELECT 1 FROM users u
+        WHERE u.id = sessions.user_id
+          AND u.session_epoch = sessions.epoch)
 RETURNING *;
 
 -- name: RevokeSessionFamily :execrows

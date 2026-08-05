@@ -9,11 +9,35 @@ import (
 	"context"
 )
 
+const bumpUserSessionEpoch = `-- name: BumpUserSessionEpoch :one
+UPDATE users
+   SET session_epoch = session_epoch + 1,
+       updated_at    = ?
+ WHERE id = ?
+RETURNING session_epoch
+`
+
+type BumpUserSessionEpochParams struct {
+	UpdatedAt string
+	ID        string
+}
+
+// BumpUserSessionEpoch invalidates every session the user currently has,
+// including one a concurrent refresh is in the middle of creating. It does not
+// enumerate rows, so there is no instant whose membership it could miss. See
+// the Postgres original for the full reasoning (known issue #18).
+func (q *Queries) BumpUserSessionEpoch(ctx context.Context, arg BumpUserSessionEpochParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, bumpUserSessionEpoch, arg.UpdatedAt, arg.ID)
+	var session_epoch int64
+	err := row.Scan(&session_epoch)
+	return session_epoch, err
+}
+
 const createUser = `-- name: CreateUser :one
 
 INSERT INTO users (id, email, password_hash, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?)
-RETURNING id, email, password_hash, email_verified_at, created_at, updated_at
+RETURNING id, email, password_hash, email_verified_at, created_at, updated_at, session_epoch
 `
 
 type CreateUserParams struct {
@@ -46,12 +70,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.EmailVerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SessionEpoch,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, email_verified_at, created_at, updated_at FROM users WHERE email = ?
+SELECT id, email, password_hash, email_verified_at, created_at, updated_at, session_epoch FROM users WHERE email = ?
 `
 
 // Case-insensitivity comes from the column's NOCASE collation, so this is a
@@ -66,12 +91,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.EmailVerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SessionEpoch,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, email_verified_at, created_at, updated_at FROM users WHERE id = ?
+SELECT id, email, password_hash, email_verified_at, created_at, updated_at, session_epoch FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -84,6 +110,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.EmailVerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SessionEpoch,
 	)
 	return i, err
 }

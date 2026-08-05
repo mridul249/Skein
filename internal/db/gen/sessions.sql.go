@@ -15,9 +15,9 @@ import (
 
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (id, user_id, family_id, prev_id, refresh_hash,
-                      user_agent, ip, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at
+                      user_agent, ip, expires_at, epoch)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at, epoch
 `
 
 type CreateSessionParams struct {
@@ -29,8 +29,17 @@ type CreateSessionParams struct {
 	UserAgent   string
 	Ip          *netip.Addr
 	ExpiresAt   pgtype.Timestamptz
+	Epoch       int64
 }
 
+// CreateSession inserts one issued refresh token.
+//
+// epoch is supplied by the caller and is NEVER read from users here. On
+// rotation it is copied from the parent row that was just claimed; on a fresh
+// login it is the user's current epoch. Reading it in this statement instead
+// would reintroduce known issue #18 one scope up: a successor whose INSERT
+// races a revocation would read the NEW epoch and be born valid, which is
+// precisely the race the epoch exists to close.
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
 	row := q.db.QueryRow(ctx, createSession,
 		arg.ID,
@@ -41,6 +50,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.UserAgent,
 		arg.Ip,
 		arg.ExpiresAt,
+		arg.Epoch,
 	)
 	var i Session
 	err := row.Scan(
@@ -55,6 +65,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.RevokedAt,
+		&i.Epoch,
 	)
 	return i, err
 }
@@ -91,7 +102,7 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at FROM sessions WHERE id = $1
+SELECT id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at, epoch FROM sessions WHERE id = $1
 `
 
 func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error) {
@@ -109,12 +120,13 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, er
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.RevokedAt,
+		&i.Epoch,
 	)
 	return i, err
 }
 
 const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
-SELECT id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at FROM sessions WHERE refresh_hash = $1
+SELECT id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at, epoch FROM sessions WHERE refresh_hash = $1
 `
 
 // GetSessionByRefreshHash looks a session up by the hash of the presented
@@ -136,6 +148,7 @@ func (q *Queries) GetSessionByRefreshHash(ctx context.Context, refreshHash []byt
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.RevokedAt,
+		&i.Epoch,
 	)
 	return i, err
 }
@@ -151,7 +164,11 @@ UPDATE sessions
        SELECT 1 FROM token_families f
         WHERE f.id = sessions.family_id
           AND f.revoked_at IS NOT NULL)
-RETURNING id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at
+   AND EXISTS (
+       SELECT 1 FROM users u
+        WHERE u.id = sessions.user_id
+          AND u.session_epoch = sessions.epoch)
+RETURNING id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at, epoch
 `
 
 // MarkSessionUsed claims a refresh token. The used_at IS NULL predicate makes
@@ -170,6 +187,14 @@ RETURNING id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created
 // snapshot at statement start, so the insert cannot see the concurrent
 // revocation and the revocation cannot see the new row. Both commit and the bug
 // is unchanged. A single statement is atomic; it is not serialisable.
+//
+// The epoch predicate is the second half of the same idea, for user-level
+// revocation (known issue #18). A session is valid only while the epoch it was
+// born under still matches its user's current one, and this is the only place
+// that is enforced. Reading users here, fresh, at claim time is what makes a
+// session created before a password change unusable after it — including one
+// inserted moments after the revocation by a refresh that was already in
+// flight, since that successor inherited its parent's stale epoch.
 func (q *Queries) MarkSessionUsed(ctx context.Context, id uuid.UUID) (Session, error) {
 	row := q.db.QueryRow(ctx, markSessionUsed, id)
 	var i Session
@@ -185,6 +210,7 @@ func (q *Queries) MarkSessionUsed(ctx context.Context, id uuid.UUID) (Session, e
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.RevokedAt,
+		&i.Epoch,
 	)
 	return i, err
 }

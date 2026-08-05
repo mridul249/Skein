@@ -30,7 +30,7 @@ func (q *Queries) AbandonExpiredUploads(ctx context.Context) ([]AbandonExpiredUp
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []AbandonExpiredUploadsRow{}
 	for rows.Next() {
 		var i AbandonExpiredUploadsRow
@@ -101,7 +101,7 @@ func (q *Queries) DeleteReservationsForUpload(ctx context.Context, uploadID uuid
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []DeleteReservationsForUploadRow{}
 	for rows.Next() {
 		var i DeleteReservationsForUploadRow
@@ -136,7 +136,7 @@ func (q *Queries) ExpiredReservations(ctx context.Context) ([]ExpiredReservation
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []ExpiredReservationsRow{}
 	for rows.Next() {
 		var i ExpiredReservationsRow
@@ -214,7 +214,7 @@ func (q *Queries) ListAccountCapacityForPlanning(ctx context.Context, userID uui
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []ListAccountCapacityForPlanningRow{}
 	for rows.Next() {
 		var i ListAccountCapacityForPlanningRow
