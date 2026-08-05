@@ -109,3 +109,64 @@ test('resync and cancel send the access token', async () => {
     );
   }
 });
+
+// THE PROBE MUST NOT MEMOIZE A PRE-AUTH FAILURE.
+//
+// Observed in the running app, from the owner's log:
+//
+//   16:47:24.419  GET /api/desktop/capabilities  status=401
+//   16:47:33.024  POST /api/auth/login           status=200
+//
+// DownloadsProvider mounts ABOVE the router, so the probe runs about nine
+// seconds before there is a session. It correctly sent no credential, the
+// server correctly answered 401, and the probe correctly failed closed — and
+// then CACHED that, so logging in never re-ran it. Every download afterwards
+// went down the browser path.
+//
+// 404 means "this binary has no such route" and is a fact about the BINARY,
+// which is why caching it is right. 401 means "you are not signed in", a fact
+// about the SESSION, which changes. The two must not be conflated.
+test('a 401 is not cached, because it is a fact about the session not the binary', async () => {
+  resetDesktopProbe();
+  __setAccessTokenForTests(null);
+
+  let calls = 0;
+  const impl = (async () => {
+    calls++;
+    // Unauthenticated first, exactly as the real server answers.
+    if (calls === 1) return jsonResponse({ error: 'unauthorized' }, 401);
+    return jsonResponse({ desktop_downloads: true, download_dir: '/d' });
+  }) as unknown as typeof fetch;
+
+  const before = await probeDesktop(impl);
+  assert.equal(before.desktopDownloads, false, 'an unauthenticated probe must fail closed');
+
+  // Now a session exists, as after login.
+  __setAccessTokenForTests(TOKEN);
+  const after = await probeDesktop(impl);
+
+  assert.equal(calls, 2, 'the probe did not re-run after the 401; it cached a session failure');
+  assert.equal(
+    after.desktopDownloads,
+    true,
+    'the desktop path stayed disabled after login because the pre-auth 401 was cached',
+  );
+});
+
+// A 404 still caches: that one really is a property of the binary.
+test('a 404 is cached, because the binary cannot grow the route while running', async () => {
+  resetDesktopProbe();
+  __setAccessTokenForTests(TOKEN);
+
+  let calls = 0;
+  const impl = (async () => {
+    calls++;
+    return jsonResponse({}, 404);
+  }) as unknown as typeof fetch;
+
+  await probeDesktop(impl);
+  await probeDesktop(impl);
+  await probeDesktop(impl);
+
+  assert.equal(calls, 1, 'the browser build re-probed; a 404 is stable and should be cached');
+});
