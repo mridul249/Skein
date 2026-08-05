@@ -88,7 +88,7 @@ DESKTOP_LDFLAGS = -X main.version=$(VERSION) \
 
 desktop: web
 	@mkdir -p bin
-	cd cmd/skein-desktop && $(GOBIN)/wails build -tags webkit2_41 -skipbindings \
+	cd cmd/skein-desktop && $(GOBIN)/wails build -tags webkit2_41,desktop -skipbindings \
 		-trimpath -ldflags '$(DESKTOP_LDFLAGS)' -clean -f
 	cp cmd/skein-desktop/build/bin/skein-desktop bin/skein-desktop
 	@ls -lh bin/skein-desktop

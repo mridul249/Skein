@@ -57,7 +57,12 @@ export function Files() {
   }, [selectedId]);
   const inputRef = useRef<HTMLInputElement>(null);
   const { start: startUploadJob } = useUploads();
-  const { start: startDownloadJob, fail: failDownloadJob } = useDownloads();
+  const {
+    start: startDownloadJob,
+    fail: failDownloadJob,
+    desktop,
+    startDesktop,
+  } = useDownloads();
 
   const { data: quota } = useQuery({ queryKey: ['quota'], queryFn: api.quota });
   const { data: drivesData } = useQuery({ queryKey: ['drives'], queryFn: api.listDrives });
@@ -184,6 +189,23 @@ export function Files() {
    * show that; the user dismisses it themselves.
    */
   async function download(file: FileItem) {
+    // The desktop build streams through Go: real bytes, real cancel, and an
+    // error that can surface mid-transfer. The browser hands the transfer to
+    // the browser, which tells JS nothing (#15).
+    //
+    // The probe fails closed, so `desktop` false covers "browser" and "could
+    // not tell" alike — both take the unchanged a.click() path below.
+    if (desktop) {
+      try {
+        await startDesktop(file.id);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not start that download.';
+        setBanner(message);
+        throw err;
+      }
+      return;
+    }
+
     const jobId = startDownloadJob(file.name);
     try {
       const url = await api.contentURL(file.id);
@@ -197,8 +219,6 @@ export function Files() {
     } catch (err) {
       // A damaged file never gets a capability URL now (the server checks the
       // shards are still there before signing), so this is where that lands.
-      // Before that check, the browser followed the link, the server refused,
-      // and WebKitGTK saved the ERROR RESPONSE to Downloads as the file.
       const damaged = err instanceof ApiError && err.isDamagedFile;
       const message = err instanceof ApiError ? err.message : 'Could not download that file.';
       failDownloadJob(jobId, damaged ? 'This file is damaged and cannot be downloaded.' : message);

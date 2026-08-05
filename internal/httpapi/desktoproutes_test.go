@@ -35,12 +35,25 @@ func TestServerBinaryHasNoDesktopRoutes(t *testing.T) {
 	}
 	body := string(raw)
 
-	// Route patterns and handler symbols that must not be present.
+	// GO SYMBOLS, not route strings.
+	//
+	// The route paths themselves appear in the binary regardless, because the
+	// server embeds the frontend bundle and the client's capability probe
+	// contains the URL it probes — a string the browser build is SUPPOSED to
+	// have, since probing and getting a 404 is exactly how it detects it is
+	// not the desktop shell. Asserting on the path therefore fails for a
+	// reason that is not a leak (observed 2026-08-05).
+	//
+	// What must be absent is the Go code that would SERVE the route. These
+	// symbols come from function and type names the linker keeps for
+	// reflection and panic traces, so their absence is real evidence.
 	forbidden := []string{
-		"/api/desktop/downloads",
-		"/api/desktop/capabilities",
 		"DesktopDownloads",
 		"NewDownloadManager",
+		"desktopdownload.go",
+		// NOT "mountDesktop": both builds have that symbol by design — the
+		// server build's is the no-op stub in desktoproutes_server.go, so its
+		// presence proves nothing either way.
 	}
 	for _, want := range forbidden {
 		if strings.Contains(body, want) {
@@ -72,9 +85,14 @@ func TestDesktopBuildContainsTheDownloadRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read binary: %v", err)
 	}
-	if !strings.Contains(string(raw), "/api/desktop/downloads") {
-		t.Error("the desktop build does not contain the download route; " +
-			"the server-side assertion would pass vacuously")
+	// The mirror of the assertion above, so that one cannot pass vacuously
+	// through a rename: the desktop build must contain the handler symbols the
+	// server build must not.
+	for _, want := range []string{"DesktopDownloads", "NewDownloadManager"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("the desktop build does not contain %q; the server-side "+
+				"assertion would pass vacuously", want)
+		}
 	}
 }
 

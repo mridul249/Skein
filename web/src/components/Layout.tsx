@@ -7,6 +7,8 @@ import { api } from '../lib/api';
 import { QuotaRail } from './QuotaBar';
 import { UploadList } from './UploadList';
 import { DownloadList } from './DownloadList';
+import { DesktopDownloadDrawer } from './DesktopDownloadDrawer';
+import { useDownloads } from '../lib/downloads-context';
 import { useSession } from '../lib/session';
 import { Wordmark } from './Wordmark';
 
@@ -139,10 +141,35 @@ export function Layout() {
             user cannot cancel.
           */}
           <UploadList />
-          <DownloadList />
+          <Downloads />
           <Outlet context={{ quota }} />
         </div>
       </main>
     </div>
   );
+}
+
+/**
+ * One of two download UIs, never both.
+ *
+ * The desktop build streams through Go and can show real bytes; the browser
+ * hands the transfer to the browser and can show nothing (#15). Rendering the
+ * honest one for the shell in use is the whole point — a progress bar in the
+ * browser would be the hoax loading this project keeps removing.
+ */
+function Downloads() {
+  const { desktop, desktopJobs, cancelDesktop, dismissDesktop, clearDesktopSettled } =
+    useDownloads();
+
+  if (desktop) {
+    return (
+      <DesktopDownloadDrawer
+        jobs={desktopJobs}
+        onCancel={cancelDesktop}
+        onDismiss={dismissDesktop}
+        onClear={clearDesktopSettled}
+      />
+    );
+  }
+  return <DownloadList />;
 }

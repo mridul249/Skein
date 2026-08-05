@@ -373,3 +373,46 @@ func TestDesktopDownloadPeakRSSIsFlat(t *testing.T) {
 	t.Logf("heap growth %d bytes for a %d byte file across %d shards",
 		growth, size, len(file.Shards))
 }
+
+// A CANCELLED DOWNLOAD MUST REPORT "cancelled", NOT "failed".
+//
+// Found live 2026-08-05, not by test: cancelling a real Drive download
+// reported `state: failed` with "check your connection". The provider's HTTP
+// stack replaces a cancelled request's error with its own, so
+// errors.Is(err, context.Canceled) is FALSE by the time the copy returns — the
+// classification has to ask the download's context instead.
+//
+// This drives it through the real manager against a real (local) backend and
+// asserts the user-facing outcome, which is what was wrong.
+func TestCancelReportsCancelledNotFailed(t *testing.T) {
+	f := newSharedDrive(t)
+	mgr := files.NewDownloadManager(f.svc)
+	ctx := context.Background()
+
+	data := make([]byte, 8<<20)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	file := f.uploadAs(t, f.user1, "cancelme.bin", data)
+
+	dir := t.TempDir()
+	dl, err := mgr.Start(ctx, f.user1, file.ID, dir)
+	if err != nil {
+		t.Fatalf("Start() = %v", err)
+	}
+	if cerr := mgr.Cancel(dl.ID); cerr != nil {
+		t.Fatalf("Cancel() = %v", cerr)
+	}
+
+	final := waitForState(t, mgr, dl.ID, files.DownloadCancelled)
+
+	if final.State != files.DownloadCancelled {
+		t.Errorf("state = %q, want cancelled", final.State)
+	}
+	// The message the user sees is the whole point of this test.
+	if final.Err != "" {
+		t.Errorf("a cancelled download reported an error message: %q. "+
+			"Cancelling is not a failure and must not tell the user to check "+
+			"their connection", final.Err)
+	}
+}
