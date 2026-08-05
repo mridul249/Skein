@@ -111,7 +111,7 @@ func (b *ctxBackend) Kind() storage.Kind                               { return 
 // in place.
 type abortFixture struct {
 	svc      *files.Service
-	store    *files.MemoryStore
+	store    files.ConformanceStore
 	router   *router.MemoryStore
 	ctxStore *ctxStore
 	backends map[uuid.UUID]*ctxBackend
@@ -167,7 +167,7 @@ func newAbortFixture(t *testing.T, drives int, capacityEach, shardSize int64) *a
 	reserver := router.NewReserver(wrapped, logger)
 	planner := router.NewPlanner(reserver, router.PolicyRoundRobin, shardSize, skcrypto.StreamOverhead)
 
-	store := files.NewMemoryStore()
+	store := files.NewConformanceStore(t)
 	svc := files.NewService(
 		store,
 		files.NewStripingPlanner(planner, reserver),

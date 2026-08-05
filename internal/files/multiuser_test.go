@@ -34,7 +34,7 @@ import (
 // is what makes it a test of isolation rather than of two unrelated setups.
 type sharedDriveFixture struct {
 	svc      *files.Service
-	store    *files.MemoryStore
+	store    files.ConformanceStore
 	router   *router.MemoryStore
 	backends map[uuid.UUID]*local.Backend
 	// throttled drives return ErrRateLimited from every read.
@@ -80,7 +80,7 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 		1<<20, func(n int64) int64 { return n })
 
 	throttled := map[uuid.UUID]bool{}
-	store := files.NewMemoryStore()
+	store := files.NewConformanceStore(t)
 	svc := files.NewService(
 		store,
 		files.NewStripingPlanner(planner, reserver),
