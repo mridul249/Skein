@@ -47,8 +47,21 @@ const (
 	// non-identifying (so the folder name in a user's Drive does not expose
 	// their Skein user id).
 	InfoAppFolder = "skein-app-folder-v1"
-	infoKeyID     = "skein-key-id-v1"
-	keyIDLength   = 4
+	// InfoManifest namespaces the key that encrypts sidecar manifests — the
+	// per-file records written beside the shards so the shard-to-file mapping
+	// survives losing the database.
+	//
+	// Separate from InfoFile deliberately, and the separation is the point of
+	// having info strings at all: a manifest describes where a file's bytes
+	// are and is written to every account holding a shard, while InfoFile
+	// protects the bytes themselves. Deriving both from one key would mean a
+	// weakness in the manifest format reached file content.
+	//
+	// The salt is the file id, matching every other per-file derivation here,
+	// so one manifest key cannot decrypt another file's manifest.
+	InfoManifest = "skein-manifest-v1"
+	infoKeyID    = "skein-key-id-v1"
+	keyIDLength  = 4
 )
 
 // ErrKeyLength reports a master key that is not 32 bytes.

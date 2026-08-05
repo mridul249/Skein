@@ -132,7 +132,48 @@ func (s *Service) Upload(ctx context.Context, req UploadRequest, r io.Reader) (F
 		slog.Int("shards", len(writtenShards)),
 		slog.Bool("encrypted", s.encrypt))
 
+	// THE ONE MANIFEST CALL SITE. Everything about writing sidecar manifests
+	// lives behind writeManifest; this is the only place it is invoked, so the
+	// reservation rewrite that replaces this path moves a call rather than
+	// untangling manifest logic from reservation logic.
+	//
+	// Deliberately AFTER the commit and deliberately unable to fail it:
+	// writeManifest returns nothing. The manifest is a redundancy layer, and
+	// letting a redundancy layer break the primary path inverts the point of
+	// having one. A file with no manifest is a file protected by the database
+	// alone — which is where every file was before this existed.
+	//
+	// context.WithoutCancel: the upload is committed and the response is about
+	// to be written, so a client that disconnects now must not strand the file
+	// without its manifest. Same reasoning as the cleanup paths above.
+	s.writeManifest(context.WithoutCancel(ctx), ready, s.folderPathFor(ctx, req.UserID, ready.FolderID))
 	return ready, nil
+}
+
+// folderPathFor resolves a file's folder chain, outermost first, for its
+// manifest. Best-effort: a manifest that cannot name the folder tree is still
+// worth far more than no manifest, so a failure here yields an empty path
+// rather than skipping the write.
+func (s *Service) folderPathFor(ctx context.Context, userID uuid.UUID, folderID *uuid.UUID) []string {
+	if folderID == nil {
+		return nil
+	}
+	var path []string
+	seen := map[uuid.UUID]bool{}
+	for id := folderID; id != nil; {
+		if seen[*id] {
+			break // a cycle cannot happen through the API, but do not hang on one
+		}
+		seen[*id] = true
+
+		folder, err := s.store.GetFolder(ctx, userID, *id)
+		if err != nil {
+			return nil
+		}
+		path = append([]string{folder.Name}, path...)
+		id = folder.ParentID
+	}
+	return path
 }
 
 // committedShard pairs a stored manifest row with the reference needed to
