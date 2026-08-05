@@ -88,7 +88,7 @@ func newRoundRobinStriped(t *testing.T, drives int, capacityEach, shardSize int6
 	reserver := router.NewReserver(routerStore, logger)
 	planner := router.NewPlanner(reserver, router.PolicyRoundRobin, shardSize, skcrypto.StreamOverhead)
 
-	store := files.NewMemoryStore()
+	store := files.NewConformanceStore(t)
 	svc := files.NewService(
 		store,
 		files.NewStripingPlanner(planner, reserver),

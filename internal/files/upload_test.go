@@ -22,7 +22,7 @@ import (
 
 type fixture struct {
 	svc     *files.Service
-	store   *files.MemoryStore
+	store   files.ConformanceStore
 	backend *local.Backend
 	userID  uuid.UUID
 }
@@ -54,10 +54,9 @@ func newFixtureForBench(b *testing.B, backend storage.Backend) *fixture {
 }
 
 // tb is the subset of testing.TB the fixture needs.
-type tb interface {
-	Helper()
-	Fatalf(format string, args ...any)
-}
+// tb was a two-method stand-in; it is testing.TB now because the conformance
+// harness needs TempDir and Cleanup to build a scratch SQLite database.
+type tb = testing.TB
 
 func buildFixture(t tb, backend storage.Backend) *fixture {
 	t.Helper()
@@ -71,7 +70,7 @@ func buildFixture(t tb, backend storage.Backend) *fixture {
 		t.Fatalf("NewKeyring() = %v", err)
 	}
 
-	store := files.NewMemoryStore()
+	store := files.NewConformanceStore(t)
 	svc := files.NewService(
 		store,
 		files.NewSingleShardPlanner(nil),
@@ -234,7 +233,7 @@ func TestUploadRefusesWhenTheDriveIsUnavailable(t *testing.T) {
 		t.Fatalf("NewKeyring() = %v", err)
 	}
 
-	store := files.NewMemoryStore()
+	store := files.NewConformanceStore(t)
 	svc := files.NewService(store, files.NewSingleShardPlanner(nil), failingResolver{}, ring,
 		files.Config{MaxUploadBytes: 1 << 40},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))

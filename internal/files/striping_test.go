@@ -26,7 +26,7 @@ import (
 // Phase 5 exit criteria are exercised end to end with no network.
 type stripedFixture struct {
 	svc      *files.Service
-	store    *files.MemoryStore
+	store    files.ConformanceStore
 	router   *router.MemoryStore
 	backends map[uuid.UUID]*local.Backend
 	accounts []uuid.UUID
@@ -102,7 +102,7 @@ func newStriped(t *testing.T, drives int, capacityEach int64, shardSize int64, e
 	}
 	planner := router.NewPlanner(reserver, router.PolicyMostAvailable, shardSize, storedSize)
 
-	store := files.NewMemoryStore()
+	store := files.NewConformanceStore(t)
 	svc := files.NewService(
 		store,
 		files.NewStripingPlanner(planner, reserver),
