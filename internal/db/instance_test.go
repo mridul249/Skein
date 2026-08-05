@@ -36,8 +36,12 @@ func TestVerifyMasterKeyIDRecordsOnFirstBoot(t *testing.T) {
 	store := migratedSQLite(t)
 	ctx := context.Background()
 
-	if err := store.VerifyMasterKeyID(ctx, "723bcc0a"); err != nil {
+	adopted, err := store.VerifyMasterKeyID(ctx, "723bcc0a")
+	if err != nil {
 		t.Fatalf("first boot refused: %v", err)
+	}
+	if !adopted {
+		t.Error("first boot did not report adopting the key, so startup cannot warn about it")
 	}
 
 	got, ok, err := store.MasterKeyID(ctx)
@@ -60,8 +64,12 @@ func TestVerifyMasterKeyIDAcceptsTheSameKey(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		if err := store.VerifyMasterKeyID(ctx, "723bcc0a"); err != nil {
+		adopted, err := store.VerifyMasterKeyID(ctx, "723bcc0a")
+		if err != nil {
 			t.Fatalf("boot %d refused the correct key: %v", i+1, err)
+		}
+		if adopted != (i == 0) {
+			t.Errorf("boot %d reported adopted=%v; only the FIRST boot adopts", i+1, adopted)
 		}
 	}
 
@@ -82,11 +90,11 @@ func TestVerifyMasterKeyIDRefusesADifferentKey(t *testing.T) {
 	store := migratedSQLite(t)
 	ctx := context.Background()
 
-	if err := store.VerifyMasterKeyID(ctx, "723bcc0a"); err != nil {
+	if _, err := store.VerifyMasterKeyID(ctx, "723bcc0a"); err != nil {
 		t.Fatalf("first boot: %v", err)
 	}
 
-	err := store.VerifyMasterKeyID(ctx, "6731d8dc")
+	_, err := store.VerifyMasterKeyID(ctx, "6731d8dc")
 	if err == nil {
 		t.Fatal("a DIFFERENT master key was accepted; recovery would proceed and " +
 			"fail later as a decryption error, which reads as data corruption")
@@ -123,12 +131,12 @@ func TestAMismatchDoesNotOverwriteTheStoredKeyID(t *testing.T) {
 	store := migratedSQLite(t)
 	ctx := context.Background()
 
-	if err := store.VerifyMasterKeyID(ctx, "723bcc0a"); err != nil {
+	if _, err := store.VerifyMasterKeyID(ctx, "723bcc0a"); err != nil {
 		t.Fatalf("first boot: %v", err)
 	}
-	_ = store.VerifyMasterKeyID(ctx, "6731d8dc")
+	_, _ = store.VerifyMasterKeyID(ctx, "6731d8dc")
 
-	if err := store.VerifyMasterKeyID(ctx, "6731d8dc"); err == nil {
+	if _, err := store.VerifyMasterKeyID(ctx, "6731d8dc"); err == nil {
 		t.Fatal("the wrong key was accepted on a second attempt: the mismatch " +
 			"overwrote the stored id, so the check is a one-time warning")
 	}

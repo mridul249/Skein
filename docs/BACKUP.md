@@ -85,8 +85,18 @@ a rejected start does not poison the instance.
 > the logged `key_id` against the `Key ID:` line in your key file is still a
 > reasonable sanity check, and it is the only check available for a database
 > created before this landed - such an instance has no recorded key ID, so the
-> first start under any key records that key's ID rather than refusing. If you
-> are recovering an older instance, compare the two strings yourself once, and
+> first start under any key records that key's ID rather than refusing.
+>
+> **Skein says so when it happens**, rather than letting you find out later:
+>
+> ```
+> level=WARN msg="no master key id was recorded; adopting the supplied key as
+> this instance's" key_id=3fabd5e4 note="expected on a first run; on a RESTORED
+> database, check this matches the Key ID in your exported key file"
+> ```
+>
+> On a fresh install that line is noise you see once. **On a restore it is the
+> one line that matters**: compare the two strings yourself at that moment, and
 > the automatic check takes over from the next start onwards.
 
 **A wrong key does not corrupt anything, and Skein says so rather than
