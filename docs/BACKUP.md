@@ -8,13 +8,27 @@ file, on which drive, in what order. Either alone is useless: the key
 without the database is a key with nothing to open; the database without
 the key is a map to files you cannot read.
 
-**The manifest architecture that would make a drive self-describing - and
-would let you rebuild the database from the drives alone - is planned but
-not built yet** (Phase 7 Task 5.1; see [ARCHITECTURE.md](ARCHITECTURE.md)).
-Until it lands, the database is a genuine single point of failure for the
-shard-to-file mapping, even though it is not one for the file contents
-themselves (those are encrypted end to end regardless of what happens to
-the database).
+**Sidecar manifests now make each drive self-describing.** Every upload
+writes an encrypted `.skein_manifest_<file_id>.enc` beside its shards - one
+copy on **every** account holding a shard of that file, not one copy total,
+so any single surviving drive is enough to find the rest. Each manifest
+records the file's name, size, folder path, and every shard's index, offset,
+sizes, digest and provider object id: everything needed to rebuild the
+database rows.
+
+> **They protect against losing the DATABASE. They do nothing about losing
+> the KEY.** A manifest is encrypted under a key derived from
+> `SKEIN_MASTER_KEY`, exactly as file contents are. Lose that key and the
+> manifests become as unreadable as the shards they describe - **and this is
+> precisely why the exported key file must not live beside the database or
+> the backups.** Redundancy against one failure is not redundancy against the
+> other, and storing both halves together converts two independent risks into
+> one.
+
+Rebuilding the database from those manifests is the next piece of work and
+is not built yet, so **restoring from `make backup` remains the procedure
+today**. What has changed is that the information needed to rebuild is now
+durably on the drives rather than existing only in the database.
 
 ## What to back up
 
@@ -112,8 +126,8 @@ Be clear-eyed about the boundaries:
 
 | Lost | Recoverable? |
 |---|---|
-| The database, key file survives | **No, not yet.** The shard-to-file mapping lives only in the database until sidecar manifests ship. Restore from `make backup`. Note a restored database carries its recorded key ID with it, so the startup check keeps working across a restore. |
-| The key, database survives | **No. Permanently.** Every shard is unreadable. There is no vendor, no support path and no backdoor - this is the design working as intended. |
+| The database, key file survives | **Not automatically yet, but the information survives.** Sidecar manifests on the drives now carry the full shard-to-file mapping; the command that rebuilds the database from them is not built yet, so restore from `make backup` today. Note a restored database carries its recorded key ID with it, so the startup check keeps working across a restore. |
+| The key, database survives | **No. Permanently.** Every shard is unreadable, **and so is every sidecar manifest** - they are encrypted under a key derived from the same master key, so they add no recovery path here. There is no vendor, no support path and no backdoor - this is the design working as intended. |
 | Both | No. |
 | One drive of several | Yes, if the file was striped across others *and* you have the key and database - but any file with a shard on the lost drive is incomplete. See `POST /api/system/reconcile`. |
 
