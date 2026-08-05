@@ -111,7 +111,10 @@ func NewDownloadManager(svc *Service) *DownloadManager {
 // symlink resolution, and dir itself must exist and be writable BEFORE any
 // byte moves — a transfer that fails on the final write has already spent the
 // whole download.
-func ResolveTarget(dir, name string) (string, error) {
+func ResolveTarget(root, dir, name string) (string, error) {
+	if dir == "" {
+		dir = root
+	}
 	if dir == "" {
 		return "", skerr.Public(skerr.ErrValidation,
 			"No download folder is configured.")
@@ -191,7 +194,7 @@ func uniquePath(path string) string {
 //
 // The file is checked for reachable shards BEFORE anything is created on disk,
 // so a damaged file fails as an error rather than as a truncated file.
-func (m *DownloadManager) Start(ctx context.Context, userID, fileID uuid.UUID, dir string) (DesktopDownload, error) {
+func (m *DownloadManager) Start(ctx context.Context, userID, fileID uuid.UUID, root, dir string) (DesktopDownload, error) {
 	file, err := m.svc.Get(ctx, userID, fileID)
 	if err != nil {
 		return DesktopDownload{}, err
@@ -202,7 +205,7 @@ func (m *DownloadManager) Start(ctx context.Context, userID, fileID uuid.UUID, d
 		return DesktopDownload{}, cerr
 	}
 
-	target, err := ResolveTarget(dir, file.Name)
+	target, err := ResolveTarget(root, dir, file.Name)
 	if err != nil {
 		return DesktopDownload{}, err
 	}
