@@ -161,15 +161,26 @@ function Downloads() {
   const { desktop, desktopJobs, cancelDesktop, dismissDesktop, clearDesktopSettled } =
     useDownloads();
 
+  // data-download-ui names which of the two is mounted. Both render nothing
+  // when there are no jobs and both carry aria-label="Downloads", so without
+  // this the swap is unobservable from the DOM — which is why the drawer could
+  // ship unreachable while every test passed. Asserted by the browser test
+  // "the desktop build renders the desktop drawer, not the browser list".
   if (desktop) {
     return (
-      <DesktopDownloadDrawer
-        jobs={desktopJobs}
-        onCancel={cancelDesktop}
-        onDismiss={dismissDesktop}
-        onClear={clearDesktopSettled}
-      />
+      <div data-download-ui="desktop">
+        <DesktopDownloadDrawer
+          jobs={desktopJobs}
+          onCancel={cancelDesktop}
+          onDismiss={dismissDesktop}
+          onClear={clearDesktopSettled}
+        />
+      </div>
     );
   }
-  return <DownloadList />;
+  return (
+    <div data-download-ui="browser">
+      <DownloadList />
+    </div>
+  );
 }

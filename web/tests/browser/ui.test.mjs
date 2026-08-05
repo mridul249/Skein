@@ -1001,3 +1001,55 @@ test('download rows align their status and action columns', async () => {
     assert.equal(rights.size, 1, `action column is ragged across rows: ${[...rights]}`);
   });
 });
+
+// THE CHECK THAT WOULD HAVE CAUGHT THE DEAD DRAWER.
+//
+// Every piece of the Go-side download path was built, unit-tested and verified
+// live through a headless harness, and the feature was still invisible in the
+// running app: the capability probe went out with no Authorization header, the
+// server answered 401, and the probe correctly read that as "not the desktop
+// build". Both binary-level route tests passed the whole time, because the
+// routes really were in the binary — nothing asserted that the UI reached them.
+//
+// So this drives the real chain: fetch -> probe -> `desktop` -> which component
+// Layout mounts. The fixture's stub returns 401 for an unauthenticated probe,
+// exactly as the real server does, so an unauthenticated client fails this.
+test('the desktop build renders the desktop drawer, not the browser list', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/') + '&desktop=1');
+
+    const which = await p.eval(
+      `(async () => {
+        // The probe is async; wait for it to settle rather than sampling once.
+        for (let i = 0; i < 50; i++) {
+          const el = document.querySelector('[data-download-ui]');
+          if (el && el.dataset.downloadUi === 'desktop') return 'desktop';
+          await new Promise((r) => setTimeout(r, 40));
+        }
+        const el = document.querySelector('[data-download-ui]');
+        return el ? el.dataset.downloadUi : 'absent';
+      })()`,
+    );
+
+    assert.equal(
+      which,
+      'desktop',
+      'the desktop build is still rendering the browser download list; the ' +
+        'capability probe never reported the desktop path',
+    );
+  });
+});
+
+// The other direction, so the test above cannot pass by the swap being stuck on.
+test('without the capability the browser list is what renders', async () => {
+  await on({}, async (p) => {
+    await p.goto(url('/'));
+
+    const which = await p.eval(`(() => {
+      const el = document.querySelector('[data-download-ui]');
+      return el ? el.dataset.downloadUi : 'absent';
+    })()`);
+
+    assert.equal(which, 'browser', 'the browser build rendered the desktop drawer');
+  });
+});
