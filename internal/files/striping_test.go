@@ -40,6 +40,10 @@ type multiResolver struct {
 	// shape an exhausted retry has (gdrive.Pool wraps the last error). Used to
 	// prove reconcile never flags what it could not check.
 	throttled map[uuid.UUID]bool
+	// refuseManifests, when set and true, makes every backend reject a
+	// manifest write while leaving shard writes untouched. A pointer so the
+	// fixture can flip it after the resolver has been handed to the service.
+	refuseManifests *bool
 }
 
 func (m multiResolver) For(_ context.Context, _ uuid.UUID, accountID *uuid.UUID) (storage.Backend, error) {
@@ -53,7 +57,21 @@ func (m multiResolver) For(_ context.Context, _ uuid.UUID, accountID *uuid.UUID)
 	if m.throttled != nil && m.throttled[*accountID] {
 		return throttlingBackend{Backend: b}, nil
 	}
+	if m.refuseManifests != nil && *m.refuseManifests {
+		return manifestRefusingBackend{Backend: b}, nil
+	}
 	return b, nil
+}
+
+// manifestRefusingBackend rejects manifest writes and passes everything else
+// through, so an upload's shards succeed and only its manifest fails.
+type manifestRefusingBackend struct{ storage.Backend }
+
+func (m manifestRefusingBackend) Put(ctx context.Context, r io.Reader, spec storage.ObjectSpec) (storage.ObjectRef, error) {
+	if files.IsManifestName(spec.Name) {
+		return storage.ObjectRef{}, errors.New("injected manifest write failure")
+	}
+	return m.Backend.Put(ctx, r, spec)
 }
 
 // throttlingBackend reports rate limiting on every read, leaving writes alone
