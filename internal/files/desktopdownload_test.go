@@ -16,16 +16,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/mridul249/Skein/internal/files"
 	"github.com/mridul249/Skein/internal/skerr"
 	"github.com/mridul249/Skein/internal/storage"
 )
 
-func waitForState(t *testing.T, mgr *files.DownloadManager, id string, want files.DownloadState) files.DesktopDownload {
+func waitForState(t *testing.T, mgr *files.DownloadManager, owner uuid.UUID, id string, want files.DownloadState) files.DesktopDownload {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		dl, ok := mgr.Get(id)
+		dl, ok := mgr.Get(owner, id)
 		if ok && dl.State == want {
 			return dl
 		}
@@ -34,7 +36,7 @@ func waitForState(t *testing.T, mgr *files.DownloadManager, id string, want file
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	dl, _ := mgr.Get(id)
+	dl, _ := mgr.Get(owner, id)
 	t.Fatalf("timed out waiting for %q; state is %q", want, dl.State)
 	return files.DesktopDownload{}
 }
@@ -57,7 +59,7 @@ func TestDesktopDownloadWritesTheFile(t *testing.T) {
 		t.Fatalf("Start() = %v", err)
 	}
 
-	done := waitForState(t, mgr, dl.ID, files.DownloadComplete)
+	done := waitForState(t, mgr, f.user1, dl.ID, files.DownloadComplete)
 
 	got, err := os.ReadFile(done.Path)
 	if err != nil {
@@ -116,7 +118,7 @@ func TestDesktopDownloadVerifiesShardDigests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() = %v", err)
 	}
-	failed := waitForState(t, mgr, dl.ID, files.DownloadFailed)
+	failed := waitForState(t, mgr, f.user1, dl.ID, files.DownloadFailed)
 
 	if failed.Err == "" {
 		t.Error("a corrupted download reported no error")
@@ -148,10 +150,10 @@ func TestDesktopDownloadCancelRemovesThePartialFile(t *testing.T) {
 		t.Fatalf("Start() = %v", err)
 	}
 
-	if cerr := mgr.Cancel(dl.ID); cerr != nil {
+	if cerr := mgr.Cancel(f.user1, dl.ID); cerr != nil {
 		t.Fatalf("Cancel() = %v", cerr)
 	}
-	cancelled := waitForState(t, mgr, dl.ID, files.DownloadCancelled)
+	cancelled := waitForState(t, mgr, f.user1, dl.ID, files.DownloadCancelled)
 
 	// The partial file is gone: a truncated file under the real name looks
 	// like a download that worked.
@@ -339,7 +341,7 @@ func TestDesktopDownloadPeakRSSIsFlat(t *testing.T) {
 	go func() {
 		defer close(sampling)
 		for {
-			dlNow, ok := mgr.Get(dl.ID)
+			dlNow, ok := mgr.Get(f.user1, dl.ID)
 			if !ok || dlNow.State != files.DownloadRunning {
 				return
 			}
@@ -352,7 +354,7 @@ func TestDesktopDownloadPeakRSSIsFlat(t *testing.T) {
 		}
 	}()
 
-	waitForState(t, mgr, dl.ID, files.DownloadComplete)
+	waitForState(t, mgr, f.user1, dl.ID, files.DownloadComplete)
 	<-sampling
 
 	growth := int64(peak) - int64(before.HeapAlloc)
@@ -400,11 +402,11 @@ func TestCancelReportsCancelledNotFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() = %v", err)
 	}
-	if cerr := mgr.Cancel(dl.ID); cerr != nil {
+	if cerr := mgr.Cancel(f.user1, dl.ID); cerr != nil {
 		t.Fatalf("Cancel() = %v", cerr)
 	}
 
-	final := waitForState(t, mgr, dl.ID, files.DownloadCancelled)
+	final := waitForState(t, mgr, f.user1, dl.ID, files.DownloadCancelled)
 
 	if final.State != files.DownloadCancelled {
 		t.Errorf("state = %q, want cancelled", final.State)

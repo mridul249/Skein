@@ -100,20 +100,22 @@ func (h *DesktopDownloads) Start(w http.ResponseWriter, r *http.Request) {
 
 // List handles GET /api/desktop/downloads.
 func (h *DesktopDownloads) List(w http.ResponseWriter, r *http.Request) {
-	if _, err := middleware.MustUserID(r.Context()); err != nil {
+	userID, err := middleware.MustUserID(r.Context())
+	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, r, http.StatusOK, map[string]any{"downloads": h.mgr.List()})
+	httpx.WriteJSON(w, r, http.StatusOK, map[string]any{"downloads": h.mgr.List(userID)})
 }
 
 // Cancel handles DELETE /api/desktop/downloads/{id}.
 func (h *DesktopDownloads) Cancel(w http.ResponseWriter, r *http.Request) {
-	if _, err := middleware.MustUserID(r.Context()); err != nil {
+	userID, err := middleware.MustUserID(r.Context())
+	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	if err := h.mgr.Cancel(chi.URLParam(r, "id")); err != nil {
+	if err := h.mgr.Cancel(userID, chi.URLParam(r, "id")); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
@@ -128,7 +130,8 @@ func (h *DesktopDownloads) Cancel(w http.ResponseWriter, r *http.Request) {
 // bridge does not exist. SSE over the server the window is already a client of
 // needs no bridge at all.
 func (h *DesktopDownloads) Events(w http.ResponseWriter, r *http.Request) {
-	if _, err := middleware.MustUserID(r.Context()); err != nil {
+	userID, err := middleware.MustUserID(r.Context())
+	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
@@ -142,7 +145,7 @@ func (h *DesktopDownloads) Events(w http.ResponseWriter, r *http.Request) {
 	// Unwrap exists for.
 	rc := http.NewResponseController(w)
 
-	updates, unsubscribe, found := h.mgr.Subscribe(chi.URLParam(r, "id"))
+	updates, unsubscribe, found := h.mgr.Subscribe(userID, chi.URLParam(r, "id"))
 	if !found {
 		httpx.WriteError(w, r, skerr.ErrNotFound)
 		return
