@@ -53,6 +53,12 @@ export interface FileItem {
   created_at: string;
   updated_at: string;
   deleted_at?: string;
+  /**
+   * When this file's health was last established by a COMPLETE reconcile run.
+   * Null means never checked, which is a different fact from "checked and
+   * healthy" and must render differently — see lib/health.ts.
+   */
+  reconciled_at: string | null;
   shards: Shard[];
 }
 
@@ -369,6 +375,22 @@ export const api = {
       body: { current_password: currentPassword, new_password: newPassword },
     });
     setSession(s);
+  },
+
+  /**
+   * Permanently removes a file whose shards are confirmed gone.
+   *
+   * DESTROYS, and does not trash: a damaged file has no shards left to
+   * restore, so a trashed row would pretend to be recoverable when it is not.
+   *
+   * The server RE-CONFIRMS the damage itself rather than trusting anything
+   * sent from here, and refuses a file it finds intact (409). That is
+   * deliberate and must stay that way — a client-supplied assertion about the
+   * world is a hint about what to check, never the check. This call therefore
+   * carries only the id.
+   */
+  async purgeDamaged(fileId: string): Promise<void> {
+    await request<void>(`/api/files/${fileId}/damaged`, { method: 'DELETE' });
   },
 
   /**

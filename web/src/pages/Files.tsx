@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 
+import { DamagedBadge } from '../components/DamagedBadge';
+import { splitDownloadable } from '../lib/health';
 import { ApiError, api, type FileItem, type Folder } from '../lib/api';
 import { QuotaBar } from '../components/QuotaBar';
 import { ShardMap } from '../components/ShardMap';
@@ -36,6 +38,10 @@ export function Files() {
   const [deleting, setDeleting] = useState<Folder | null>(null);
   /** The file whose detail drawer is open, by id. */
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The damaged file awaiting a purge confirmation. Destructive and
+  // irreversible, so it gets the same named-consequence modal a folder delete
+  // does rather than a bare confirm.
+  const [purging, setPurging] = useState<FileItem | null>(null);
 
   // Bulk selection, distinct from `selectedId` (which drives the detail
   // drawer). A set of ids rather than indices, so sorting and filtering cannot
@@ -157,6 +163,20 @@ export function Files() {
       setBanner(err instanceof ApiError ? err.message : 'Could not move that to trash.'),
   });
 
+  // Purging a damaged file DESTROYS it: there are no shards left to restore,
+  // so trashing would leave a row pretending to be recoverable. The server
+  // re-confirms the damage itself and refuses an intact file, so this call
+  // carries only the id — see api.purgeDamaged.
+  const purgeDamaged = useMutation({
+    mutationFn: (id: string) => api.purgeDamaged(id),
+    onSuccess: () => {
+      closeDrawer();
+      refresh();
+    },
+    onError: (err: unknown) =>
+      setBanner(err instanceof ApiError ? err.message : 'Could not remove that file.'),
+  });
+
   const newFolder = useMutation({
     mutationFn: (name: string) => api.createFolder(name, folderId),
     onSuccess: refresh,
@@ -258,20 +278,47 @@ export function Files() {
     const chosen = files.filter((f) => ids.includes(f.id));
     if (chosen.length === 0) return;
 
+    // Damaged files are excluded BEFORE anything is requested. Their shards
+    // are gone, so the server refuses to sign a capability URL (409) and every
+    // one would land in the failure list as noise the user cannot act on.
+    // Skipping them is stated rather than silent: a count that quietly shrinks
+    // is the other way to get this wrong.
+    const { downloadable, skipped } = splitDownloadable(chosen);
+    const skipNote =
+      skipped.length === 0
+        ? ''
+        : `${skipped.length} damaged ${skipped.length === 1 ? 'file was' : 'files were'} skipped.`;
+
+    if (downloadable.length === 0) {
+      setBanner(
+        skipped.length === 1
+          ? 'That file is damaged and cannot be downloaded.'
+          : 'Every selected file is damaged and cannot be downloaded.',
+      );
+      return;
+    }
+
     setBulkBusy(true);
     setBanner(
-      chosen.length === 1
-        ? ''
-        : `Starting ${chosen.length} downloads, one at a time…`,
+      downloadable.length === 1
+        ? skipNote
+        : [`Starting ${downloadable.length} downloads, one at a time…`, skipNote]
+            .filter(Boolean)
+            .join(' '),
     );
     try {
-      const { failed } = await runBulkDownload(chosen, (f) =>
+      const { failed } = await runBulkDownload(downloadable, (f) =>
         download(files.find((x) => x.id === f.id) as FileItem),
       );
       setBanner(
-        failed.length === 0
-          ? ''
-          : `${failed.length} of ${chosen.length} downloads could not be started.`,
+        [
+          failed.length === 0
+            ? ''
+            : `${failed.length} of ${downloadable.length} downloads could not be started.`,
+          skipNote,
+        ]
+          .filter(Boolean)
+          .join(' '),
       );
     } finally {
       setBulkBusy(false);
@@ -319,6 +366,24 @@ export function Files() {
           setNaming(false);
         }}
       />
+
+      {/* A damaged file cannot be restored from Trash — its shards are already
+          gone — so this modal says "permanently" and means it. Design.md §7:
+          name what goes. */}
+      <Modal
+        open={purging !== null}
+        title={purging ? `Permanently remove ${purging.name}?` : ''}
+        intent="danger"
+        confirmLabel="Remove permanently"
+        onCancel={() => setPurging(null)}
+        onConfirm={() => {
+          if (purging) purgeDamaged.mutate(purging.id);
+          setPurging(null);
+        }}
+      >
+        Its shards are already missing from your drives, so this cannot go to
+        Trash and cannot be undone. Only the record of the file is removed.
+      </Modal>
 
       {/* Design.md §7: name what goes, not "Are you sure?". */}
       <Modal
@@ -523,19 +588,25 @@ export function Files() {
                     }}
                   />
                 </td>
-                <td className="max-w-0 truncate px-4 text-body text-text">
-                  {/* A real button, so the row is reachable and activatable by
-                      keyboard rather than click-only. */}
-                  <button
-                    type="button"
-                    className="block w-full truncate text-left"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedId(file.id);
-                    }}
-                  >
-                    {file.name}
-                  </button>
+                <td className="max-w-0 px-4 text-body text-text">
+                  {/* Flex rather than a plain truncate: the badge must keep its
+                      full width and the NAME must be what shrinks, or a long
+                      filename pushes the damage marker out of the cell. */}
+                  <div className="flex min-w-0 items-center">
+                    {/* A real button, so the row is reachable and activatable
+                        by keyboard rather than click-only. */}
+                    <button
+                      type="button"
+                      className="min-w-0 truncate text-left"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedId(file.id);
+                      }}
+                    >
+                      {file.name}
+                    </button>
+                    <DamagedBadge file={file} />
+                  </div>
                 </td>
                 <td className="tabular px-4 text-right text-data text-muted">
                   {bytes(file.size_bytes)}
@@ -702,6 +773,7 @@ export function Files() {
           open={selectedId !== null}
           onClose={closeDrawer}
           onDownload={(f) => void download(f)}
+          onPurgeDamaged={(f) => setPurging(f)}
           onTrash={(f) => {
             trash.mutate(f.id);
             closeDrawer();
