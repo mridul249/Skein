@@ -162,10 +162,10 @@ func (s *Service) Login(ctx context.Context, email, password string, meta Reques
 // belongs behind the credential rate limiter with register and login — it
 // verifies a password, which makes it an online guessing oracle.
 //
-// IT DOES NOT SIGN OTHER DEVICES OUT, and that is a known gap, not an
-// oversight. Doing so needs validity state a racing insert inherits — the
-// per-user epoch described in known issue #18 — because both available
-// primitives are wrong for the job:
+// IT SIGNS EVERY SESSION OUT, including the one that performed the change and
+// including one a concurrent refresh is midway through creating. That last
+// case is the whole reason this waited for known issue #18's per-user epoch
+// rather than using either primitive already to hand:
 //
 //   - RevokeTokenFamily is per-family, and a family is one login. Revoking
 //     every family except the current one needs a per-user family listing that
@@ -173,26 +173,27 @@ func (s *Service) Login(ctx context.Context, email, password string, meta Reques
 //   - RevokeAllUserSessions enumerates the sessions existing at one instant
 //     and cannot bind one inserted afterwards; its own comment in
 //     queries/sessions.sql records that it is unsound against a concurrent
-//     refresh and must not be wired up.
+//     refresh and it must still not be wired up.
 //
-// The epoch is schema work owned by the Session 2 rewrite. Until it lands,
-// other sessions stay valid until they expire on their own, the Settings UI
-// says so in as many words, and TestChangePasswordDoesNotYetRevokeOtherSessions
-// pins the current behaviour so the epoch work has a test that must flip.
-func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, current, next string, meta RequestMeta) error {
+// The epoch has neither problem: it is validity state a racing insert
+// INHERITS from the parent it claimed, so a successor born after the
+// revocation carries a stale epoch and ClaimSession refuses it.
+// TestPasswordChangeRevokesASessionRotatingConcurrently forces exactly that
+// interleaving; a sequential test cannot express it.
+func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, current, next string, meta RequestMeta) (TokenPair, error) {
 	// Length-bound the input before spending argon2 on it: cost is linear in
 	// input length past maxPasswordLen, so an unbounded current password is a
 	// cheap way to make the server do expensive work.
 	if utf8.RuneCountInString(current) > maxPasswordLen {
-		return errWrongCurrentPassword()
+		return TokenPair{}, errWrongCurrentPassword()
 	}
 
 	user, err := s.store.GetUserByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, skerr.ErrNotFound) {
-			return skerr.ErrUnauthorized
+			return TokenPair{}, skerr.ErrUnauthorized
 		}
-		return fmt.Errorf("look up user: %w", err)
+		return TokenPair{}, fmt.Errorf("look up user: %w", err)
 	}
 
 	// The same verification path Login uses. A second implementation here is
@@ -201,35 +202,57 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, current,
 	if err != nil {
 		s.log.ErrorContext(ctx, "stored password hash is malformed",
 			slog.String("user_id", user.ID.String()))
-		return errWrongCurrentPassword()
+		return TokenPair{}, errWrongCurrentPassword()
 	}
 	if !ok {
 		s.record(ctx, &user.ID, EventLoginFailed,
 			map[string]any{"reason": "bad_password", "op": "change_password"}, meta)
-		return errWrongCurrentPassword()
+		return TokenPair{}, errWrongCurrentPassword()
 	}
 
 	// The same validator registration uses, applied after verification so a
 	// wrong current password cannot be distinguished from a weak new one by
 	// which error comes back.
 	if verr := validatePassword(next); verr != nil {
-		return verr
+		return TokenPair{}, verr
 	}
 
 	// HashPassword owns the argon2id parameters (password.go). Reading them
 	// here would be a second copy that silently stops matching.
 	hash, err := HashPassword(next)
 	if err != nil {
-		return fmt.Errorf("hash password: %w", err)
+		return TokenPair{}, fmt.Errorf("hash password: %w", err)
 	}
 	if uerr := s.store.UpdateUserPassword(ctx, user.ID, hash); uerr != nil {
-		return fmt.Errorf("update password: %w", uerr)
+		return TokenPair{}, fmt.Errorf("update password: %w", uerr)
+	}
+
+	// Sign every session out, including one a concurrent refresh is midway
+	// through creating (known issue #18). This is deliberately NOT
+	// RevokeAllUserSessions: that enumerates the rows existing at one instant
+	// and cannot bind a successor inserted after the sweep, which is the
+	// canonical failure here — a password change is exactly the moment an
+	// attacker's in-flight refresh must not survive.
+	//
+	// Ordering matters: the password is updated first, so there is no window
+	// in which the old password still authenticates against a bumped epoch.
+	epoch, berr := s.store.BumpUserSessionEpoch(ctx, user.ID)
+	if berr != nil {
+		return TokenPair{}, fmt.Errorf("revoke sessions: %w", berr)
 	}
 
 	// EventPasswordChanged was declared at store.go and never emitted until
 	// now; this is its first caller.
 	s.record(ctx, &user.ID, EventPasswordChanged, nil, meta)
-	return nil
+
+	// The bump invalidated THIS device's session too -- it is one of the
+	// sessions being revoked, and an epoch cannot exempt a caller it cannot
+	// identify. Signing the user out of the tab they are actively using is a
+	// regression dressed as a security fix, so mint a replacement under the
+	// new epoch. Every OTHER device stays revoked, which is the property that
+	// matters.
+	user.SessionEpoch = epoch
+	return s.startSession(ctx, user, meta)
 }
 
 // Refresh rotates a refresh token.
@@ -331,6 +354,15 @@ func (s *Service) Refresh(ctx context.Context, presented string, meta RequestMet
 		// Inherited, not extended: the family dies when the original
 		// login would have.
 		ExpiresAt: claimed.ExpiresAt,
+		// INHERITED FROM THE CLAIMED PARENT, and this is the mechanism of
+		// issue #18 rather than an incidental copy. Reading the user's
+		// current epoch here instead would reproduce the identical race one
+		// scope up: a revocation landing between the claim and this insert
+		// would be read as the NEW epoch, and the successor would be born
+		// valid — exactly what a row-enumerating sweep already fails to
+		// prevent. The parent's epoch is stale by construction in that
+		// interleaving, so the successor inherits its deadness.
+		Epoch: claimed.Epoch,
 	})
 	if err != nil {
 		return TokenPair{}, fmt.Errorf("create rotated session: %w", err)
@@ -433,6 +465,9 @@ func (s *Service) startSession(ctx context.Context, user User, meta RequestMeta)
 		UserAgent:   meta.UserAgent,
 		IP:          meta.IP,
 		ExpiresAt:   s.now().Add(s.refreshTTL),
+		// The user's epoch as it stood when this login was authenticated. A
+		// login is a fresh start, so there is no parent to inherit from.
+		Epoch: user.SessionEpoch,
 	})
 	if err != nil {
 		return TokenPair{}, fmt.Errorf("create session: %w", err)

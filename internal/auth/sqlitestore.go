@@ -122,6 +122,20 @@ func (s *SQLiteStore) UpdateUserPassword(ctx context.Context, id uuid.UUID, pass
 	return nil
 }
 
+// BumpUserSessionEpoch supersedes every session the user has. See the
+// interface doc: it enumerates nothing, which is why it is sound where
+// RevokeAllUserSessions is not.
+func (s *SQLiteStore) BumpUserSessionEpoch(ctx context.Context, userID uuid.UUID) (int64, error) {
+	epoch, err := s.q.BumpUserSessionEpoch(ctx, gensqlite.BumpUserSessionEpochParams{
+		UpdatedAt: s.fmtTime(s.now()),
+		ID:        userID.String(),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("bump session epoch: %w", err)
+	}
+	return epoch, nil
+}
+
 // CreateTokenFamily records a new login's family.
 func (s *SQLiteStore) CreateTokenFamily(ctx context.Context, familyID, userID uuid.UUID) error {
 	if err := s.q.CreateTokenFamily(ctx, gensqlite.CreateTokenFamilyParams{
@@ -159,6 +173,7 @@ func (s *SQLiteStore) CreateSession(ctx context.Context, n NewSession) (Session,
 		Ip:          addrPtrToString(n.IP),
 		CreatedAt:   s.fmtTime(s.now()),
 		ExpiresAt:   s.fmtTime(n.ExpiresAt),
+		Epoch:       n.Epoch,
 	})
 	if err != nil {
 		return Session{}, fmt.Errorf("insert session: %w", err)
@@ -291,6 +306,7 @@ func (s *SQLiteStore) toUser(r gensqlite.User) (User, error) {
 		PasswordHash:    r.PasswordHash,
 		EmailVerifiedAt: verified,
 		CreatedAt:       created,
+		SessionEpoch:    r.SessionEpoch,
 	}, nil
 }
 
@@ -338,6 +354,7 @@ func (s *SQLiteStore) toSession(r gensqlite.Session) (Session, error) {
 		ExpiresAt: expires,
 		UsedAt:    usedAt,
 		RevokedAt: revokedAt,
+		Epoch:     r.Epoch,
 	}, nil
 }
 

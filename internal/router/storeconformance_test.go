@@ -153,8 +153,24 @@ func (s *testRouterSQLiteStore) Expire(uploadID uuid.UUID) {
 func applyRouterSQLiteMigrations(t testing.TB, db *sql.DB) {
 	t.Helper()
 
+	// Stand-ins for the two auth tables the skipped 00001 would create, in
+	// their PRE-BUNDLE shape. 00005 adds users.session_epoch and
+	// sessions.epoch by ALTER, so declaring those columns here would collide
+	// with the migration ("duplicate column name") — and would also stop the
+	// fixture exercising the real ALTER at all.
+	//
+	// ABSORBING, NOT MANUFACTURING: permissive stand-ins that make the real
+	// migrations applicable. Nothing the router reads or writes either table,
+	// so no behaviour under test depends on their shape, and neither adds a
+	// way for two operations to interfere.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY) STRICT`); err != nil {
 		t.Fatalf("create users stand-in: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS sessions (
+		id      TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL
+	) STRICT`); err != nil {
+		t.Fatalf("create sessions stand-in: %v", err)
 	}
 
 	dir := filepath.Join(routerRepoRoot(t), "internal", "db", "migrations", "sqlite")

@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -105,13 +106,25 @@ func TestChangePasswordSucceedsAndOldPasswordStopsWorking(t *testing.T) {
 	r := newCredentialRouter(t)
 	tok := registerAndToken(t, r, cpEmail, cpOld)
 
+	// 200 with a replacement session, not 204. The change bumps the user's
+	// session epoch (known issue #18), which revokes EVERY session including
+	// this caller's own — so the response has to hand back a usable one or the
+	// tab that just changed its password is silently signed out at its next
+	// refresh.
 	rec := changePassword(t, r, tok,
 		`{"current_password":"`+cpOld+`","new_password":"`+cpNew+`"}`)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 	}
-	if body := rec.Body.String(); body != "" {
-		t.Errorf("204 carried a body: %q", body)
+
+	var session struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &session); err != nil {
+		t.Fatalf("decode session response: %v", err)
+	}
+	if session.AccessToken == "" {
+		t.Fatal("the response carried no access token, so the caller has nothing to continue with")
 	}
 
 	if got := postJSON(t, r, "/api/auth/login",
@@ -121,6 +134,17 @@ func TestChangePasswordSucceedsAndOldPasswordStopsWorking(t *testing.T) {
 	if got := postJSON(t, r, "/api/auth/login",
 		`{"email":"`+cpEmail+`","password":"`+cpOld+`"}`); got.Code == http.StatusOK {
 		t.Error("the old password still logs in")
+	}
+
+	// The returned token is a working credential, not merely a non-empty
+	// string. Asserted against change-password itself rather than
+	// /api/auth/me, because this router deliberately mounts only the
+	// credential group. Left until last because it changes the password again,
+	// which would invalidate the two login assertions above.
+	if again := changePassword(t, r, session.AccessToken,
+		`{"current_password":"`+cpNew+`","new_password":"`+cpOld+`"}`); again.Code != http.StatusOK {
+		t.Errorf("the returned token does not authenticate: reusing it = %d, want 200; body %s",
+			again.Code, again.Body.String())
 	}
 }
 

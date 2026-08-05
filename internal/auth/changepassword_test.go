@@ -25,7 +25,7 @@ func TestChangePasswordReplacesTheCredential(t *testing.T) {
 		t.Fatalf("Register() = %v", err)
 	}
 
-	if cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, newTestPassword, testMeta()); cerr != nil {
+	if _, cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, newTestPassword, testMeta()); cerr != nil {
 		t.Fatalf("ChangePassword() = %v", cerr)
 	}
 
@@ -49,7 +49,7 @@ func TestChangePasswordRejectsAWrongCurrentPassword(t *testing.T) {
 	}
 	before, _ := store.GetUserByID(ctx, pair.User.ID)
 
-	cerr := svc.ChangePassword(ctx, pair.User.ID, "not the current password", newTestPassword, testMeta())
+	_, cerr := svc.ChangePassword(ctx, pair.User.ID, "not the current password", newTestPassword, testMeta())
 	if cerr == nil {
 		t.Fatal("ChangePassword() accepted a wrong current password")
 	}
@@ -83,7 +83,7 @@ func TestChangePasswordAppliesTheRegistrationValidator(t *testing.T) {
 	}
 
 	short := strings.Repeat("a", minPasswordLen-1)
-	cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, short, testMeta())
+	_, cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, short, testMeta())
 	if cerr == nil {
 		t.Fatalf("ChangePassword() accepted a %d-rune password; the minimum is %d",
 			len(short), minPasswordLen)
@@ -95,7 +95,7 @@ func TestChangePasswordAppliesTheRegistrationValidator(t *testing.T) {
 	// And a password that registration would reject for length at the top end
 	// is rejected here too, by the same rule.
 	long := strings.Repeat("b", maxPasswordLen+1)
-	if lerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, long, testMeta()); lerr == nil {
+	if _, lerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, long, testMeta()); lerr == nil {
 		t.Error("ChangePassword() accepted a password over the maximum length")
 	}
 }
@@ -110,7 +110,7 @@ func TestChangePasswordRehashesAtCurrentParameters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register() = %v", err)
 	}
-	if cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, newTestPassword, testMeta()); cerr != nil {
+	if _, cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, newTestPassword, testMeta()); cerr != nil {
 		t.Fatalf("ChangePassword() = %v", cerr)
 	}
 
@@ -133,7 +133,7 @@ func TestChangePasswordRecordsASecurityEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register() = %v", err)
 	}
-	if cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, newTestPassword, testMeta()); cerr != nil {
+	if _, cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, newTestPassword, testMeta()); cerr != nil {
 		t.Fatalf("ChangePassword() = %v", cerr)
 	}
 
@@ -156,7 +156,7 @@ func TestChangePasswordDoesNotRecordSuccessOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register() = %v", err)
 	}
-	_ = svc.ChangePassword(ctx, pair.User.ID, "wrong", newTestPassword, testMeta())
+	_, _ = svc.ChangePassword(ctx, pair.User.ID, "wrong", newTestPassword, testMeta())
 
 	if events := store.EventsOfKind(EventPasswordChanged); len(events) != 0 {
 		t.Errorf("%d %s events after a REJECTED change, want 0",
@@ -164,46 +164,16 @@ func TestChangePasswordDoesNotRecordSuccessOnFailure(t *testing.T) {
 	}
 }
 
-// KNOWN GAP, ASSERTED DELIBERATELY. Changing a password does NOT sign other
-// devices out. This is not desirable; it is blocked on known issue #18's
-// per-user epoch, which is schema work owned by the Session 2 rewrite.
+// The gap this file used to pin is CLOSED. Known issue #18's per-user epoch
+// landed with the schema bundle, so a password change now signs other devices
+// out, and TestChangePasswordDoesNotYetRevokeOtherSessions was inverted rather
+// than deleted — it lives on as TestPasswordChangeRevokesOtherSessions in
+// epoch_race_test.go, alongside the concurrency case that is the actual reason
+// RevokeAllUserSessions could not be used.
 //
-// This test exists so that work has something that MUST flip when it lands. If
-// you are here because this test failed, you have probably just built the
-// epoch — that is the intended outcome. Invert it to assert the sessions are
-// revoked, and update the UI copy in the Settings modal, which currently tells
-// the user their other devices stay signed in.
-//
-// Do NOT "fix" this by wiring RevokeAllUserSessions: its own comment
-// (queries/sessions.sql) records that it is unsound against a concurrent
-// refresh, and a successor inserted after the sweep is born valid.
-func TestChangePasswordDoesNotYetRevokeOtherSessions(t *testing.T) {
-	svc, _ := newTestService(t)
-	ctx := context.Background()
-
-	pair, err := svc.Register(ctx, testEmail, testPassword, testMeta())
-	if err != nil {
-		t.Fatalf("Register() = %v", err)
-	}
-	// A second device: an independent login, so an independent family.
-	other, err := svc.Login(ctx, testEmail, testPassword, testMeta())
-	if err != nil {
-		t.Fatalf("Login() = %v", err)
-	}
-
-	if cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, newTestPassword, testMeta()); cerr != nil {
-		t.Fatalf("ChangePassword() = %v", cerr)
-	}
-
-	// The other device's refresh token still works. When the epoch lands this
-	// becomes an error, and this assertion inverts.
-	if _, rerr := svc.Refresh(ctx, other.RefreshToken, testMeta()); rerr != nil {
-		t.Fatalf("the other session was revoked by a password change: %v\n"+
-			"If you just implemented the per-user epoch for issue #18, this test "+
-			"is now obsolete: invert it to assert revocation, and update the "+
-			"Settings modal copy that promises other devices stay signed in.", rerr)
-	}
-}
+// Kept as a note rather than dropped silently, because the old test's doc
+// comment told the next reader to expect a failure here and to invert it. This
+// says the inversion happened and where it went.
 
 // SKEIN_MASTER_KEY is independent of the login password: no argon2id output
 // reaches any file key. That is what makes a password change safe to perform
@@ -253,7 +223,7 @@ func TestChangePasswordLeavesMasterKeyDerivationUnchanged(t *testing.T) {
 		t.Fatalf("SealString() = %v", err)
 	}
 
-	if cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, newTestPassword, testMeta()); cerr != nil {
+	if _, cerr := svc.ChangePassword(ctx, pair.User.ID, testPassword, newTestPassword, testMeta()); cerr != nil {
 		t.Fatalf("ChangePassword() = %v", cerr)
 	}
 
@@ -298,7 +268,7 @@ func TestChangePasswordWrongCurrentIsNotUnauthorized(t *testing.T) {
 		t.Fatalf("Register() = %v", err)
 	}
 
-	cerr := svc.ChangePassword(ctx, pair.User.ID, "not the current password", newTestPassword, testMeta())
+	_, cerr := svc.ChangePassword(ctx, pair.User.ID, "not the current password", newTestPassword, testMeta())
 	if cerr == nil {
 		t.Fatal("ChangePassword() accepted a wrong current password")
 	}

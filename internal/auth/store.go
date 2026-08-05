@@ -15,6 +15,10 @@ type User struct {
 	PasswordHash    string
 	EmailVerifiedAt *time.Time
 	CreatedAt       time.Time
+
+	// SessionEpoch is the epoch a session created for this user right now
+	// would be born under.
+	SessionEpoch int64
 }
 
 // Session is the domain view of one issued refresh token. The token itself is
@@ -31,6 +35,11 @@ type Session struct {
 	ExpiresAt time.Time
 	UsedAt    *time.Time
 	RevokedAt *time.Time
+
+	// Epoch is the user's session_epoch as it stood when this session was
+	// created. A session is valid only while it still matches the user's
+	// current epoch; see Store.BumpUserSessionEpoch.
+	Epoch int64
 }
 
 // NewSession is the input to Store.CreateSession.
@@ -43,6 +52,13 @@ type NewSession struct {
 	UserAgent   string
 	IP          *netip.Addr
 	ExpiresAt   time.Time
+
+	// Epoch is INHERITED, never re-read. On rotation the caller copies it from
+	// the parent row it just claimed; on a fresh login it is the user's
+	// current epoch. Re-reading it here would reproduce issue #18 one scope
+	// up -- a successor racing a revocation would read the new value and be
+	// born valid.
+	Epoch int64
 }
 
 // SecurityEvent is an append-only audit record.
@@ -76,6 +92,19 @@ type Store interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
+
+	// BumpUserSessionEpoch invalidates every session the user has, including
+	// one a concurrent refresh is midway through creating, and returns the new
+	// epoch.
+	//
+	// This is the sound primitive for user-level revocation, and the reason
+	// RevokeAllUserSessions is not (known issue #18). A row-enumerating sweep
+	// cannot bind a session inserted after it; an epoch does not enumerate
+	// anything, so there is no instant whose membership it can miss. A
+	// successor inserted after this call still carries the epoch it inherited
+	// from the parent it claimed, which is now stale, and ClaimSession refuses
+	// it.
+	BumpUserSessionEpoch(ctx context.Context, userID uuid.UUID) (int64, error)
 
 	// CreateTokenFamily records a new login's family. It must be called
 	// before the first session of that family, because sessions.family_id

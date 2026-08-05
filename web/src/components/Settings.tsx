@@ -309,14 +309,16 @@ function SecurityPanel() {
         )}
 
         {/*
-          THE HONEST STATEMENT, and it is not decoration. Changing a password
-          does NOT sign other devices out — that needs the per-user epoch from
-          known issue #18. Implying otherwise would leave a user believing they
-          had locked out a stolen session when they had not.
+          THE HONEST STATEMENT, and it is not decoration. This now promises
+          revocation, so it is only true while the per-user epoch (known issue
+          #18) is actually wired to ChangePassword. If that ever regresses,
+          this text becomes the dangerous kind of wrong — a user believing they
+          locked out a stolen session when they did not. It is pinned by
+          TestPasswordChangeRevokesOtherSessions and by the concurrent case
+          beside it.
         */}
         <p className="rounded border border-border bg-raised p-3 text-caption text-muted">
-          Your other devices stay signed in until their sessions expire. Changing
-          your password here does not sign them out.
+          Your other devices will be signed out. This one stays signed in.
         </p>
 
         {error && (
@@ -326,7 +328,7 @@ function SecurityPanel() {
         )}
         {done && (
           <p role="status" className="text-caption text-success">
-            Password changed. Your other devices are still signed in.
+            Password changed. Your other devices have been signed out.
           </p>
         )}
 

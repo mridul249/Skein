@@ -85,11 +85,23 @@ func (s *PGStore) CreateSession(ctx context.Context, n NewSession) (Session, err
 		UserAgent:   truncate(n.UserAgent, 512),
 		Ip:          n.IP,
 		ExpiresAt:   ts(n.ExpiresAt),
+		Epoch:       n.Epoch,
 	})
 	if err != nil {
 		return Session{}, fmt.Errorf("insert session: %w", err)
 	}
 	return toSession(row), nil
+}
+
+// BumpUserSessionEpoch supersedes every session the user has. See the
+// interface doc: this enumerates nothing, which is why it is sound where
+// RevokeAllUserSessions is not.
+func (s *PGStore) BumpUserSessionEpoch(ctx context.Context, userID uuid.UUID) (int64, error) {
+	epoch, err := s.q.BumpUserSessionEpoch(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("bump session epoch: %w", err)
+	}
+	return epoch, nil
 }
 
 // CreateTokenFamily records a new login's family.
@@ -202,6 +214,7 @@ func toUser(r gen.User) User {
 		PasswordHash:    r.PasswordHash,
 		EmailVerifiedAt: nullableTime(r.EmailVerifiedAt),
 		CreatedAt:       r.CreatedAt.Time,
+		SessionEpoch:    r.SessionEpoch,
 	}
 }
 
@@ -217,6 +230,7 @@ func toSession(r gen.Session) Session {
 		ExpiresAt: r.ExpiresAt.Time,
 		UsedAt:    nullableTime(r.UsedAt),
 		RevokedAt: nullableTime(r.RevokedAt),
+		Epoch:     r.Epoch,
 	}
 }
 
