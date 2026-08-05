@@ -142,8 +142,12 @@ type changePasswordRequest struct {
 // shares that budget with register and login so an attacker cannot spread
 // guesses across endpoints.
 //
-// 204 rather than a session payload — the current session is unaffected, and
-// no other device is signed out (see auth.ChangePassword and known issue #18).
+// Returns a fresh session rather than 204. A password change bumps the user's
+// session epoch (known issue #18), which revokes EVERY session including the
+// caller's own — an epoch cannot exempt a device it cannot identify. The
+// replacement pair keeps the tab the user is actually looking at signed in
+// while every other device is signed out, which is the property they asked
+// for. The refresh cookie is rewritten as a side effect of writeSession.
 func (h *Auth) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	userID, err := middleware.MustUserID(r.Context())
 	if err != nil {
@@ -155,12 +159,13 @@ func (h *Auth) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, derr)
 		return
 	}
-	if cerr := h.svc.ChangePassword(r.Context(), userID,
-		req.CurrentPassword, req.NewPassword, metaFrom(r)); cerr != nil {
+	pair, cerr := h.svc.ChangePassword(r.Context(), userID,
+		req.CurrentPassword, req.NewPassword, metaFrom(r))
+	if cerr != nil {
 		httpx.WriteError(w, r, cerr)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	h.writeSession(w, r, http.StatusOK, pair)
 }
 
 func (h *Auth) writeSession(w http.ResponseWriter, r *http.Request, status int, pair auth.TokenPair) {

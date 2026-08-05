@@ -355,18 +355,20 @@ export function accessTokenForStreamURL(): Promise<string | null> {
 
 export const api = {
   /**
-   * Changes the signed-in user's password.
+   * Changes the signed-in user's password and signs every OTHER device out.
    *
-   * OTHER DEVICES ARE NOT SIGNED OUT. The server verifies, validates and
-   * rehashes, but does not revoke other sessions — that needs the per-user
-   * epoch from known issue #18, which is schema work. The Settings copy says
-   * so plainly; do not add a spinner or a message implying revocation.
+   * The server bumps the user's session epoch (known issue #18), which revokes
+   * every session including this one, and returns a replacement pair so the
+   * current tab stays signed in. Storing it is not optional: skip setSession
+   * and this tab is running on an access token whose next refresh will fail,
+   * so the user is silently signed out minutes later.
    */
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    await request<void>('/api/auth/change-password', {
+    const s = await request<SessionResponse>('/api/auth/change-password', {
       method: 'POST',
       body: { current_password: currentPassword, new_password: newPassword },
     });
+    setSession(s);
   },
 
   /**

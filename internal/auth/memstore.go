@@ -53,7 +53,9 @@ func (m *MemoryStore) CreateUser(_ context.Context, id uuid.UUID, email, hash st
 	if _, exists := m.byEmail[key]; exists {
 		return User{}, skerr.ErrConflict
 	}
-	u := User{ID: id, Email: key, PasswordHash: hash, CreatedAt: m.clock()}
+	// session_epoch DEFAULT 1 in both dialects. Starting at 0 here would make
+	// the double disagree with the schema about what a fresh user looks like.
+	u := User{ID: id, Email: key, PasswordHash: hash, CreatedAt: m.clock(), SessionEpoch: 1}
 	m.users[id] = u
 	m.byEmail[key] = id
 	return u, nil
@@ -95,6 +97,21 @@ func (m *MemoryStore) UpdateUserPassword(_ context.Context, id uuid.UUID, hash s
 }
 
 // CreateSession records one issued refresh token.
+// BumpUserSessionEpoch invalidates every session the user has by superseding
+// the epoch they were born under. It enumerates nothing, which is the whole
+// point -- see the interface doc and known issue #18.
+func (m *MemoryStore) BumpUserSessionEpoch(_ context.Context, userID uuid.UUID) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[userID]
+	if !ok {
+		return 0, skerr.ErrNotFound
+	}
+	u.SessionEpoch++
+	m.users[userID] = u
+	return u.SessionEpoch, nil
+}
+
 // CreateTokenFamily records a family. Mirrors the FK ordering the real schema
 // enforces: a session cannot be inserted before its family exists.
 func (m *MemoryStore) CreateTokenFamily(_ context.Context, familyID, _ uuid.UUID) error {
@@ -141,6 +158,11 @@ func (m *MemoryStore) CreateSession(_ context.Context, n NewSession) (Session, e
 		IP:        n.IP,
 		CreatedAt: m.clock(),
 		ExpiresAt: n.ExpiresAt,
+		// Stored as supplied. This store must not read the user's current
+		// epoch here for the same reason the SQL does not: the value is
+		// INHERITED from the claimed parent, and re-reading it reproduces
+		// issue #18.
+		Epoch: n.Epoch,
 	}
 	m.sessions[s.ID] = s
 	m.byHash[string(n.RefreshHash)] = s.ID
@@ -176,6 +198,13 @@ func (m *MemoryStore) ClaimSession(_ context.Context, id uuid.UUID) (Session, er
 	// only this one stops it. If these two predicates ever diverge, the
 	// doubles validate against semantics the database no longer has.
 	if at, exists := m.families[s.FamilyID]; exists && at != nil {
+		return Session{}, skerr.ErrNotFound
+	}
+	// The epoch half, mirroring the EXISTS (... u.session_epoch =
+	// sessions.epoch) in MarkSessionUsed. A session created before a
+	// user-level revocation carries a stale epoch, and this is the only place
+	// that is enforced -- its own row says nothing.
+	if u, exists := m.users[s.UserID]; !exists || u.SessionEpoch != s.Epoch {
 		return Session{}, skerr.ErrNotFound
 	}
 	t := m.clock()
