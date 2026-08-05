@@ -44,9 +44,10 @@ const (
 type FileHealth struct {
 	FileID uuid.UUID `json:"file_id"`
 	Name   string    `json:"name"`
-	// State is derived, never stored: the files.status CHECK constraint admits
-	// only pending/ready/failed under both dialects, so persisting
-	// partially_missing would need a migration. See the note on Reconcile.
+	// State is derived by this run AND persisted to files.status when the
+	// file was fully checked -- so a badge survives a page reload rather than
+	// living only in one response body. The persistence rule is on Reconcile:
+	// a file with any indeterminate shard has nothing written for it.
 	State string `json:"state"`
 
 	TotalShards   int     `json:"total_shards"`
@@ -104,11 +105,20 @@ type ReconcileReport struct {
 // spend that budget continuously to find nothing almost every time. It is a
 // diagnostic the user runs when something looks wrong.
 //
-// RESULTS ARE DERIVED, NOT PERSISTED. `files.status` has a CHECK constraint
-// admitting only pending/ready/failed under both dialects
-// (00004_files.sql:46, sqlite/00003_files.sql:37), so storing
-// partially_missing would need a migration — out of scope this session. The
-// report is computed per run and returned; the UI badges from it.
+// RESULTS ARE PERSISTED, PER FILE, AND ONLY WHEN DEFINITE. The schema bundle
+// widened the files.status CHECK to admit partially_missing and corrupted and
+// added files.reconciled_at, so a damaged badge now survives a page reload
+// instead of dying with the response that produced it.
+//
+// The rule, and it is the whole safety property: a file with ANY indeterminate
+// shard has NOTHING written for it — not the status, not the timestamp.
+// reconciled_at asserts that the evidence was gathered at that moment, so
+// stamping it for a file nobody could check is a UI claiming freshness for a
+// scan that never happened. Gating is per FILE rather than per RUN, because a
+// file fully checked in a partly-throttled run has still been established.
+//
+// A persistence failure is logged and does not fail the run: the report is
+// still correct, and the next run re-derives everything.
 func (s *Service) Reconcile(ctx context.Context, userID uuid.UUID) (ReconcileReport, error) {
 	report := ReconcileReport{StartedAt: time.Now(), Complete: true}
 
@@ -143,6 +153,17 @@ func (s *Service) Reconcile(ctx context.Context, userID uuid.UUID) (ReconcileRep
 	}
 	wg.Wait()
 
+	// PERSISTENCE IS PER FILE, NOT PER RUN, and the distinction is deliberate.
+	//
+	// A file every one of whose shards produced a definite answer has been
+	// fully established, even if some OTHER file in the same run was
+	// throttled. Gating on report.Complete would throw away good evidence
+	// because of an unrelated file; gating on the file's own unchecked count
+	// keeps the guarantee exactly where it belongs.
+	//
+	// The invariant that must hold either way: nothing is written for a file
+	// with any indeterminate shard. Not the status, not the timestamp.
+	at := time.Now()
 	for _, h := range healths {
 		if h.TotalShards == 0 {
 			continue
@@ -153,6 +174,23 @@ func (s *Service) Reconcile(ctx context.Context, userID uuid.UUID) (ReconcileRep
 			report.Damaged = append(report.Damaged, h)
 		case HealthUnknown:
 			report.Unknown = append(report.Unknown, h)
+		}
+
+		if len(h.UncheckedShards) > 0 {
+			// Nothing definite was established about this file. Leave both
+			// columns exactly as they were.
+			continue
+		}
+		if perr := s.store.RecordReconciledHealth(ctx, userID, h.FileID,
+			statusForHealth(h.State), at); perr != nil {
+			// A write failure does not fail the run: the report is still
+			// correct and useful, and the next run re-derives everything. It
+			// does mean the badge will be stale, so it is logged rather than
+			// swallowed.
+			s.log.WarnContext(ctx, "could not persist reconciled health",
+				slog.String("file_id", h.FileID.String()),
+				slog.String("state", h.State),
+				slog.String("error", perr.Error()))
 		}
 	}
 
@@ -181,6 +219,26 @@ func (s *Service) Reconcile(ctx context.Context, userID uuid.UUID) (ReconcileRep
 		slog.Bool("complete", report.Complete))
 
 	return report, nil
+}
+
+// statusForHealth maps a derived health state onto the persisted status
+// column.
+//
+// HealthUnknown deliberately has no mapping and never reaches here: a file
+// with any indeterminate shard is skipped before this is called. It panics
+// rather than defaulting, because a silent default is how an unchecked file
+// would come to be recorded as healthy.
+func statusForHealth(state string) string {
+	switch state {
+	case HealthOK:
+		return StatusReady
+	case HealthPartiallyMissing:
+		return StatusPartiallyMissing
+	case HealthCorrupted:
+		return StatusCorrupted
+	default:
+		panic("files: no persisted status for health state " + state)
+	}
 }
 
 // checkFile classifies one file's shards, returning its health, how many
