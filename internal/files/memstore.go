@@ -2,6 +2,7 @@ package files
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -179,7 +180,7 @@ func (m *MemoryStore) CreateFile(_ context.Context, n NewFile) (File, error) {
 	}
 	for _, f := range m.files {
 		if f.UserID == n.UserID && f.DeletedAt == nil && f.Name == n.Name &&
-			samePtr(f.FolderID, n.FolderID) && f.Status == StatusReady {
+			samePtr(f.FolderID, n.FolderID) && IsListable(f.Status) {
 			return File{}, skerr.ErrConflict
 		}
 	}
@@ -218,6 +219,34 @@ func (m *MemoryStore) MarkFileReady(_ context.Context, userID, id uuid.UUID, siz
 	return f, nil
 }
 
+// RecordReconciledHealth writes a complete run's finding for one file.
+//
+// Mirrors both dialects: it refuses to touch a row in an upload state, so a
+// reconcile racing an upload cannot promote a half-written file to ready or
+// mark a failed one damaged.
+func (m *MemoryStore) RecordReconciledHealth(_ context.Context, userID, id uuid.UUID, status string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	f, ok := m.files[id]
+	if !ok || f.UserID != userID {
+		return skerr.ErrNotFound
+	}
+	if !IsListable(f.Status) {
+		// pending or failed: mid-upload or dead. Not reconcile's business.
+		return nil
+	}
+	if !IsListable(status) {
+		return fmt.Errorf("refusing to record non-reconciled status %q", status)
+	}
+	f.Status = status
+	stamped := at
+	f.ReconciledAt = &stamped
+	f.UpdatedAt = m.clock()
+	m.files[id] = f
+	return nil
+}
+
 // MarkFileFailed records that an upload did not finish.
 func (m *MemoryStore) MarkFileFailed(_ context.Context, id uuid.UUID) error {
 	m.mu.Lock()
@@ -250,7 +279,10 @@ func (m *MemoryStore) ListFiles(_ context.Context, userID uuid.UUID, p ListParam
 
 	var out []File
 	for _, f := range m.files {
-		if f.UserID != userID || f.DeletedAt != nil || f.Status != StatusReady {
+		// IsListable, not == StatusReady: a damaged file is committed and must
+		// stay visible and marked. Filtering it out would make it silently
+		// vanish, which is the opposite of the badge this supports.
+		if f.UserID != userID || f.DeletedAt != nil || !IsListable(f.Status) {
 			continue
 		}
 		if !samePtr(f.FolderID, p.FolderID) {

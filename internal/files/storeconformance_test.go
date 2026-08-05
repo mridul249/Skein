@@ -90,6 +90,10 @@ func newTestFilesSQLiteStore(t testing.TB) *SQLiteStore {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	// Stand-in tables FIRST: 00005_schema_bundle.sql alters users and
+	// sessions, so they must exist before the migrations run, not merely
+	// before the tests do.
+	seedFilesStandInTables(t, db)
 	applyFilesSQLiteMigrations(t, db)
 	seedFilesReferences(t, db)
 	return NewSQLiteStore(db)
@@ -106,8 +110,6 @@ func newTestFilesSQLiteStore(t testing.TB) *SQLiteStore {
 func seedFilesReferences(t testing.TB, db *sql.DB) {
 	t.Helper()
 	for _, ddl := range []string{
-		`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY) STRICT`,
-		`CREATE TABLE IF NOT EXISTS connected_accounts (id TEXT PRIMARY KEY) STRICT`,
 		// Mirror whatever ids the tests invent, so the references resolve
 		// without every test knowing about this fixture.
 		`CREATE TRIGGER IF NOT EXISTS seed_user_folders
@@ -127,9 +129,46 @@ func seedFilesReferences(t testing.TB, db *sql.DB) {
 	}
 }
 
-// applyFilesSQLiteMigrations runs the "-- +goose Up" half of the files
-// migration. goose itself is not used: it wants its own driver registration
-// and a version table these tests do not care about.
+// seedFilesStandInTables creates the auth/accounts tables the files migrations
+// reference, in their PRE-BUNDLE shape.
+//
+// They must exist before the migrations run: 00005 ALTERs users and sessions.
+// The columns it adds are deliberately NOT declared here — declaring them would
+// collide with the ALTER and would stop the fixture exercising it.
+//
+// ABSORBING, NOT MANUFACTURING: permissive stand-ins that make the real
+// migrations applicable. Nothing in this package reads either table.
+func seedFilesStandInTables(t testing.TB, db *sql.DB) {
+	t.Helper()
+	for _, ddl := range []string{
+		`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY) STRICT`,
+		`CREATE TABLE IF NOT EXISTS connected_accounts (id TEXT PRIMARY KEY) STRICT`,
+		`CREATE TABLE IF NOT EXISTS sessions (
+			id      TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL
+		) STRICT`,
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			t.Fatalf("seed stand-in tables: %v", err)
+		}
+	}
+}
+
+// applyFilesSQLiteMigrations runs the "-- +goose Up" half of every migration
+// that touches the files tables. goose itself is not used: it wants its own
+// driver registration and a version table these tests do not care about.
+//
+// SELECTION IS BY CONTENT, NOT BY FILENAME. This used to match on names
+// containing "files", which silently skipped 00005_schema_bundle.sql — a
+// migration that adds files.reconciled_at and widens files_status_check. The
+// harness then ran every test against a files table missing a column the store
+// selects, and the failure surfaced as "no such column: reconciled_at" from
+// inside Upload rather than as "your fixture did not apply a migration".
+//
+// A filename filter encodes an assumption about how migrations will be named
+// FOREVER, and the next schema change that is not named after one table breaks
+// it again. Reading the file and asking whether it mentions the tables is the
+// same test the fixture actually means.
 func applyFilesSQLiteMigrations(t testing.TB, db *sql.DB) {
 	t.Helper()
 
@@ -141,7 +180,7 @@ func applyFilesSQLiteMigrations(t testing.TB, db *sql.DB) {
 	applied := 0
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasSuffix(name, ".sql") || !strings.Contains(name, "files") {
+		if !strings.HasSuffix(name, ".sql") {
 			continue
 		}
 		raw, rerr := os.ReadFile(filepath.Join(dir, name))
@@ -152,6 +191,9 @@ func applyFilesSQLiteMigrations(t testing.TB, db *sql.DB) {
 		if strings.TrimSpace(up) == "" {
 			t.Fatalf("%s has no +goose Up section", name)
 		}
+		if !mentionsAFilesTable(up) {
+			continue
+		}
 		if _, eerr := db.Exec(up); eerr != nil {
 			t.Fatalf("apply %s: %v", name, eerr)
 		}
@@ -160,6 +202,19 @@ func applyFilesSQLiteMigrations(t testing.TB, db *sql.DB) {
 	if applied == 0 {
 		t.Fatalf("no files migrations found in %s", dir)
 	}
+}
+
+// mentionsAFilesTable reports whether a migration touches the tables this
+// package's store owns. Deliberately broad: applying one migration too many is
+// a fixture that does slightly more setup than it needs, while applying one too
+// few is a fixture testing a schema that does not exist.
+func mentionsAFilesTable(up string) bool {
+	for _, table := range []string{"folders", "files", "file_shards"} {
+		if strings.Contains(up, table) {
+			return true
+		}
+	}
+	return false
 }
 
 func filesUpSection(s string) string {

@@ -154,6 +154,23 @@ func (s *PGStore) MarkFileReady(ctx context.Context, userID, id uuid.UUID, size 
 	return toFile(row), nil
 }
 
+// RecordReconciledHealth writes a COMPLETE reconcile run's finding for one
+// file. The status predicates live in SQL; see the query's comment.
+func (s *PGStore) RecordReconciledHealth(ctx context.Context, userID, id uuid.UUID, status string, at time.Time) error {
+	if !IsListable(status) {
+		return fmt.Errorf("refusing to record non-reconciled status %q", status)
+	}
+	if _, err := s.q.RecordReconciledHealth(ctx, gen.RecordReconciledHealthParams{
+		ID:           id,
+		UserID:       userID,
+		Status:       status,
+		ReconciledAt: nullTS(&at),
+	}); err != nil {
+		return fmt.Errorf("record reconciled health: %w", err)
+	}
+	return nil
+}
+
 // MarkFileFailed records that an upload did not finish.
 func (s *PGStore) MarkFileFailed(ctx context.Context, id uuid.UUID) error {
 	if err := s.q.MarkFileFailed(ctx, id); err != nil {
@@ -336,6 +353,7 @@ func toFile(r gen.File) File {
 		CreatedAt:    r.CreatedAt.Time,
 		UpdatedAt:    r.UpdatedAt.Time,
 		DeletedAt:    nullableTime(r.DeletedAt),
+		ReconciledAt: nullableTime(r.ReconciledAt),
 	}
 }
 

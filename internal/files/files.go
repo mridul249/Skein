@@ -14,11 +14,45 @@ import (
 )
 
 // File status values.
+//
+// pending/ready/failed are the UPLOAD lifecycle. partially_missing and
+// corrupted are RECONCILED states: they say something about the shards at the
+// provider, not about whether the upload finished, and only a complete
+// reconcile run may ever write them (see Service.Reconcile).
+//
+// The distinction matters to every listing query. A file in a reconciled state
+// is a committed file that has been damaged since — it must stay visible and
+// marked, never filtered out, or a damaged file silently disappears instead of
+// warning its owner. IsListable is that predicate; do not spell it as
+// `status == StatusReady` anywhere.
 const (
 	StatusPending = "pending"
 	StatusReady   = "ready"
 	StatusFailed  = "failed"
+
+	// StatusPartiallyMissing — some shards confirmed gone, some present. The
+	// file cannot be read whole, but the surviving shards are still there.
+	StatusPartiallyMissing = "partially_missing"
+
+	// StatusCorrupted — every shard confirmed gone. Only the database row is
+	// left.
+	StatusCorrupted = "corrupted"
 )
+
+// IsListable reports whether a status belongs in a user's file listing.
+//
+// Committed files are listable whatever their health; pending and failed
+// uploads are not. Written as a predicate rather than repeated inline because
+// there are three listing sites across two dialects plus the memory store, and
+// a fourth that disagreed would hide damaged files from exactly one backend.
+func IsListable(status string) bool {
+	switch status {
+	case StatusReady, StatusPartiallyMissing, StatusCorrupted:
+		return true
+	default:
+		return false
+	}
+}
 
 // Folder is a virtual folder. Folders exist only in Skein's database; nothing
 // resembling this tree is created at the provider.
@@ -47,6 +81,15 @@ type File struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
+
+	// ReconciledAt is when this row's health was last established by a
+	// COMPLETE reconcile run. Nil means never reconciled, which is different
+	// from "reconciled and found healthy" — the latter carries a timestamp
+	// alongside StatusReady. An incomplete run must never stamp it: the
+	// timestamp is an assertion that the evidence was gathered, and a badge
+	// claiming freshness for a scan that never happened is the failure mode
+	// persistence introduces.
+	ReconciledAt *time.Time
 
 	// Shards is the manifest, ordered by index. It is the source of truth
 	// for where the bytes are; a file whose manifest is incomplete is
@@ -116,6 +159,20 @@ type Store interface {
 	CreateFile(ctx context.Context, n NewFile) (File, error)
 	MarkFileReady(ctx context.Context, userID, id uuid.UUID, size int64, sha []byte) (File, error)
 	MarkFileFailed(ctx context.Context, id uuid.UUID) error
+
+	// RecordReconciledHealth writes the outcome of a COMPLETE reconcile run:
+	// the derived status and the moment it was established.
+	//
+	// Only ever called for a file every one of whose shards produced a
+	// definite answer. An incomplete run must call this for nothing — see
+	// Service.Reconcile — because reconciled_at asserts that the evidence was
+	// gathered, and a status derived from a partial scan is a guess wearing a
+	// fact's clothes.
+	//
+	// It refuses to move a file out of an upload state: a pending or failed
+	// row is mid-upload or dead, and reconcile has no business commenting on
+	// either.
+	RecordReconciledHealth(ctx context.Context, userID, id uuid.UUID, status string, at time.Time) error
 	GetFile(ctx context.Context, userID, id uuid.UUID) (File, error)
 	ListFiles(ctx context.Context, userID uuid.UUID, p ListParams) ([]File, error)
 	ListTrashed(ctx context.Context, userID uuid.UUID, limit int32) ([]File, error)
