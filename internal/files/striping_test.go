@@ -76,10 +76,23 @@ func (m manifestRefusingBackend) Put(ctx context.Context, r io.Reader, spec stor
 
 // throttlingBackend reports rate limiting on every read, leaving writes alone
 // so a fixture can be built before throttling is switched on.
+//
+// IT MUST IMPLEMENT Lister, and this is not incidental. Lister is an OPTIONAL
+// capability that reconstruction type-asserts for, so a wrapper that omitted
+// List would make the assertion fail and the account would be reported as
+// "does not support listing" — indeterminate, but for entirely the wrong
+// reason, and the rate-limit path would never execute. The
+// indeterminate-under-throttling test then passes while proving nothing about
+// throttling. Found exactly that way: the mutation that should have broken it
+// did not, because the test was never reaching the code the mutation changed.
 type throttlingBackend struct{ storage.Backend }
 
 func (t throttlingBackend) Get(context.Context, storage.ObjectRef, *storage.ByteRange) (io.ReadCloser, int64, error) {
 	return nil, 0, fmt.Errorf("gave up after 5 attempts: %w", storage.ErrRateLimited)
+}
+
+func (t throttlingBackend) List(context.Context) ([]storage.ListedObject, error) {
+	return nil, fmt.Errorf("gave up after 5 attempts: %w", storage.ErrRateLimited)
 }
 
 // newStriped builds n drives of the given capacity each.
