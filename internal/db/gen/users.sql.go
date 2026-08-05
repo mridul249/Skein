@@ -11,10 +11,36 @@ import (
 	"github.com/google/uuid"
 )
 
+const bumpUserSessionEpoch = `-- name: BumpUserSessionEpoch :one
+UPDATE users
+   SET session_epoch = session_epoch + 1,
+       updated_at    = now()
+ WHERE id = $1
+RETURNING session_epoch
+`
+
+// BumpUserSessionEpoch invalidates every session the user currently has,
+// including any that a concurrent refresh is in the middle of creating.
+//
+// This is the enforcing write for user-level revocation (known issue #18).
+// Unlike RevokeAllUserSessions it does not enumerate rows, so there is no
+// instant whose membership it could miss: a successor inserted after this
+// statement still carries the epoch it inherited from its parent, which is now
+// stale, and ClaimSession refuses it.
+//
+// Returns the new epoch so the caller can mint a replacement session under it
+// — a password change should not sign the device that performed it out.
+func (q *Queries) BumpUserSessionEpoch(ctx context.Context, id uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, bumpUserSessionEpoch, id)
+	var session_epoch int64
+	err := row.Scan(&session_epoch)
+	return session_epoch, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, email, password_hash)
 VALUES ($1, $2, $3)
-RETURNING id, email, password_hash, email_verified_at, created_at, updated_at
+RETURNING id, email, password_hash, email_verified_at, created_at, updated_at, session_epoch
 `
 
 type CreateUserParams struct {
@@ -33,12 +59,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.EmailVerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SessionEpoch,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, email_verified_at, created_at, updated_at FROM users WHERE email = $1
+SELECT id, email, password_hash, email_verified_at, created_at, updated_at, session_epoch FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -51,12 +78,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.EmailVerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SessionEpoch,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, email_verified_at, created_at, updated_at FROM users WHERE id = $1
+SELECT id, email, password_hash, email_verified_at, created_at, updated_at, session_epoch FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -69,6 +97,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.EmailVerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SessionEpoch,
 	)
 	return i, err
 }

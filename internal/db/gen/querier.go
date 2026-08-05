@@ -12,6 +12,19 @@ import (
 
 type Querier interface {
 	AbandonExpiredUploads(ctx context.Context) ([]AbandonExpiredUploadsRow, error)
+	// BumpUserSessionEpoch invalidates every session the user currently has,
+	// including any that a concurrent refresh is in the middle of creating.
+	//
+	// This is the enforcing write for user-level revocation (known issue #18).
+	// Unlike RevokeAllUserSessions it does not enumerate rows, so there is no
+	// instant whose membership it could miss: a successor inserted after this
+	// statement still carries the epoch it inherited from its parent, which is now
+	// stale, and ClaimSession refuses it.
+	//
+	// Returns the new epoch so the caller can mint a replacement session under it
+	// — a password change should not sign the device that performed it out.
+	//
+	BumpUserSessionEpoch(ctx context.Context, id uuid.UUID) (int64, error)
 	// ClearAccountTokens wipes stored credentials without touching the row, so a
 	// disconnected account stops being usable while its id — and therefore every
 	// file_shards.connected_account_id pointing at it — survives. access_token_enc
@@ -28,6 +41,15 @@ type Querier interface {
 	CreateFileShard(ctx context.Context, arg CreateFileShardParams) (FileShard, error)
 	CreateFolder(ctx context.Context, arg CreateFolderParams) (Folder, error)
 	CreateOAuthState(ctx context.Context, arg CreateOAuthStateParams) error
+	// CreateSession inserts one issued refresh token.
+	//
+	// epoch is supplied by the caller and is NEVER read from users here. On
+	// rotation it is copied from the parent row that was just claimed; on a fresh
+	// login it is the user's current epoch. Reading it in this statement instead
+	// would reintroduce known issue #18 one scope up: a successor whose INSERT
+	// races a revocation would read the NEW epoch and be born valid, which is
+	// precisely the race the epoch exists to close.
+	//
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	// CreateTokenFamily records a new login's family. Written before the session
 	// row, because sessions.family_id has a foreign key to it. Reversing the order
@@ -117,6 +139,14 @@ type Querier interface {
 	// snapshot at statement start, so the insert cannot see the concurrent
 	// revocation and the revocation cannot see the new row. Both commit and the bug
 	// is unchanged. A single statement is atomic; it is not serialisable.
+	//
+	// The epoch predicate is the second half of the same idea, for user-level
+	// revocation (known issue #18). A session is valid only while the epoch it was
+	// born under still matches its user's current one, and this is the only place
+	// that is enforced. Reading users here, fresh, at claim time is what makes a
+	// session created before a password change unusable after it — including one
+	// inserted moments after the revocation by a refresh that was already in
+	// flight, since that successor inherited its parent's stale epoch.
 	//
 	MarkSessionUsed(ctx context.Context, id uuid.UUID) (Session, error)
 	NextAccountOrdinal(ctx context.Context, userID uuid.UUID) (int32, error)

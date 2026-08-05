@@ -22,6 +22,52 @@ type ConnectedAccount struct {
 	UpdatedAt         string
 }
 
+type File struct {
+	ID            string
+	UserID        string
+	FolderID      *string
+	Name          string
+	SizeBytes     int64
+	DeclaredMime  string
+	ContentSha256 []byte
+	IsStriped     int64
+	IsEncrypted   int64
+	Status        string
+	CreatedAt     string
+	UpdatedAt     string
+	DeletedAt     *string
+	ReconciledAt  *string
+}
+
+type FileShard struct {
+	ID                 string
+	FileID             string
+	Idx                int64
+	ConnectedAccountID *string
+	ProviderObjectID   string
+	SizeBytes          int64
+	PlainSizeBytes     int64
+	PlainOffset        int64
+	Sha256             []byte
+	CreatedAt          string
+}
+
+type Folder struct {
+	ID        string
+	UserID    string
+	ParentID  *string
+	Name      string
+	CreatedAt string
+	UpdatedAt string
+	DeletedAt *string
+}
+
+type InstanceMetadatum struct {
+	ID        int64
+	KeyID     string
+	CreatedAt string
+}
+
 type OauthState struct {
 	StateHash    []byte
 	UserID       string
@@ -30,6 +76,15 @@ type OauthState struct {
 	PkceVerifier *string
 	CreatedAt    string
 	ExpiresAt    string
+}
+
+type QuotaReservation struct {
+	ID               string
+	StorageAccountID string
+	Bytes            int64
+	UploadID         string
+	CreatedAt        string
+	ExpiresAt        string
 }
 
 type SecurityEvent struct {
@@ -54,6 +109,7 @@ type Session struct {
 	ExpiresAt   string
 	UsedAt      *string
 	RevokedAt   *string
+	Epoch       int64
 }
 
 type StorageAccount struct {
@@ -72,6 +128,19 @@ type TokenFamily struct {
 	RevokedAt *string
 }
 
+type Upload struct {
+	ID            string
+	UserID        string
+	FileID        *string
+	Status        string
+	SizeBytes     int64
+	BytesReceived int64
+	Plan          string
+	CreatedAt     string
+	UpdatedAt     string
+	ExpiresAt     string
+}
+
 type User struct {
 	ID              string
 	Email           string
@@ -79,4 +148,5 @@ type User struct {
 	EmailVerifiedAt *string
 	CreatedAt       string
 	UpdatedAt       string
+	SessionEpoch    int64
 }

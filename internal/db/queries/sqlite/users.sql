@@ -25,6 +25,18 @@ UPDATE users
        updated_at    = ?
  WHERE id = ?;
 
+-- BumpUserSessionEpoch invalidates every session the user currently has,
+-- including one a concurrent refresh is in the middle of creating. It does not
+-- enumerate rows, so there is no instant whose membership it could miss. See
+-- the Postgres original for the full reasoning (known issue #18).
+--
+-- name: BumpUserSessionEpoch :one
+UPDATE users
+   SET session_epoch = session_epoch + 1,
+       updated_at    = ?
+ WHERE id = ?
+RETURNING session_epoch;
+
 -- name: MarkEmailVerified :exec
 UPDATE users
    SET email_verified_at = ?,

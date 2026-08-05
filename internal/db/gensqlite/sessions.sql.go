@@ -12,9 +12,9 @@ import (
 const createSession = `-- name: CreateSession :one
 
 INSERT INTO sessions (id, user_id, family_id, prev_id, refresh_hash,
-                      user_agent, ip, created_at, expires_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at
+                      user_agent, ip, created_at, expires_at, epoch)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at, epoch
 `
 
 type CreateSessionParams struct {
@@ -27,6 +27,7 @@ type CreateSessionParams struct {
 	Ip          *string
 	CreatedAt   string
 	ExpiresAt   string
+	Epoch       int64
 }
 
 // SQLite dialect of internal/db/queries/sessions.sql. Same contracts, same
@@ -41,6 +42,10 @@ type CreateSessionParams struct {
 // damage reaches a keyword, so prose written in the house style (which uses
 // em-dashes freely) breaks codegen at a distance. Use "--" for an em-dash and
 // a plain apostrophe for a curly one. The Postgres files are unaffected.
+// epoch is supplied by the caller and NEVER read from users here. On rotation
+// it is copied from the parent row that was just claimed; on a fresh login it
+// is the user's current epoch. Reading it in this statement would reintroduce
+// known issue #18 one scope up -- see the Postgres original.
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
 	row := q.db.QueryRowContext(ctx, createSession,
 		arg.ID,
@@ -52,6 +57,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.Ip,
 		arg.CreatedAt,
 		arg.ExpiresAt,
+		arg.Epoch,
 	)
 	var i Session
 	err := row.Scan(
@@ -66,6 +72,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.RevokedAt,
+		&i.Epoch,
 	)
 	return i, err
 }
@@ -115,7 +122,7 @@ func (q *Queries) EventsOfKind(ctx context.Context, kind string) ([]SecurityEven
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []SecurityEvent{}
 	for rows.Next() {
 		var i SecurityEvent
@@ -170,7 +177,7 @@ func (q *Queries) FamilyRevokedAt(ctx context.Context, id string) (*string, erro
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at FROM sessions WHERE id = ?
+SELECT id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at, epoch FROM sessions WHERE id = ?
 `
 
 func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error) {
@@ -188,12 +195,13 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.RevokedAt,
+		&i.Epoch,
 	)
 	return i, err
 }
 
 const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
-SELECT id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at FROM sessions WHERE refresh_hash = ?
+SELECT id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at, epoch FROM sessions WHERE refresh_hash = ?
 `
 
 // GetSessionByRefreshHash looks a session up by the hash of the presented
@@ -215,6 +223,7 @@ func (q *Queries) GetSessionByRefreshHash(ctx context.Context, refreshHash []byt
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.RevokedAt,
+		&i.Epoch,
 	)
 	return i, err
 }
@@ -230,7 +239,11 @@ UPDATE sessions
        SELECT 1 FROM token_families f
         WHERE f.id = sessions.family_id
           AND f.revoked_at IS NOT NULL)
-RETURNING id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at
+   AND EXISTS (
+       SELECT 1 FROM users u
+        WHERE u.id = sessions.user_id
+          AND u.session_epoch = sessions.epoch)
+RETURNING id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at, epoch
 `
 
 type MarkSessionUsedParams struct {
@@ -280,6 +293,7 @@ func (q *Queries) MarkSessionUsed(ctx context.Context, arg MarkSessionUsedParams
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.RevokedAt,
+		&i.Epoch,
 	)
 	return i, err
 }
@@ -419,7 +433,7 @@ func (q *Queries) RevokeTokenFamily(ctx context.Context, arg RevokeTokenFamilyPa
 
 const sessionsInFamily = `-- name: SessionsInFamily :many
 
-SELECT id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at FROM sessions WHERE family_id = ?
+SELECT id, user_id, family_id, prev_id, refresh_hash, user_agent, ip, created_at, expires_at, used_at, revoked_at, epoch FROM sessions WHERE family_id = ?
 `
 
 // --- test support ---------------------------------------------------------
@@ -431,7 +445,7 @@ func (q *Queries) SessionsInFamily(ctx context.Context, familyID string) ([]Sess
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []Session{}
 	for rows.Next() {
 		var i Session
@@ -447,6 +461,7 @@ func (q *Queries) SessionsInFamily(ctx context.Context, familyID string) ([]Sess
 			&i.ExpiresAt,
 			&i.UsedAt,
 			&i.RevokedAt,
+			&i.Epoch,
 		); err != nil {
 			return nil, err
 		}

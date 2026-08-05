@@ -33,7 +33,7 @@ const createFile = `-- name: CreateFile :one
 INSERT INTO files (id, user_id, folder_id, name, size_bytes, declared_mime,
                    is_striped, is_encrypted, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
-RETURNING id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at
+RETURNING id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at
 `
 
 type CreateFileParams struct {
@@ -73,6 +73,7 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ReconciledAt,
 	)
 	return i, err
 }
@@ -193,7 +194,7 @@ func (q *Queries) FolderDescendants(ctx context.Context, arg FolderDescendantsPa
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []uuid.UUID{}
 	for rows.Next() {
 		var id uuid.UUID
@@ -209,7 +210,7 @@ func (q *Queries) FolderDescendants(ctx context.Context, arg FolderDescendantsPa
 }
 
 const getFile = `-- name: GetFile :one
-SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at FROM files
+SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at FROM files
  WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
 `
 
@@ -235,6 +236,7 @@ func (q *Queries) GetFile(ctx context.Context, arg GetFileParams) (File, error) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ReconciledAt,
 	)
 	return i, err
 }
@@ -299,7 +301,7 @@ func (q *Queries) ListChildFolders(ctx context.Context, arg ListChildFoldersPara
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []Folder{}
 	for rows.Next() {
 		var i Folder
@@ -331,7 +333,7 @@ func (q *Queries) ListFileShards(ctx context.Context, fileID uuid.UUID) ([]FileS
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []FileShard{}
 	for rows.Next() {
 		var i FileShard
@@ -358,7 +360,7 @@ func (q *Queries) ListFileShards(ctx context.Context, fileID uuid.UUID) ([]FileS
 }
 
 const listFiles = `-- name: ListFiles :many
-SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at FROM files
+SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at FROM files
  WHERE user_id = $1
    AND deleted_at IS NULL
    AND status = 'ready'
@@ -392,7 +394,7 @@ func (q *Queries) ListFiles(ctx context.Context, arg ListFilesParams) ([]File, e
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []File{}
 	for rows.Next() {
 		var i File
@@ -410,6 +412,7 @@ func (q *Queries) ListFiles(ctx context.Context, arg ListFilesParams) ([]File, e
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.ReconciledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -432,7 +435,7 @@ func (q *Queries) ListFolders(ctx context.Context, userID uuid.UUID) ([]Folder, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []Folder{}
 	for rows.Next() {
 		var i Folder
@@ -468,7 +471,7 @@ func (q *Queries) ListShardsForFiles(ctx context.Context, dollar_1 []uuid.UUID) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []FileShard{}
 	for rows.Next() {
 		var i FileShard
@@ -495,7 +498,7 @@ func (q *Queries) ListShardsForFiles(ctx context.Context, dollar_1 []uuid.UUID) 
 }
 
 const listTrashedFiles = `-- name: ListTrashedFiles :many
-SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at FROM files
+SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at FROM files
  WHERE user_id = $1 AND deleted_at IS NOT NULL
  ORDER BY deleted_at DESC
  LIMIT $2
@@ -511,7 +514,7 @@ func (q *Queries) ListTrashedFiles(ctx context.Context, arg ListTrashedFilesPara
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []File{}
 	for rows.Next() {
 		var i File
@@ -529,6 +532,7 @@ func (q *Queries) ListTrashedFiles(ctx context.Context, arg ListTrashedFilesPara
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.ReconciledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -558,7 +562,7 @@ UPDATE files
        content_sha256 = $4,
        updated_at     = now()
  WHERE id = $1 AND user_id = $2 AND status = 'pending'
-RETURNING id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at
+RETURNING id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at
 `
 
 type MarkFileReadyParams struct {
@@ -590,6 +594,7 @@ func (q *Queries) MarkFileReady(ctx context.Context, arg MarkFileReadyParams) (F
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ReconciledAt,
 	)
 	return i, err
 }
@@ -727,7 +732,7 @@ const updateFile = `-- name: UpdateFile :one
 UPDATE files
    SET name = $3, folder_id = $4, updated_at = now()
  WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
-RETURNING id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at
+RETURNING id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at
 `
 
 type UpdateFileParams struct {
@@ -759,6 +764,7 @@ func (q *Queries) UpdateFile(ctx context.Context, arg UpdateFileParams) (File, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ReconciledAt,
 	)
 	return i, err
 }

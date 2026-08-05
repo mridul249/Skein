@@ -43,6 +43,7 @@ type File struct {
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
 	DeletedAt     pgtype.Timestamptz
+	ReconciledAt  pgtype.Timestamptz
 }
 
 type FileShard struct {
@@ -66,6 +67,12 @@ type Folder struct {
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
 	DeletedAt pgtype.Timestamptz
+}
+
+type InstanceMetadatum struct {
+	ID        int16
+	KeyID     string
+	CreatedAt pgtype.Timestamptz
 }
 
 type OauthState struct {
@@ -109,6 +116,7 @@ type Session struct {
 	ExpiresAt   pgtype.Timestamptz
 	UsedAt      pgtype.Timestamptz
 	RevokedAt   pgtype.Timestamptz
+	Epoch       int64
 }
 
 type StorageAccount struct {
@@ -147,4 +155,5 @@ type User struct {
 	EmailVerifiedAt pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
+	SessionEpoch    int64
 }

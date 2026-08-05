@@ -11,10 +11,15 @@
 -- em-dashes freely) breaks codegen at a distance. Use "--" for an em-dash and
 -- a plain apostrophe for a curly one. The Postgres files are unaffected.
 
+-- epoch is supplied by the caller and NEVER read from users here. On rotation
+-- it is copied from the parent row that was just claimed; on a fresh login it
+-- is the user's current epoch. Reading it in this statement would reintroduce
+-- known issue #18 one scope up -- see the Postgres original.
+--
 -- name: CreateSession :one
 INSERT INTO sessions (id, user_id, family_id, prev_id, refresh_hash,
-                      user_agent, ip, created_at, expires_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      user_agent, ip, created_at, expires_at, epoch)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- GetSessionByRefreshHash looks a session up by the hash of the presented
@@ -66,6 +71,10 @@ UPDATE sessions
        SELECT 1 FROM token_families f
         WHERE f.id = sessions.family_id
           AND f.revoked_at IS NOT NULL)
+   AND EXISTS (
+       SELECT 1 FROM users u
+        WHERE u.id = sessions.user_id
+          AND u.session_epoch = sessions.epoch)
 RETURNING *;
 
 -- name: RevokeSessionFamily :execrows

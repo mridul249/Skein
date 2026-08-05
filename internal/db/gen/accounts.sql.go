@@ -260,7 +260,7 @@ func (q *Queries) ListActiveAccountsForSync(ctx context.Context) ([]ConnectedAcc
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []ConnectedAccount{}
 	for rows.Next() {
 		var i ConnectedAccount
@@ -302,7 +302,7 @@ func (q *Queries) ListConnectedAccounts(ctx context.Context, userID uuid.UUID) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []ConnectedAccount{}
 	for rows.Next() {
 		var i ConnectedAccount
@@ -372,7 +372,7 @@ func (q *Queries) ListStorageAccounts(ctx context.Context, userID uuid.UUID) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	items := []ListStorageAccountsRow{}
 	for rows.Next() {
 		var i ListStorageAccountsRow
