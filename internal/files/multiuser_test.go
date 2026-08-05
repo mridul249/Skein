@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -37,12 +39,51 @@ type sharedDriveFixture struct {
 	store    files.ConformanceStore
 	router   *router.MemoryStore
 	backends map[uuid.UUID]*local.Backend
+	// roots is each backend's on-disk directory, so a test can inspect what
+	// ACTUALLY landed at the provider rather than asking the service what it
+	// believes it wrote.
+	roots map[uuid.UUID]string
 	// throttled drives return ErrRateLimited from every read.
 	throttled map[uuid.UUID]bool
-	accounts  []uuid.UUID
-	user1     uuid.UUID
-	user2     uuid.UUID
+	// refuseManifests makes every backend reject a manifest write while
+	// leaving shard writes alone, so the "a manifest failure must not fail the
+	// upload" requirement can be exercised.
+	refuseManifests *bool
+	// ring is the fixture's keyring, needed to open a sealed manifest.
+	ring     *skcrypto.Keyring
+	accounts []uuid.UUID
+	user1    uuid.UUID
+	user2    uuid.UUID
 }
+
+// objects returns everything present on one backend, name to contents, read
+// from the provider's own storage.
+func (f *sharedDriveFixture) objects(t *testing.T, accountID uuid.UUID) map[string][]byte {
+	t.Helper()
+	root, ok := f.roots[accountID]
+	if !ok {
+		t.Fatalf("no root recorded for account %s", accountID)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read backend root: %v", err)
+	}
+	out := map[string][]byte{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		body, rerr := os.ReadFile(filepath.Join(root, e.Name()))
+		if rerr != nil {
+			t.Fatalf("read object %s: %v", e.Name(), rerr)
+		}
+		out[e.Name()] = body
+	}
+	return out
+}
+
+// failManifestWrites makes every drive refuse manifest objects from now on.
+func (f *sharedDriveFixture) failManifestWrites() { *f.refuseManifests = true }
 
 func newSharedDrive(t *testing.T) *sharedDriveFixture {
 	t.Helper()
@@ -59,6 +100,7 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 	const capacityEach = 8 << 20
 	routerStore := router.NewMemoryStore()
 	backends := map[uuid.UUID]*local.Backend{}
+	roots := map[uuid.UUID]string{}
 	ids := make([]uuid.UUID, 0, 2)
 
 	// TWO Google accounts, shared by BOTH Skein users.
@@ -67,11 +109,13 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 		ids = append(ids, id)
 		routerStore.AddAccount(id, int32(i+1), "shared@example.com", capacityEach, 0)
 
-		b, berr := local.New(t.TempDir(), local.WithFakeCapacity(capacityEach))
+		root := t.TempDir()
+		b, berr := local.New(root, local.WithFakeCapacity(capacityEach))
 		if berr != nil {
 			t.Fatalf("local.New() = %v", berr)
 		}
 		backends[id] = b
+		roots[id] = root
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -80,11 +124,12 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 		1<<20, func(n int64) int64 { return n })
 
 	throttled := map[uuid.UUID]bool{}
+	refuse := new(bool)
 	store := files.NewConformanceStore(t)
 	svc := files.NewService(
 		store,
 		files.NewStripingPlanner(planner, reserver),
-		multiResolver{backends: backends, throttled: throttled},
+		multiResolver{backends: backends, throttled: throttled, refuseManifests: refuse},
 		ring,
 		files.Config{Encrypt: false, MaxUploadBytes: 1 << 40},
 		logger,
@@ -92,9 +137,9 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 
 	return &sharedDriveFixture{
 		svc: svc, store: store, router: routerStore,
-		backends: backends, accounts: ids,
-		throttled: throttled,
-		user1:     uuid.New(), user2: uuid.New(),
+		backends: backends, roots: roots, accounts: ids,
+		throttled: throttled, refuseManifests: refuse, ring: ring,
+		user1: uuid.New(), user2: uuid.New(),
 	}
 }
 
