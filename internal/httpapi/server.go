@@ -42,6 +42,11 @@ const (
 	// Dumper additionally refuses concurrent runs outright.
 	backupRatePerMin = 1
 
+	// reconcileRatePerMin bounds the reconcile diagnostic. A few per minute:
+	// it is N metadata calls across every shard the user owns, on the same
+	// Drive pool uploads and downloads use.
+	reconcileRatePerMin = 3
+
 	// contentRatePerMin governs the byte-serving routes only, and is separate
 	// from apiRatePerMin because the traffic shape is different (known issue
 	// #25). A download is one request; a <video> being scrubbed is many range
@@ -312,6 +317,13 @@ func (s *Server) mountFiles(api chi.Router) {
 		// unbounded.
 		g.Post("/files/bulk-delete", h.BulkDelete)
 		g.Post("/trash/empty", h.EmptyTrash)
+
+		// Reconcile is N provider calls, bounded by the shared Drive pool. Its
+		// own budget rather than apiRatePerMin: a user hammering it would
+		// spend the pool that uploads and downloads also need.
+		g.With(middleware.RateLimit(middleware.NewLimiter(reconcileRatePerMin))).
+			Post("/system/reconcile", h.Reconcile)
+		g.Delete("/files/{id}/damaged", h.PurgeDamaged)
 
 		g.Get("/folders", h.ListFolders)
 		g.Post("/folders", h.CreateFolder)

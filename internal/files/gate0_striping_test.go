@@ -92,7 +92,7 @@ func newRoundRobinStriped(t *testing.T, drives int, capacityEach, shardSize int6
 	svc := files.NewService(
 		store,
 		files.NewStripingPlanner(planner, reserver),
-		multiResolver{backends},
+		multiResolver{backends: backends},
 		ring,
 		files.Config{Encrypt: true, MaxUploadBytes: 1 << 40},
 		logger,
