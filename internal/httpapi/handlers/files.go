@@ -367,27 +367,64 @@ func (h *Files) Content(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(statusFor(rng))
 
-	if _, werr := w.Write(head); werr != nil {
-		return // client hung up; the deferred Close tears down the read
+	// expected is what the response promised: the range length when one was
+	// asked for, the whole file otherwise. It is what makes a short read
+	// distinguishable from a small file.
+	expected := meta.SizeBytes
+	if rng != nil {
+		expected = rng.Length
+	}
+
+	nHead, werr := w.Write(head)
+	if werr != nil {
+		// The client hung up before the sniff buffer was even flushed. This
+		// used to return silently; it is the same truncation as any other.
+		logTruncatedTransfer(middleware.LoggerFrom(r.Context()), fileID.String(),
+			int64(nHead), expected, werr)
+		return // the deferred Close tears down the read
 	}
 
 	// Fixed buffer. Nothing on this path grows with file size.
 	buf := make([]byte, storage.CopyBufferSize)
-	if _, werr := io.CopyBuffer(w, content.Body, buf); werr != nil {
-		// The status is already written, so this can only be logged.
-		middleware.LoggerFrom(r.Context()).Debug("download interrupted",
-			"file_id", fileID.String(), "error", werr.Error())
+	nBody, cerr := io.CopyBuffer(w, content.Body, buf)
+	if cerr != nil {
+		// The status is already written, so this can only be logged — which
+		// is precisely why it must be logged at a visible level.
+		logTruncatedTransfer(middleware.LoggerFrom(r.Context()), fileID.String(),
+			int64(nHead)+nBody, expected, cerr)
 	}
 }
 
-// logTruncatedTransfer reports a transfer that stopped short.
+// logTruncatedTransfer reports a transfer that stopped short of what it
+// promised, at a level that is actually visible.
 //
-// STUB: current behaviour, pending the fix.
+// The status is committed before the body is copied, so a failed copy leaves
+// the access log reading `status=200 bytes=65536` — indistinguishable in shape
+// from a small file served perfectly. This was logged at Debug, the app runs
+// at info, and on 2026-08-05 that cost a full investigation to establish that
+// a 5,909,666-byte file logging 65,536 bytes was a preview abandoning an image
+// load rather than a range request skipping digest verification. It was
+// benign; nothing in the log said so.
+//
+// Warn rather than Error: a client hanging up is not a server fault, and this
+// must not page anyone. But it is the difference between "small file" and
+// "short read", and that difference has to survive the default log level.
+//
+// Quiet on success, and quiet when everything was delivered even if the
+// connection then broke — a late error after the last byte is not a
+// truncation. An unknown expected size (0) cannot be judged, so it is not
+// reported rather than guessed at.
 func logTruncatedTransfer(lg *slog.Logger, fileID string, written, expected int64, cause error) {
-	if cause == nil {
+	if cause == nil || expected <= 0 || written >= expected {
 		return
 	}
-	lg.Debug("download interrupted", "file_id", fileID, "error", cause.Error())
+	lg.Warn("download truncated",
+		slog.String("file_id", fileID),
+		slog.Int64("bytes_written", written),
+		slog.Int64("bytes_expected", expected),
+		slog.Int64("bytes_short", expected-written),
+		slog.String("error", cause.Error()),
+	)
 }
 
 func statusFor(rng *storage.ByteRange) int {
