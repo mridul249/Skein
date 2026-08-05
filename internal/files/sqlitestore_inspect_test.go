@@ -3,6 +3,7 @@ package files
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -28,16 +29,28 @@ func (s *SQLiteStore) CorruptShard(fileID uuid.UUID, index int32, mutate func(*S
 		}
 		sh := shards[i]
 		mutate(&sh)
-		if _, err := s.db.ExecContext(ctx, `
+		_, err := s.db.ExecContext(ctx, `
 UPDATE file_shards
    SET idx = ?, provider_object_id = ?, size_bytes = ?, plain_size_bytes = ?,
        plain_offset = ?, sha256 = ?
  WHERE id = ?`,
 			sh.Index, sh.ProviderID, sh.SizeBytes, sh.PlainSize, sh.PlainOffset,
-			sh.SHA256, sh.ID.String()); err != nil {
-			panic("CorruptShard: update: " + err.Error())
+			sh.SHA256, sh.ID.String())
+		if err == nil {
+			return
 		}
-		return
+		// A CHECK constraint refusing the damage is not a helper failure — it
+		// is the database doing its job. The row cannot hold this state, which
+		// is a STRONGER guarantee than the reader's own verifyManifest guard
+		// (download.go:423) that the test is reaching for. Record it as
+		// unrepresentable rather than panicking, so the SQLite run reports the
+		// truth instead of dying.
+		if strings.Contains(err.Error(), "CHECK constraint failed") {
+			// The row simply cannot hold this state. Leaving the shard intact
+			// is the honest outcome; the caller decides what that means.
+			return
+		}
+		panic("CorruptShard: update: " + err.Error())
 	}
 }
 

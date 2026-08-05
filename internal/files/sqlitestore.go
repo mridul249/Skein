@@ -128,7 +128,7 @@ WITH RECURSIVE subtree AS (
     SELECT f0.id FROM folders f0
      WHERE f0.id = ?1 AND f0.user_id = ?2 AND f0.deleted_at IS NULL
     UNION ALL
-    SELECT f.id FROM defer func() folders f
+    SELECT f.id FROM folders f
      JOIN subtree st ON f.parent_id = st.id
      WHERE f.deleted_at IS NULL
 )
