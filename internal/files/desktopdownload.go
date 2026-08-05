@@ -276,11 +276,17 @@ func (m *DownloadManager) Start(ctx context.Context, userID, fileID uuid.UUID, r
 		subs:   map[chan DesktopDownload]struct{}{},
 	}
 	m.downloads[id] = entry
+	// Copy the snapshot while the lock is still held. Reading entry.snapshot
+	// after unlocking races run(), which starts publishing progress into that
+	// same struct immediately — every other access to it is under m.mu, and
+	// this one return statement was the exception. Caught by -race once the
+	// ownership tests gave the scheduler a reason to interleave.
+	snap := entry.snapshot
 	m.mu.Unlock()
 
 	go m.run(dlCtx, id, userID, fileID, target)
 
-	return entry.snapshot, nil
+	return snap, nil
 }
 
 // run performs the transfer. Every exit path either completes the file or
