@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/mridul249/Skein/internal/storage"
 )
 
 // AppFolderName is the folder shards are kept in at the provider.
@@ -295,4 +297,93 @@ func (b *Backend) MoveToFolder(ctx context.Context, objectID, folderID string) e
 // query injection waiting for the day it is not.
 func driveQuote(s string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+}
+
+// List enumerates every object in the account's app folder, satisfying
+// storage.Lister.
+//
+// SCOPED TO THE APP FOLDER, not to Drive root, which is the difference from
+// ListRootShards above: shards and sidecar manifests are written with the app
+// folder as their parent, so that is the only place discovery can find them.
+// ListRootShards exists for the one-shot migration of objects written before
+// the folder existed and is not a substitute.
+//
+// No name filter. Reconstruction asks for everything Skein wrote and decides
+// for itself what a manifest is; filtering here would put that knowledge in
+// two places, and `drive.file` scope already limits results to objects this
+// client created.
+func (b *Backend) List(ctx context.Context) ([]storage.ListedObject, error) {
+	if b.folderID == "" {
+		// No app folder resolved means nothing was ever written through this
+		// backend. An empty result is correct and is NOT the same as a failure
+		// to look, which the caller must classify as indeterminate.
+		return nil, nil
+	}
+
+	var out []storage.ListedObject
+	pageToken := ""
+	for {
+		batch, next, err := b.listFolderPage(ctx, pageToken)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, batch...)
+		if next == "" {
+			return out, nil
+		}
+		pageToken = next
+	}
+}
+
+func (b *Backend) listFolderPage(ctx context.Context, pageToken string) ([]storage.ListedObject, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	values := url.Values{
+		"q":                 {"'" + b.folderID + "' in parents and trashed = false"},
+		"fields":            {"nextPageToken,files(id,name,size)"},
+		"pageSize":          {"1000"},
+		"supportsAllDrives": {"false"},
+	}
+	if pageToken != "" {
+		values.Set("pageToken", pageToken)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, filesEndpoint+"?"+values.Encode(), nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("build folder list request: %w", err)
+	}
+
+	//nolint:bodyclose // drainAndClose below closes it on every path.
+	resp, err := b.httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("list folder objects: %w", err)
+	}
+	defer drainAndClose(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", b.apiError(resp, "list folder objects")
+	}
+
+	var page struct {
+		NextPageToken string `json:"nextPageToken"`
+		Files         []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			Size string `json:"size"`
+		} `json:"files"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&page); err != nil {
+		return nil, "", fmt.Errorf("decode folder list: %w", err)
+	}
+
+	out := make([]storage.ListedObject, 0, len(page.Files))
+	for _, f := range page.Files {
+		out = append(out, storage.ListedObject{
+			ProviderID: f.ID,
+			Name:       f.Name,
+			Size:       parseInt64(f.Size),
+		})
+	}
+	return out, page.NextPageToken, nil
 }

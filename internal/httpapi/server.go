@@ -329,8 +329,14 @@ func (s *Server) mountFiles(api chi.Router) {
 		// Reconcile is N provider calls, bounded by the shared Drive pool. Its
 		// own budget rather than apiRatePerMin: a user hammering it would
 		// spend the pool that uploads and downloads also need.
-		g.With(middleware.RateLimit(middleware.NewLimiter(reconcileRatePerMin))).
-			Post("/system/reconcile", h.Reconcile)
+		// Reconstruct shares reconcile's budget: both walk every drive the
+		// user owns through the same pool, so they draw on the same scarce
+		// resource and should be limited together.
+		g.Group(func(sys chi.Router) {
+			sys.Use(middleware.RateLimit(middleware.NewLimiter(reconcileRatePerMin)))
+			sys.Post("/system/reconcile", h.Reconcile)
+			sys.Post("/system/reconstruct", h.Reconstruct)
+		})
 		g.Delete("/files/{id}/damaged", h.PurgeDamaged)
 
 		g.Get("/folders", h.ListFolders)

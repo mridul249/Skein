@@ -69,6 +69,9 @@ type Service struct {
 	// inline, which is what the single-file paths did before bulk existed and
 	// what tests without a pool get.
 	pool WorkPool
+
+	// accounts names the drives a user has connected, for reconstruction.
+	accounts AccountLister
 }
 
 // WorkPool bounds concurrency and retries rate-limited provider calls.
@@ -82,6 +85,20 @@ type WorkPool interface {
 
 // SetWorkPool installs the shared provider pool. Called during wiring.
 func (s *Service) SetWorkPool(p WorkPool) { s.pool = p }
+
+// AccountLister names the accounts a user has connected.
+//
+// A one-method interface for the same reason WorkPool is one: reconstruction
+// has to scan every drive the user owns, and this package must not import
+// internal/accounts to find out which those are. accounts.Service satisfies it.
+type AccountLister interface {
+	AccountIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+}
+
+// SetAccountLister installs the account source reconstruction scans. Called
+// during wiring. Nil means Reconstruct must be given account ids explicitly,
+// which is what the tests do.
+func (s *Service) SetAccountLister(a AccountLister) { s.accounts = a }
 
 // runPooled runs fn through the pool when one is installed, inline otherwise.
 func (s *Service) runPooled(ctx context.Context, fn func(ctx context.Context) error) error {

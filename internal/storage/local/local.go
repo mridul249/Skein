@@ -184,6 +184,37 @@ func (b *Backend) Delete(_ context.Context, ref storage.ObjectRef) error {
 	return nil
 }
 
+// List enumerates every object in the backend's root, satisfying
+// storage.Lister so reconstruction can discover manifests here.
+//
+// Temporary upload files are excluded: Put writes to a `.upload-*` temp and
+// renames on success, so anything still carrying that prefix is a transfer in
+// flight or the debris of a failed one, never a real object.
+func (b *Backend) List(_ context.Context) ([]storage.ListedObject, error) {
+	entries, err := os.ReadDir(b.root)
+	if err != nil {
+		return nil, fmt.Errorf("list objects: %w", err)
+	}
+	out := make([]storage.ListedObject, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".upload-") {
+			continue
+		}
+		info, ierr := e.Info()
+		if ierr != nil {
+			return nil, fmt.Errorf("stat object %s: %w", e.Name(), ierr)
+		}
+		out = append(out, storage.ListedObject{
+			// The local backend addresses objects by name, so the name is
+			// also the provider id.
+			ProviderID: e.Name(),
+			Name:       e.Name(),
+			Size:       info.Size(),
+		})
+	}
+	return out, nil
+}
+
 // Quota reports capacity. With a fake capacity set it reports that; otherwise
 // it reports the real filesystem.
 func (b *Backend) Quota(_ context.Context) (storage.Quota, error) {

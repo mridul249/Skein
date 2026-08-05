@@ -123,6 +123,27 @@ type NewFile struct {
 	IsEncrypted  bool
 }
 
+// ReconstructedFile is the input to Store.InsertReconstructedFile.
+//
+// Separate from NewFile because the two describe opposite situations. NewFile
+// begins an upload: the store assigns `pending`, and the row becomes `ready`
+// only once every byte has arrived. A reconstructed file has ALREADY been
+// uploaded — its shards are sitting at the provider right now — so it is
+// inserted committed, and its timestamps come from the manifest rather than
+// from the clock, or a recovered library would claim every file was created
+// the moment it was recovered.
+type ReconstructedFile struct {
+	ID           uuid.UUID
+	UserID       uuid.UUID
+	FolderID     *uuid.UUID
+	Name         string
+	SizeBytes    int64
+	DeclaredMime string
+	IsStriped    bool
+	IsEncrypted  bool
+	CreatedAt    time.Time
+}
+
 // NewShard is the input to Store.CreateShard.
 type NewShard struct {
 	ID          uuid.UUID
@@ -182,6 +203,29 @@ type Store interface {
 	HardDeleteFile(ctx context.Context, userID, id uuid.UUID) (int64, error)
 
 	CreateShard(ctx context.Context, n NewShard) (Shard, error)
+
+	// InsertReconstructedFile inserts a file row recovered from a sidecar
+	// manifest, and does NOTHING if a row with that id already exists.
+	//
+	// ADDITIVE ONLY. Reconstruction adds what is missing; it never overwrites
+	// what the database has. The database is authoritative where the two
+	// disagree, because it holds state a manifest cannot know — a file the
+	// user has since renamed, trashed, or that reconcile has marked damaged.
+	// Overwriting on a partial Drive scan is how a recovery destroys good
+	// data, which is a strictly worse outcome than recovering nothing.
+	//
+	// It returns whether it inserted, so a run can report what it actually
+	// added rather than how many rows it looked at.
+	InsertReconstructedFile(ctx context.Context, n ReconstructedFile) (inserted bool, err error)
+
+	// InsertReconstructedShard inserts one shard row, doing nothing if the
+	// (file_id, idx) pair already exists. Same additive-only rule.
+	InsertReconstructedShard(ctx context.Context, n NewShard) (inserted bool, err error)
+
+	// EnsureFolder returns the id of the folder with this name under this
+	// parent, creating it only if no live one exists. Reconstruction rebuilds
+	// a folder path segment by segment through this.
+	EnsureFolder(ctx context.Context, userID uuid.UUID, parentID *uuid.UUID, name string) (uuid.UUID, error)
 	ListShards(ctx context.Context, fileID uuid.UUID) ([]Shard, error)
 	DeleteShards(ctx context.Context, fileID uuid.UUID) (int64, error)
 }

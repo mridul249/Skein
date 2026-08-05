@@ -73,6 +73,13 @@ type Querier interface {
 	// statement so two janitor runs cannot release the same reservation twice.
 	//
 	ExpiredReservations(ctx context.Context) ([]ExpiredReservationsRow, error)
+	// FindLiveFolder looks for an existing folder by name under a parent, so
+	// reconstruction reuses the user's folder rather than creating a duplicate.
+	//
+	// IS NOT DISTINCT FROM, not =, so a NULL parent (a root folder) matches
+	// rather than yielding NULL and returning nothing.
+	//
+	FindLiveFolder(ctx context.Context, arg FindLiveFolderParams) (Folder, error)
 	// FolderDescendants is used to reject a move that would put a folder inside
 	// its own subtree, which would detach the whole branch from the root.
 	//
@@ -93,6 +100,24 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	HardDeleteFile(ctx context.Context, arg HardDeleteFileParams) (int64, error)
+	// Reconstruction queries. All three are ADDITIVE ONLY: reconstruction adds
+	// what is missing and never overwrites what the database has, because the
+	// database holds state a sidecar manifest cannot know (a rename, a trash, a
+	// reconcile verdict). ON CONFLICT DO NOTHING is that rule in SQL.
+	//
+	// No last-write-wins, and no timestamp vectors. One Skein instance per user
+	// means a single writer, so there is no concurrent-update problem to resolve
+	// and updated_at comparison would be sufficient even if there were. Do not
+	// reintroduce a merge algorithm here.
+	// InsertReconstructedFile inserts a file recovered from a manifest.
+	//
+	// Inserted as 'ready' rather than 'pending': the shards are already at the
+	// provider, so the row describes a completed upload, not one in flight.
+	// created_at comes from the manifest so a recovered library does not claim
+	// every file was created at the moment of recovery.
+	//
+	InsertReconstructedFile(ctx context.Context, arg InsertReconstructedFileParams) (int64, error)
+	InsertReconstructedShard(ctx context.Context, arg InsertReconstructedShardParams) (int64, error)
 	// ListAccountCapacityForPlanning returns candidates in most-free-first order,
 	// which is what the greedy planner walks. It is one query rather than a lookup
 	// per account.

@@ -686,6 +686,29 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]Account, error)
 	return out, nil
 }
 
+// AccountIDsForUser names every drive whose objects reconstruction should
+// scan, satisfying files.AccountLister.
+//
+// UNLIKE List, THIS INCLUDES DISABLED ACCOUNTS, and the difference is
+// deliberate. List answers "which drives does this user have?" for the UI, and
+// a disconnected drive is gone as far as they are concerned. Reconstruction
+// asks a different question — "where might the record of my files be?" — and a
+// disconnected drive still physically holds shards and sidecar manifests
+// (Disconnect is a soft delete precisely so those links survive, see #19).
+// Skipping it would silently omit part of the library from a recovery, which
+// is the failure this whole block exists to prevent.
+func (s *Service) AccountIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	stored, err := s.store.ListAccounts(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list accounts: %w", err)
+	}
+	out := make([]uuid.UUID, 0, len(stored))
+	for _, a := range stored {
+		out = append(out, a.ID)
+	}
+	return out, nil
+}
+
 // PoolFor returns per-account and aggregate capacity for the caller.
 //
 // Disabled accounts stay in Accounts but contribute nothing to the totals, so

@@ -171,6 +171,41 @@ func (q *Queries) DeleteFileShards(ctx context.Context, fileID uuid.UUID) (int64
 	return result.RowsAffected(), nil
 }
 
+const findLiveFolder = `-- name: FindLiveFolder :one
+SELECT id, user_id, parent_id, name, created_at, updated_at, deleted_at FROM folders
+ WHERE user_id = $1
+   AND parent_id IS NOT DISTINCT FROM $3::uuid
+   AND name = $2
+   AND deleted_at IS NULL
+ LIMIT 1
+`
+
+type FindLiveFolderParams struct {
+	UserID   uuid.UUID
+	Name     string
+	ParentID *uuid.UUID
+}
+
+// FindLiveFolder looks for an existing folder by name under a parent, so
+// reconstruction reuses the user's folder rather than creating a duplicate.
+//
+// IS NOT DISTINCT FROM, not =, so a NULL parent (a root folder) matches
+// rather than yielding NULL and returning nothing.
+func (q *Queries) FindLiveFolder(ctx context.Context, arg FindLiveFolderParams) (Folder, error) {
+	row := q.db.QueryRow(ctx, findLiveFolder, arg.UserID, arg.Name, arg.ParentID)
+	var i Folder
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ParentID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const folderDescendants = `-- name: FolderDescendants :many
 WITH RECURSIVE subtree AS (
     SELECT f0.id FROM folders f0
@@ -277,6 +312,97 @@ type HardDeleteFileParams struct {
 
 func (q *Queries) HardDeleteFile(ctx context.Context, arg HardDeleteFileParams) (int64, error) {
 	result, err := q.db.Exec(ctx, hardDeleteFile, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const insertReconstructedFile = `-- name: InsertReconstructedFile :execrows
+
+INSERT INTO files (id, user_id, folder_id, name, size_bytes, declared_mime,
+                   is_striped, is_encrypted, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ready', $9, now())
+ON CONFLICT (id) DO NOTHING
+`
+
+type InsertReconstructedFileParams struct {
+	ID           uuid.UUID
+	UserID       uuid.UUID
+	FolderID     *uuid.UUID
+	Name         string
+	SizeBytes    int64
+	DeclaredMime string
+	IsStriped    bool
+	IsEncrypted  bool
+	CreatedAt    pgtype.Timestamptz
+}
+
+// Reconstruction queries. All three are ADDITIVE ONLY: reconstruction adds
+// what is missing and never overwrites what the database has, because the
+// database holds state a sidecar manifest cannot know (a rename, a trash, a
+// reconcile verdict). ON CONFLICT DO NOTHING is that rule in SQL.
+//
+// No last-write-wins, and no timestamp vectors. One Skein instance per user
+// means a single writer, so there is no concurrent-update problem to resolve
+// and updated_at comparison would be sufficient even if there were. Do not
+// reintroduce a merge algorithm here.
+// InsertReconstructedFile inserts a file recovered from a manifest.
+//
+// Inserted as 'ready' rather than 'pending': the shards are already at the
+// provider, so the row describes a completed upload, not one in flight.
+// created_at comes from the manifest so a recovered library does not claim
+// every file was created at the moment of recovery.
+func (q *Queries) InsertReconstructedFile(ctx context.Context, arg InsertReconstructedFileParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertReconstructedFile,
+		arg.ID,
+		arg.UserID,
+		arg.FolderID,
+		arg.Name,
+		arg.SizeBytes,
+		arg.DeclaredMime,
+		arg.IsStriped,
+		arg.IsEncrypted,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const insertReconstructedShard = `-- name: InsertReconstructedShard :execrows
+INSERT INTO file_shards (id, file_id, idx, connected_account_id,
+                         provider_object_id, size_bytes, plain_size_bytes,
+                         plain_offset, sha256)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (file_id, idx) DO NOTHING
+`
+
+type InsertReconstructedShardParams struct {
+	ID                 uuid.UUID
+	FileID             uuid.UUID
+	Idx                int32
+	ConnectedAccountID *uuid.UUID
+	ProviderObjectID   string
+	SizeBytes          int64
+	PlainSizeBytes     int64
+	PlainOffset        int64
+	Sha256             []byte
+}
+
+func (q *Queries) InsertReconstructedShard(ctx context.Context, arg InsertReconstructedShardParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertReconstructedShard,
+		arg.ID,
+		arg.FileID,
+		arg.Idx,
+		arg.ConnectedAccountID,
+		arg.ProviderObjectID,
+		arg.SizeBytes,
+		arg.PlainSizeBytes,
+		arg.PlainOffset,
+		arg.Sha256,
+	)
 	if err != nil {
 		return 0, err
 	}

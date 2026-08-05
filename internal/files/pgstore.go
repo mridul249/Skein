@@ -171,6 +171,78 @@ func (s *PGStore) RecordReconciledHealth(ctx context.Context, userID, id uuid.UU
 	return nil
 }
 
+// InsertReconstructedFile inserts a recovered file row. Additive only: the
+// ON CONFLICT DO NOTHING lives in SQL, so a row the database already holds
+// wins over whatever a manifest says.
+func (s *PGStore) InsertReconstructedFile(ctx context.Context, n ReconstructedFile) (bool, error) {
+	rows, err := s.q.InsertReconstructedFile(ctx, gen.InsertReconstructedFileParams{
+		ID:           n.ID,
+		UserID:       n.UserID,
+		FolderID:     n.FolderID,
+		Name:         n.Name,
+		SizeBytes:    n.SizeBytes,
+		DeclaredMime: n.DeclaredMime,
+		IsStriped:    n.IsStriped,
+		IsEncrypted:  n.IsEncrypted,
+		CreatedAt:    nullTS(&n.CreatedAt),
+	})
+	if err != nil {
+		return false, fmt.Errorf("insert reconstructed file: %w", err)
+	}
+	return rows > 0, nil
+}
+
+// InsertReconstructedShard inserts one recovered shard row, idempotently on
+// (file_id, idx).
+func (s *PGStore) InsertReconstructedShard(ctx context.Context, n NewShard) (bool, error) {
+	rows, err := s.q.InsertReconstructedShard(ctx, gen.InsertReconstructedShardParams{
+		ID:                 n.ID,
+		FileID:             n.FileID,
+		Idx:                n.Index,
+		ConnectedAccountID: n.AccountID,
+		ProviderObjectID:   n.ProviderID,
+		SizeBytes:          n.SizeBytes,
+		PlainSizeBytes:     n.PlainSize,
+		PlainOffset:        n.PlainOffset,
+		Sha256:             n.SHA256,
+	})
+	if err != nil {
+		return false, fmt.Errorf("insert reconstructed shard: %w", err)
+	}
+	return rows > 0, nil
+}
+
+// EnsureFolder reuses a live folder of that name under that parent, creating
+// one only when none exists.
+func (s *PGStore) EnsureFolder(ctx context.Context, userID uuid.UUID, parentID *uuid.UUID, name string) (uuid.UUID, error) {
+	row, err := s.q.FindLiveFolder(ctx, gen.FindLiveFolderParams{
+		UserID:   userID,
+		ParentID: parentID,
+		Name:     name,
+	})
+	if err == nil {
+		return row.ID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, fmt.Errorf("find live folder: %w", err)
+	}
+
+	folder, cerr := s.CreateFolder(ctx, uuid.New(), userID, parentID, name)
+	if cerr != nil {
+		// A concurrent creator won the race; take theirs.
+		if errors.Is(cerr, skerr.ErrConflict) {
+			again, ferr := s.q.FindLiveFolder(ctx, gen.FindLiveFolderParams{
+				UserID: userID, ParentID: parentID, Name: name,
+			})
+			if ferr == nil {
+				return again.ID, nil
+			}
+		}
+		return uuid.Nil, cerr
+	}
+	return folder.ID, nil
+}
+
 // MarkFileFailed records that an upload did not finish.
 func (s *PGStore) MarkFileFailed(ctx context.Context, id uuid.UUID) error {
 	if err := s.q.MarkFileFailed(ctx, id); err != nil {

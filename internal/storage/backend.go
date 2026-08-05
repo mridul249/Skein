@@ -112,6 +112,36 @@ type Backend interface {
 	Kind() Kind
 }
 
+// ListedObject is one object found by Lister.List.
+type ListedObject struct {
+	// ProviderID is the provider's own identifier, the same value an
+	// ObjectRef carries.
+	ProviderID string
+	// Name is the provider-side object name, e.g. a NameForShard result or a
+	// files.ManifestName one.
+	Name string
+	Size int64
+}
+
+// Lister enumerates the objects Skein has written to one account.
+//
+// AN OPTIONAL CAPABILITY, NOT PART OF Backend, and deliberately so. Every
+// other operation in this package addresses an object Skein already knows
+// about, by an id the database holds; listing is the one operation that exists
+// to discover objects the database does NOT know about, which is a different
+// job with a different failure mode. Only reconstruction needs it.
+//
+// A backend that cannot list is not broken. Reconstruction must treat an
+// account it cannot enumerate as INDETERMINATE — "I could not look here" — and
+// never as "there is nothing here", because concluding absence from an
+// unavailable listing is exactly how a recovery decides files are gone when
+// they are not.
+type Lister interface {
+	// List returns every object Skein wrote to this account, scoped to its
+	// app folder. Implementations page internally and return the whole set.
+	List(ctx context.Context) ([]ListedObject, error)
+}
+
 // NameForShard returns the provider-side object name for one shard.
 //
 // The user's filename never reaches the provider. It is metadata Skein holds

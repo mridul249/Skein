@@ -182,3 +182,47 @@ UPDATE files
    AND deleted_at IS NULL
    AND status IN ('ready', 'partially_missing', 'corrupted')
    AND $3 IN ('ready', 'partially_missing', 'corrupted');
+
+-- Reconstruction queries. All three are ADDITIVE ONLY: reconstruction adds
+-- what is missing and never overwrites what the database has, because the
+-- database holds state a sidecar manifest cannot know (a rename, a trash, a
+-- reconcile verdict). ON CONFLICT DO NOTHING is that rule in SQL.
+--
+-- No last-write-wins, and no timestamp vectors. One Skein instance per user
+-- means a single writer, so there is no concurrent-update problem to resolve
+-- and updated_at comparison would be sufficient even if there were. Do not
+-- reintroduce a merge algorithm here.
+
+-- InsertReconstructedFile inserts a file recovered from a manifest.
+--
+-- Inserted as 'ready' rather than 'pending': the shards are already at the
+-- provider, so the row describes a completed upload, not one in flight.
+-- created_at comes from the manifest so a recovered library does not claim
+-- every file was created at the moment of recovery.
+--
+-- name: InsertReconstructedFile :execrows
+INSERT INTO files (id, user_id, folder_id, name, size_bytes, declared_mime,
+                   is_striped, is_encrypted, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ready', $9, now())
+ON CONFLICT (id) DO NOTHING;
+
+-- name: InsertReconstructedShard :execrows
+INSERT INTO file_shards (id, file_id, idx, connected_account_id,
+                         provider_object_id, size_bytes, plain_size_bytes,
+                         plain_offset, sha256)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (file_id, idx) DO NOTHING;
+
+-- FindLiveFolder looks for an existing folder by name under a parent, so
+-- reconstruction reuses the user's folder rather than creating a duplicate.
+--
+-- IS NOT DISTINCT FROM, not =, so a NULL parent (a root folder) matches
+-- rather than yielding NULL and returning nothing.
+--
+-- name: FindLiveFolder :one
+SELECT * FROM folders
+ WHERE user_id = $1
+   AND parent_id IS NOT DISTINCT FROM sqlc.narg('parent_id')::uuid
+   AND name = $2
+   AND deleted_at IS NULL
+ LIMIT 1;

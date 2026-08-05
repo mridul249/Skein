@@ -254,6 +254,9 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	// file operations. Two pools would each stay politely under the cap while
 	// together exceeding it.
 	filesSvc.SetWorkPool(accountsSvc.Pool())
+	// Reconstruction scans every drive the user has connected, including
+	// disabled ones — a disconnected drive still holds shards and manifests.
+	filesSvc.SetAccountLister(accountsSvc)
 
 	var desktopConnect handlers.DesktopConnector
 	if o.desktopConnect != nil {

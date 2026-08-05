@@ -247,6 +247,99 @@ func (m *MemoryStore) RecordReconciledHealth(_ context.Context, userID, id uuid.
 	return nil
 }
 
+// InsertReconstructedFile inserts a recovered file row, or does nothing if one
+// with that id already exists. See the interface doc: additive only.
+func (m *MemoryStore) InsertReconstructedFile(_ context.Context, n ReconstructedFile) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Same constraints the real dialects enforce.
+	if n.SizeBytes < 0 || strings.TrimSpace(n.Name) == "" {
+		return false, skerr.ErrValidation
+	}
+	if _, exists := m.files[n.ID]; exists {
+		// THE IDEMPOTENCE POINT. Not an error and not an update: the row the
+		// database already holds wins, because it may carry state a manifest
+		// cannot know (a rename, a trash, a reconcile verdict).
+		return false, nil
+	}
+	now := m.clock()
+	created := n.CreatedAt
+	if created.IsZero() {
+		created = now
+	}
+	m.files[n.ID] = File{
+		ID:           n.ID,
+		UserID:       n.UserID,
+		FolderID:     n.FolderID,
+		Name:         n.Name,
+		SizeBytes:    n.SizeBytes,
+		DeclaredMime: n.DeclaredMime,
+		IsStriped:    n.IsStriped,
+		IsEncrypted:  n.IsEncrypted,
+		// Committed, not pending: the bytes are already at the provider.
+		Status:    StatusReady,
+		CreatedAt: created,
+		UpdatedAt: now,
+	}
+	return true, nil
+}
+
+// InsertReconstructedShard inserts one recovered shard row, or does nothing if
+// that (file_id, idx) pair is already present.
+func (m *MemoryStore) InsertReconstructedShard(_ context.Context, n NewShard) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if n.SizeBytes < 0 || n.PlainSize < 0 || n.PlainOffset < 0 {
+		return false, skerr.ErrValidation
+	}
+	for _, existing := range m.shards[n.FileID] {
+		if existing.Index == n.Index {
+			return false, nil // file_shards_unique_index, idempotently
+		}
+	}
+	m.shards[n.FileID] = append(m.shards[n.FileID], Shard{
+		ID:          n.ID,
+		FileID:      n.FileID,
+		Index:       n.Index,
+		AccountID:   n.AccountID,
+		ProviderID:  n.ProviderID,
+		SizeBytes:   n.SizeBytes,
+		PlainSize:   n.PlainSize,
+		PlainOffset: n.PlainOffset,
+		SHA256:      n.SHA256,
+		CreatedAt:   m.clock(),
+	})
+	sort.Slice(m.shards[n.FileID], func(i, j int) bool {
+		return m.shards[n.FileID][i].Index < m.shards[n.FileID][j].Index
+	})
+	return true, nil
+}
+
+// EnsureFolder returns the live folder with this name under this parent,
+// creating it only if none exists.
+func (m *MemoryStore) EnsureFolder(_ context.Context, userID uuid.UUID, parentID *uuid.UUID, name string) (uuid.UUID, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if strings.TrimSpace(name) == "" {
+		return uuid.Nil, skerr.ErrValidation
+	}
+	for id, f := range m.folders {
+		if f.UserID == userID && f.DeletedAt == nil && f.Name == name && samePtr(f.ParentID, parentID) {
+			return id, nil
+		}
+	}
+	now := m.clock()
+	id := uuid.New()
+	m.folders[id] = Folder{
+		ID: id, UserID: userID, ParentID: parentID, Name: name,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	return id, nil
+}
+
 // MarkFileFailed records that an upload did not finish.
 func (m *MemoryStore) MarkFileFailed(_ context.Context, id uuid.UUID) error {
 	m.mu.Lock()
