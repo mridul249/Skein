@@ -99,6 +99,9 @@ func (d *Dumper) Dump(ctx context.Context, w io.Writer) error {
 // whose exit status could mask pg_dump's, and no quoting for a connection
 // string to escape from.
 func (d *Dumper) dumpPostgres(ctx context.Context, w io.Writer) error {
+	// #nosec G204 -- argument list, never a shell, so there is no quoting to
+	// escape from. DatabaseURL is operator configuration (SKEIN_DATABASE_URL),
+	// not request data: no HTTP handler can influence it.
 	cmd := exec.CommandContext(ctx, "pg_dump",
 		"--no-owner", "--no-privileges", d.DatabaseURL)
 
@@ -166,6 +169,8 @@ func (d *Dumper) dumpSQLite(ctx context.Context, w io.Writer) error {
 		return fmt.Errorf("vacuum into: %w", err)
 	}
 
+	// #nosec G304 -- target is a path this function just created itself via
+	// os.CreateTemp; it is never caller-supplied.
 	f, err := os.Open(target)
 	if err != nil {
 		return fmt.Errorf("open snapshot: %w", err)

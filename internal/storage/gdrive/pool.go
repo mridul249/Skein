@@ -198,6 +198,9 @@ func backoffFor(attempt int, err error) time.Duration {
 	if backoff > maxBackoff {
 		backoff = maxBackoff
 	}
+	// #nosec G404 -- retry jitter. Its purpose is to desynchronise concurrent
+	// retries, not to be unpredictable; nothing security-relevant depends on
+	// it. crypto/rand here would cost entropy for no gain.
 	return time.Duration(rand.Int64N(int64(backoff)) + int64(baseBackoff)/2)
 }
 
