@@ -293,7 +293,7 @@ func (s *Service) backfillOne(ctx context.Context, userID uuid.UUID, f File, pre
 	// TestABackfilledManifestIsIdenticalToAnUploadTimeOne.
 	full := f
 	full.Shards = shards
-	sealed, serr := SealManifest(s.keyring, ManifestFor(full, s.folderPathFor(ctx, userID, f.FolderID)))
+	sealed, serr := SealManifest(s.keyring, ManifestFor(full, s.folderPathFor(ctx, userID, f.FolderID), s.emailFor(ctx, userID)))
 	if serr != nil {
 		result.State = BackfillFailed
 		result.Reason = "the manifest could not be built"

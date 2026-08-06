@@ -59,6 +59,12 @@ type ReconstructReport struct {
 	// decrypted. Each one is a file that exists and was NOT recovered.
 	ManifestsUnreadable int `json:"manifests_unreadable"`
 
+	// ManifestsForOtherUsers is how many belonged to a different account on a
+	// shared Google Drive. Reported rather than silent so a user recovering
+	// nothing can tell "there was nothing of mine here" from "I found things
+	// and they were someone else's".
+	ManifestsForOtherUsers int `json:"manifests_for_other_users"`
+
 	// DryRun is true when this report describes what WOULD happen. Nothing was
 	// written.
 	DryRun bool `json:"dry_run"`
@@ -165,6 +171,18 @@ func (s *Service) reconstruct(ctx context.Context, userID uuid.UUID, accountIDs 
 	}
 	report.ManifestsFound = len(found)
 
+	// The caller's durable identity, resolved once. Empty when no directory is
+	// wired (tests) or the lookup fails — in which case only the user-id
+	// anchor applies and a rebuilt database recovers nothing, which is the
+	// pre-fix behaviour rather than a new failure.
+	var callerEmail string
+	if s.users != nil {
+		if email, eerr := s.users.EmailForUser(ctx, userID); eerr == nil {
+			callerEmail = strings.ToLower(strings.TrimSpace(email))
+		}
+	}
+	var skippedOther int
+
 	// Apply in a deterministic order so a run's log is readable and two runs
 	// over the same data do the same things in the same sequence.
 	ids := make([]uuid.UUID, 0, len(found))
@@ -188,10 +206,22 @@ func (s *Service) reconstruct(ctx context.Context, userID uuid.UUID, accountIDs 
 			continue
 		}
 
-		// OWNERSHIP. A manifest belonging to another user is skipped outright
-		// and is not an error: on a shared Google account it is the expected
-		// case, not a fault.
-		if m.UserID != userID {
+		// OWNERSHIP, ON TWO ANCHORS — and the second one is what makes real
+		// recovery possible.
+		//
+		// The user id matches while the database survives. After a REBUILD it
+		// never matches: registration mints a fresh random UUID, so every
+		// manifest carries an id that no longer exists. The owner hit exactly
+		// this — fresh database, same email, both drives reconnected,
+		// 12 files recovered as ZERO.
+		//
+		// So a manifest is also claimable by EMAIL, which is unique per
+		// instance and is what the user re-enters when rebuilding. Isolation
+		// is unchanged: a different email still recovers nothing, because
+		// email is exactly as unforgeable here as a user id was — both come
+		// out of a manifest only readable with the master key.
+		if !s.claims(ctx, userID, callerEmail, m) {
+			skippedOther++
 			continue
 		}
 
@@ -209,8 +239,11 @@ func (s *Service) reconstruct(ctx context.Context, userID uuid.UUID, accountIDs 
 	}
 	sort.Strings(report.IncompleteReasons)
 
+	report.ManifestsForOtherUsers = skippedOther
+
 	report.FinishedAt = time.Now()
 	s.log.InfoContext(ctx, "reconstruct finished",
+		slog.Int("other_users", skippedOther),
 		slog.Int("accounts", len(report.Accounts)),
 		slog.Int("manifests", report.ManifestsFound),
 		slog.Int("unreadable", report.ManifestsUnreadable),
@@ -233,6 +266,41 @@ func (s *Service) ReconstructAll(ctx context.Context, userID uuid.UUID, dryRun b
 		return ReconstructReport{}, fmt.Errorf("list connected drives: %w", err)
 	}
 	return s.reconstruct(ctx, userID, ids, dryRun)
+}
+
+// claims reports whether this caller owns the manifest.
+//
+// Two anchors, checked in order of strength:
+//
+//  1. The user id matches — the normal case, and the only one available while
+//     the database that wrote the manifest is still alive.
+//  2. The email matches — the RECOVERY case. A rebuilt database mints a new
+//     user id, so this is the only thing that can still match. Compared
+//     case-insensitively because users.email is UNIQUE NOCASE and the address
+//     someone retypes will not always match its stored casing.
+//
+// An empty email on either side never matches: a manifest written before this
+// field existed cannot be claimed by email, and falls back to the user id
+// alone. That is the correct conservative reading — it means such a manifest
+// is unrecoverable after a rebuild, which is a real limitation, not a reason
+// to relax the check.
+func (s *Service) claims(ctx context.Context, userID uuid.UUID, callerEmail string, m Manifest) bool {
+	if m.UserID == userID {
+		return true
+	}
+	if callerEmail == "" || m.UserEmail == "" {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(m.UserEmail), callerEmail) {
+		return false
+	}
+	// Claimed by email: the manifest was written by a previous incarnation of
+	// this account. Logged because it is the signature of a genuine recovery
+	// and an operator should be able to see it happen.
+	s.log.InfoContext(ctx, "claiming a manifest by email after a database rebuild",
+		slog.String("file_id", m.FileID.String()),
+		slog.String("previous_user_id", m.UserID.String()))
+	return true
 }
 
 // scanAccount lists one account and fetches every manifest it holds.

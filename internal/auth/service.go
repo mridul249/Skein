@@ -414,6 +414,34 @@ func (s *Service) Logout(ctx context.Context, presented string, meta RequestMeta
 	return nil
 }
 
+// EmailForUser resolves a user's durable identity, satisfying
+// files.UserDirectory.
+//
+// Sidecar manifests record it because a user id cannot survive losing the
+// database — registration mints a fresh random UUID, so a rebuilt instance can
+// never match a manifest written by the old one. Email is UNIQUE per instance
+// and is what the user re-enters when rebuilding.
+func (s *Service) EmailForUser(ctx context.Context, userID uuid.UUID) (string, error) {
+	u, err := s.store.GetUserByID(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("look up user: %w", err)
+	}
+	return u.Email, nil
+}
+
+// UserIDForEmail is the reverse lookup, for completeness of the interface.
+func (s *Service) UserIDForEmail(ctx context.Context, email string) (uuid.UUID, error) {
+	normalised, err := normaliseEmail(email)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	u, err := s.store.GetUserByEmail(ctx, normalised)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("look up user: %w", err)
+	}
+	return u.ID, nil
+}
+
 // Me returns the authenticated user.
 func (s *Service) Me(ctx context.Context, userID uuid.UUID) (User, error) {
 	u, err := s.store.GetUserByID(ctx, userID)
