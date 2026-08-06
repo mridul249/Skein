@@ -154,6 +154,18 @@ func (s *PGStore) SetAppFolderID(ctx context.Context, id uuid.UUID, folderID str
 	return *got, nil
 }
 
+// RebindAppFolderID overwrites the folder id. See the query comment for why
+// recovery needs a write SetAppFolderID above deliberately refuses.
+func (s *PGStore) RebindAppFolderID(ctx context.Context, id uuid.UUID, folderID string) error {
+	if err := s.q.RebindAppFolderID(ctx, gen.RebindAppFolderIDParams{
+		ID:          id,
+		AppFolderID: &folderID,
+	}); err != nil {
+		return fmt.Errorf("rebind app folder id: %w", err)
+	}
+	return nil
+}
+
 // ClearAccountTokens wipes stored credentials, leaving the row and its id in
 // place. See the Store interface, and Service.Disconnect for why the row has
 // to survive.

@@ -410,6 +410,32 @@ func (q *Queries) NextAccountOrdinal(ctx context.Context, userID uuid.UUID) (int
 	return column_1, err
 }
 
+const rebindAppFolderID = `-- name: RebindAppFolderID :exec
+UPDATE connected_accounts
+   SET app_folder_id = $2,
+       updated_at    = now()
+ WHERE id = $1
+`
+
+type RebindAppFolderIDParams struct {
+	ID          uuid.UUID
+	AppFolderID *string
+}
+
+// RebindAppFolderID overwrites the folder id unconditionally.
+//
+// The single-shot SetAppFolderID above is right for first use and wrong for
+// recovery, which exists precisely to correct a value that is already set and
+// already wrong: a rebuilt database resolves a folder by a name derived from
+// the user id, the new user id derives a different name, and the account ends
+// up bound to a fresh empty folder while its shards sit in the old one. Only
+// reconstruction may call this, and only with a folder it has just read
+// claimed manifests out of.
+func (q *Queries) RebindAppFolderID(ctx context.Context, arg RebindAppFolderIDParams) error {
+	_, err := q.db.Exec(ctx, rebindAppFolderID, arg.ID, arg.AppFolderID)
+	return err
+}
+
 const setAccountStatus = `-- name: SetAccountStatus :exec
 UPDATE connected_accounts
    SET status     = $2,

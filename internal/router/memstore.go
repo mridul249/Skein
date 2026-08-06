@@ -47,6 +47,14 @@ func (m *MemoryStore) AddAccount(id uuid.UUID, ordinal int32, email string, tota
 	}
 }
 
+// RemoveAccount forgets an account, as disconnecting a drive does. Tests that
+// rebuild a database use it to retire the ids that database minted.
+func (m *MemoryStore) RemoveAccount(id uuid.UUID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.accounts, id)
+}
+
 // Candidates returns the registered accounts, most free space first.
 func (m *MemoryStore) Candidates(context.Context, uuid.UUID) ([]Candidate, error) {
 	m.mu.Lock()

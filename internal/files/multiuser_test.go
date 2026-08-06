@@ -47,6 +47,9 @@ type sharedDriveFixture struct {
 	roots map[uuid.UUID]string
 	// throttled drives return ErrRateLimited from every read.
 	throttled map[uuid.UUID]bool
+	// parents overrides the folder a listing reports per object name, so a
+	// test can put two users' data in two folders on one drive.
+	parents *map[string]string
 	// refuseManifests makes every backend reject a manifest write while
 	// leaving shard writes alone, so the "a manifest failure must not fail the
 	// upload" requirement can be exercised.
@@ -61,6 +64,9 @@ type sharedDriveFixture struct {
 	user1    uuid.UUID
 	user2    uuid.UUID
 }
+
+// sharedDriveCapacity is how much each fixture drive holds.
+const sharedDriveCapacity = 8 << 20
 
 // testUserDirectory maps user ids to the durable email identity a manifest
 // records. Satisfies files.UserDirectory.
@@ -107,6 +113,43 @@ func (d *testUserDirectory) UserIDForEmail(_ context.Context, email string) (uui
 func (f *sharedDriveFixture) destroyDatabase(t *testing.T) {
 	t.Helper()
 	f.rebuild(t)
+	f.reconnectDrives(t)
+}
+
+// reconnectDrives re-mints every connected-account id, exactly as reconnecting
+// a Drive account after a rebuild does.
+//
+// WITHOUT THIS THE FIXTURE LIES, and it lied for a whole session. A rebuilt
+// database has no connected_accounts rows; the user reconnects, and each drive
+// gets a FRESH uuid. Manifests, however, record each shard's location by the
+// OLD connected-account id — the same kind of database-local identifier as
+// user_id, one layer down. Keeping the ids stable across destroyDatabase meant
+// every recovery test resolved shard accounts that a real recovery cannot,
+// which is why "7 files, 0 shards" reached a live user on 2026-08-06: the file
+// rows came back and every shard insert failed its foreign key.
+//
+// The provider objects and their directories are untouched. Only the
+// database's idea of what to call each drive changes, which is precisely what
+// a reconnect changes.
+func (f *sharedDriveFixture) reconnectDrives(t *testing.T) {
+	t.Helper()
+	fresh := make([]uuid.UUID, 0, len(f.accounts))
+	for i, old := range f.accounts {
+		id := uuid.New()
+		fresh = append(fresh, id)
+
+		f.backends[id] = f.backends[old]
+		delete(f.backends, old)
+		f.roots[id] = f.roots[old]
+		delete(f.roots, old)
+		if f.throttled[old] {
+			f.throttled[id] = true
+			delete(f.throttled, old)
+		}
+		f.router.AddAccount(id, int32(i+1), "shared@example.com", sharedDriveCapacity, 0)
+		f.router.RemoveAccount(old)
+	}
+	f.accounts = fresh
 }
 
 // objects returns everything present on one backend, name to contents, read
@@ -150,7 +193,7 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 		t.Fatalf("NewKeyring() = %v", err)
 	}
 
-	const capacityEach = 8 << 20
+	const capacityEach = sharedDriveCapacity
 	routerStore := router.NewMemoryStore()
 	backends := map[uuid.UUID]*local.Backend{}
 	roots := map[uuid.UUID]string{}
@@ -178,6 +221,7 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 
 	throttled := map[uuid.UUID]bool{}
 	refuse := new(bool)
+	parents := &map[string]string{}
 
 	// A stand-in user directory. Emails are the DURABLE identity a manifest
 	// records, so a fixture without one cannot exercise recovery after a
@@ -190,7 +234,8 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 		svc := files.NewService(
 			st,
 			files.NewStripingPlanner(planner, reserver),
-			multiResolver{backends: backends, throttled: throttled, refuseManifests: refuse},
+			multiResolver{backends: backends, throttled: throttled,
+				refuseManifests: refuse, parents: parents},
 			ring,
 			files.Config{Encrypt: false, MaxUploadBytes: 1 << 40},
 			logger,
@@ -203,7 +248,7 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 	f := &sharedDriveFixture{
 		svc: svc, store: store, router: routerStore,
 		backends: backends, roots: roots, accounts: ids,
-		throttled: throttled, refuseManifests: refuse, ring: ring,
+		throttled: throttled, refuseManifests: refuse, parents: parents, ring: ring,
 		user1: uuid.New(), user2: uuid.New(),
 	}
 	f.dir = dir

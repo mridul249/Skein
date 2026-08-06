@@ -142,6 +142,10 @@ type Store interface {
 	// SetAppFolderID writes the folder id only if none is set yet, and
 	// returns ErrNotFound when another writer got there first.
 	SetAppFolderID(ctx context.Context, id uuid.UUID, folderID string) (string, error)
+	// RebindAppFolderID overwrites the folder id unconditionally. Recovery
+	// only: it exists to correct a value that is set and wrong, which the
+	// single-shot SetAppFolderID above cannot do.
+	RebindAppFolderID(ctx context.Context, id uuid.UUID, folderID string) error
 	DeleteAccount(ctx context.Context, userID, id uuid.UUID) (int64, error)
 
 	UpsertCapacity(ctx context.Context, accountID uuid.UUID, total, used int64) error

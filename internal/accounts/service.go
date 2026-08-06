@@ -799,6 +799,29 @@ func (s *Service) invalidate(accountID uuid.UUID) {
 	}
 }
 
+// RebindAppFolder repoints an account at a folder that already holds its
+// objects, satisfying files.FolderRebinder. Recovery calls it; nothing else
+// should.
+//
+// The invalidate() at the end is not optional. Resolver caches a backend per
+// account and that backend captured the OLD folder id at construction, so
+// without dropping it every upload for the rest of the process would keep
+// writing to the folder this call just corrected — the cache would silently
+// undo the fix.
+func (s *Service) RebindAppFolder(ctx context.Context, accountID uuid.UUID, folderID string) error {
+	if folderID == "" {
+		return fmt.Errorf("rebind app folder: empty folder id")
+	}
+	if err := s.store.RebindAppFolderID(ctx, accountID, folderID); err != nil {
+		return err
+	}
+	s.log.InfoContext(ctx, "rebound an account's app folder after recovery",
+		slog.String("account_id", accountID.String()),
+		slog.String("folder_id", folderID))
+	s.invalidate(accountID)
+	return nil
+}
+
 // PurgeExpiredOAuthStates removes abandoned authorisations.
 func (s *Service) PurgeExpiredOAuthStates(ctx context.Context) (int64, error) {
 	n, err := s.store.DeleteExpiredOAuthStates(ctx)
