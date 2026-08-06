@@ -102,6 +102,33 @@ type BackfillReport struct {
 	Results  []BackfillResult `json:"results"`
 }
 
+// RewriteManifests rewrites EVERY manifest, whether or not one already exists.
+//
+// Needed because a manifest written before a format field existed cannot be
+// repaired from the drives — it has to be regenerated from the database. The
+// case that forced this: manifests written before `user_email` carry no
+// durable identity, so they are unrecoverable after a database rebuild (issue
+// #52), and ordinary backfill SKIPS them precisely because a manifest is
+// already there.
+//
+// Same code path as backfill, with the coverage check bypassed.
+func (s *Service) RewriteManifestsForUser(ctx context.Context, userID uuid.UUID) (BackfillReport, error) {
+	if s.accounts == nil {
+		return BackfillReport{}, fmt.Errorf("files: no account lister wired")
+	}
+	ids, err := s.accounts.AccountIDsForUser(ctx, userID)
+	if err != nil {
+		return BackfillReport{}, fmt.Errorf("list connected drives: %w", err)
+	}
+	return s.RewriteManifests(ctx, userID, ids)
+}
+
+// RewriteManifests regenerates manifests for the named accounts. Exported so
+// tests can name accounts explicitly, as BackfillManifests does.
+func (s *Service) RewriteManifests(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID) (BackfillReport, error) {
+	return s.backfillManifests(ctx, userID, accountIDs, false, true)
+}
+
 // BackfillManifests writes a sidecar manifest for every file that lacks one.
 //
 // WHY THIS EXISTS: manifests are written at upload commit, so every file
@@ -118,14 +145,14 @@ type BackfillReport struct {
 // A file whose accounts could not be listed is INDETERMINATE. It is not
 // covered, not failed, and the run is not complete.
 func (s *Service) BackfillManifests(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID) (BackfillReport, error) {
-	return s.backfillManifests(ctx, userID, accountIDs, false)
+	return s.backfillManifests(ctx, userID, accountIDs, false, false)
 }
 
 // backfillManifests is the shared implementation. dryRun reports coverage
 // without writing, which is what ManifestCoverageForUser needs — one code path
 // so the numbers a user sees before acting are produced by the same logic that
 // acts.
-func (s *Service) backfillManifests(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID, dryRun bool) (BackfillReport, error) {
+func (s *Service) backfillManifests(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID, dryRun, rewrite bool) (BackfillReport, error) {
 	report := BackfillReport{StartedAt: time.Now(), Complete: true, DryRun: dryRun}
 
 	// One listing per account, up front. Coverage is a question about what is
@@ -153,7 +180,7 @@ func (s *Service) backfillManifests(ctx context.Context, userID uuid.UUID, accou
 	}
 
 	for _, f := range files {
-		result := s.backfillOne(ctx, userID, f, present, dryRun)
+		result := s.backfillOne(ctx, userID, f, present, dryRun, rewrite)
 		report.Results = append(report.Results, result)
 
 		report.Coverage.Files++
@@ -208,7 +235,7 @@ func (s *Service) ManifestCoverageForUser(ctx context.Context, userID uuid.UUID)
 	if err != nil {
 		return BackfillReport{}, fmt.Errorf("list connected drives: %w", err)
 	}
-	return s.backfillManifests(ctx, userID, ids, true)
+	return s.backfillManifests(ctx, userID, ids, true, false)
 }
 
 // BackfillManifestsForUser runs backfill across every drive the user has
@@ -226,7 +253,7 @@ func (s *Service) BackfillManifestsForUser(ctx context.Context, userID uuid.UUID
 }
 
 // backfillOne covers a single file.
-func (s *Service) backfillOne(ctx context.Context, userID uuid.UUID, f File, present map[uuid.UUID]map[uuid.UUID]bool, dryRun bool) BackfillResult {
+func (s *Service) backfillOne(ctx context.Context, userID uuid.UUID, f File, present map[uuid.UUID]map[uuid.UUID]bool, dryRun, rewrite bool) BackfillResult {
 	result := BackfillResult{FileID: f.ID}
 
 	// A manifest promising recovery of a file with a confirmed-missing shard
@@ -268,7 +295,7 @@ func (s *Service) backfillOne(ctx context.Context, userID uuid.UUID, f File, pre
 			result.Reason = "a drive holding a shard of this file could not be listed"
 			return result
 		}
-		if covered[f.ID] {
+		if covered[f.ID] && !rewrite {
 			result.Copies++
 			continue
 		}

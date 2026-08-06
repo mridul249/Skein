@@ -378,3 +378,71 @@ func TestBackfillTreatsAnUnreachableDriveAsIndeterminate(t *testing.T) {
 		}
 	}
 }
+
+// A manifest written before `user_email` existed cannot be repaired from the
+// drives — only regenerated from the database. Ordinary backfill SKIPS it,
+// because a manifest is already there, so a rewrite mode is the only way to
+// make an existing library recoverable after issue #52.
+//
+// THIS IS THE UPGRADE PATH FOR A REAL LIBRARY. Without it, every file uploaded
+// before the fix stays permanently unrecoverable after a database rebuild,
+// while coverage cheerfully reports 100%.
+func TestRewriteRepairsManifestsMissingTheEmailAnchor(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	const email = "owner@example.com"
+	f.dir.set(f.user1, email)
+	file := f.uploadAs(t, f.user1, "legacy.bin", randomBytes(t, 3<<20))
+
+	// Simulate a pre-fix manifest: same file, no email. Written by hand
+	// because no current code path can produce one.
+	stored, gerr := f.svc.Get(ctx, f.user1, file.ID)
+	if gerr != nil {
+		t.Fatalf("Get() = %v", gerr)
+	}
+	legacy := files.ManifestFor(stored, nil, "") // no email, as before the fix
+	sealed, serr := files.SealManifest(f.ring, legacy)
+	if serr != nil {
+		t.Fatalf("SealManifest() = %v", serr)
+	}
+	for _, acct := range f.accounts {
+		if _, perr := f.backends[acct].Put(ctx, bytes.NewReader(sealed), storage.ObjectSpec{
+			Name: files.ManifestName(file.ID), Size: int64(len(sealed)),
+		}); perr != nil {
+			t.Fatalf("overwrite with a legacy manifest: %v", perr)
+		}
+	}
+
+	// Ordinary backfill sees a manifest and leaves it alone — correct, and
+	// exactly why a rewrite mode is needed.
+	plain, berr := f.svc.BackfillManifests(ctx, f.user1, f.accounts)
+	if berr != nil {
+		t.Fatalf("BackfillManifests() = %v", berr)
+	}
+	if plain.Results[0].State != files.BackfillAlreadyCovered {
+		t.Errorf("plain backfill state = %q, want %q", plain.Results[0].State,
+			files.BackfillAlreadyCovered)
+	}
+	after := findAnyManifest(t, f, file.ID)
+	m, oerr := files.OpenManifest(f.ring, file.ID, after)
+	if oerr != nil {
+		t.Fatalf("OpenManifest() = %v", oerr)
+	}
+	if m.UserEmail != "" {
+		t.Fatal("the legacy manifest was already repaired; this test proves nothing")
+	}
+
+	// The rewrite repairs it.
+	if _, rerr := f.svc.RewriteManifests(ctx, f.user1, f.accounts); rerr != nil {
+		t.Fatalf("RewriteManifests() = %v", rerr)
+	}
+	repaired, oerr2 := files.OpenManifest(f.ring, file.ID, findAnyManifest(t, f, file.ID))
+	if oerr2 != nil {
+		t.Fatalf("OpenManifest() after rewrite = %v", oerr2)
+	}
+	if repaired.UserEmail != email {
+		t.Errorf("user_email = %q after a rewrite, want %q; the library is still "+
+			"unrecoverable after a database rebuild", repaired.UserEmail, email)
+	}
+}
