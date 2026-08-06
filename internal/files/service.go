@@ -72,6 +72,9 @@ type Service struct {
 
 	// accounts names the drives a user has connected, for reconstruction.
 	accounts AccountLister
+
+	// users resolves the durable identity a manifest records.
+	users UserDirectory
 }
 
 // WorkPool bounds concurrency and retries rate-limited provider calls.
@@ -94,6 +97,24 @@ func (s *Service) SetWorkPool(p WorkPool) { s.pool = p }
 type AccountLister interface {
 	AccountIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 }
+
+// UserDirectory resolves a user's durable identity — their email address.
+//
+// A one-method interface for the same reason WorkPool and AccountLister are:
+// this package must not import internal/auth. auth.Service satisfies it.
+//
+// Needed because a manifest has to carry something that survives losing the
+// database. User ids are random UUIDs minted at registration; email is what
+// the user re-enters when rebuilding, and is UNIQUE per instance.
+type UserDirectory interface {
+	EmailForUser(ctx context.Context, userID uuid.UUID) (string, error)
+	UserIDForEmail(ctx context.Context, email string) (uuid.UUID, error)
+}
+
+// SetUserDirectory installs the identity lookup manifests and reconstruction
+// need. Nil means manifests carry no email, which makes them unrecoverable
+// after a database rebuild — so it is wired in app.go and only tests omit it.
+func (s *Service) SetUserDirectory(d UserDirectory) { s.users = d }
 
 // SetAccountLister installs the account source reconstruction scans. Called
 // during wiring. Nil means Reconstruct must be given account ids explicitly,

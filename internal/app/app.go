@@ -257,6 +257,10 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	// Reconstruction scans every drive the user has connected, including
 	// disabled ones — a disconnected drive still holds shards and manifests.
 	filesSvc.SetAccountLister(accountsSvc)
+	// The durable identity manifests record, so a rebuilt database can still
+	// claim them. Without this, recovery after losing the database finds
+	// nothing — see the manifest UserEmail field.
+	filesSvc.SetUserDirectory(authSvc)
 
 	var desktopConnect handlers.DesktopConnector
 	if o.desktopConnect != nil {
