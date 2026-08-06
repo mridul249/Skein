@@ -76,6 +76,29 @@ lint:
 	go vet -tags desktop $(PKG)
 	$(GOBIN)/golangci-lint run
 	$(GOBIN)/golangci-lint run --build-tags desktop
+	@# The FRONTEND typecheck, and it is not optional padding.
+	@#
+	@# `make desktop` runs `tsc -b`, which checks src AND tests/browser via
+	@# tsconfig.app.json. Nothing else did, so a type error in the browser
+	@# fixture could only ever be found by a full Wails build — minutes long,
+	@# and not what anyone runs after editing a type. That is exactly how
+	@# adding FileItem.reconciled_at shipped a broken build on 2026-08-06 while
+	@# the session reported "typecheck clean": `tsc --noEmit -p tsconfig.json`
+	@# was run instead, and the root tsconfig is `"files": []` plus a project
+	@# reference, so with --noEmit it checks NOTHING and exits 0.
+	@#
+	@# `npm run typecheck` (tsc -b --force) is the project's own script and
+	@# catches all of it. Use it; do not invent a tsc invocation.
+	@#
+	@# Skipped with a clear message when dependencies are not installed, rather
+	@# than failing on a missing tsc: a Go-only contributor running `make lint`
+	@# should not be blocked by a frontend toolchain they have not set up. The
+	@# message says what was NOT checked, so a skip cannot be mistaken for a pass.
+	@if [ -d web/node_modules ]; then \
+		cd web && npm run typecheck; \
+	else \
+		echo "SKIPPED frontend typecheck: web/node_modules is absent (run 'cd web && npm ci')"; \
+	fi
 
 ## sqlc: regenerate internal/db/gen from queries (never hand-edit the output)
 sqlc:
