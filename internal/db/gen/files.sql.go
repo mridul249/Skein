@@ -409,6 +409,76 @@ func (q *Queries) InsertReconstructedShard(ctx context.Context, arg InsertRecons
 	return result.RowsAffected(), nil
 }
 
+const listAllFilesPage = `-- name: ListAllFilesPage :many
+SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256, is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at FROM files
+ WHERE user_id = $1
+   AND deleted_at IS NULL
+   AND status IN ('ready', 'partially_missing', 'corrupted')
+   AND ($3::timestamptz IS NULL
+        OR (created_at, id) < ($3::timestamptz,
+                               $4::uuid))
+ ORDER BY created_at DESC, id DESC
+ LIMIT $2
+`
+
+type ListAllFilesPageParams struct {
+	UserID          uuid.UUID
+	Limit           int32
+	CursorCreatedAt pgtype.Timestamptz
+	CursorID        *uuid.UUID
+}
+
+// ListAllFilesPage returns one page of EVERY live file a user owns, in every
+// folder at every depth.
+//
+// THE ABSENCE OF A folder_id PREDICATE IS THE POINT. ListFiles above filters
+// `folder_id IS NOT DISTINCT FROM $folder_id`, so passing NULL there means the
+// ROOT folder rather than "everywhere" — which is how reconcile came to check
+// 2 of 20 files while reporting itself complete (known issue #50). Whole-
+// library operations use this query; folder browsing uses that one.
+//
+// Keyset-paginated on (created_at, id) exactly as ListFiles is, so a library
+// larger than one page is still read in full without OFFSET re-scanning.
+func (q *Queries) ListAllFilesPage(ctx context.Context, arg ListAllFilesPageParams) ([]File, error) {
+	rows, err := q.db.Query(ctx, listAllFilesPage,
+		arg.UserID,
+		arg.Limit,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []File{}
+	for rows.Next() {
+		var i File
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.FolderID,
+			&i.Name,
+			&i.SizeBytes,
+			&i.DeclaredMime,
+			&i.ContentSha256,
+			&i.IsStriped,
+			&i.IsEncrypted,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.ReconciledAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChildFolders = `-- name: ListChildFolders :many
 SELECT id, user_id, parent_id, name, created_at, updated_at, deleted_at FROM folders
  WHERE user_id = $1

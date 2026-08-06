@@ -166,6 +166,14 @@ type ListParams struct {
 	CursorID        *uuid.UUID
 }
 
+// ListAllPageSize is how many rows ListAllFiles fetches per round trip.
+//
+// Exported so a test can build a library that provably spans more than one
+// page. Silent truncation at a page boundary is the same failure shape as
+// issue #50 one level up — an operation reporting itself complete over a
+// subset — and it fails at exactly the library size where it matters most.
+const ListAllPageSize = 500
+
 // Store is the persistence the files service needs. Every method that reads a
 // user-owned row takes a user id and filters on it in SQL, per Rules.md §2.7 —
 // there is deliberately no "fetch then check ownership" shape anywhere here.
@@ -195,7 +203,32 @@ type Store interface {
 	// either.
 	RecordReconciledHealth(ctx context.Context, userID, id uuid.UUID, status string, at time.Time) error
 	GetFile(ctx context.Context, userID, id uuid.UUID) (File, error)
+	// ListFiles returns ONE PAGE of ONE FOLDER. A nil ListParams.FolderID
+	// means the ROOT folder, not "everywhere" — it is the browse query behind
+	// GET /api/files.
+	//
+	// Do not use it to mean "the whole library". See ListAllFiles and known
+	// issue #50.
 	ListFiles(ctx context.Context, userID uuid.UUID, p ListParams) ([]File, error)
+
+	// ListAllFiles returns every live file the user owns, in every folder, at
+	// every depth, across every page.
+	//
+	// A SEPARATE METHOD RATHER THAN A ListParams FLAG, and the distinction is
+	// the whole reason issue #50 happened. With a flag, nil FolderID would
+	// have to mean "the root" in one mode and "everywhere" in another — the
+	// same field carrying two opposite meanings, distinguished by a second
+	// field somebody has to remember to set. Reconcile did not set it, and got
+	// the root-only reading while believing it had the library; it reported
+	// `complete: true` over 2 of the owner's 20 files.
+	//
+	// An explicit method cannot be got wrong by omission. Whole-library
+	// operations — reconcile, manifest backfill, anything that sweeps — call
+	// this; folder browsing calls ListFiles.
+	//
+	// Implementations page internally and return the whole set: a caller that
+	// had to remember to loop would be the same defect one layer along.
+	ListAllFiles(ctx context.Context, userID uuid.UUID) ([]File, error)
 	ListTrashed(ctx context.Context, userID uuid.UUID, limit int32) ([]File, error)
 	UpdateFile(ctx context.Context, userID, id uuid.UUID, name string, folderID *uuid.UUID) (File, error)
 	SoftDeleteFile(ctx context.Context, userID, id uuid.UUID) (int64, error)

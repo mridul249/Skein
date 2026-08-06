@@ -127,6 +127,19 @@ type Querier interface {
 	// acting on behalf of a request and so has no user to scope by.
 	//
 	ListActiveAccountsForSync(ctx context.Context) ([]ConnectedAccount, error)
+	// ListAllFilesPage returns one page of EVERY live file a user owns, in every
+	// folder at every depth.
+	//
+	// THE ABSENCE OF A folder_id PREDICATE IS THE POINT. ListFiles above filters
+	// `folder_id IS NOT DISTINCT FROM $folder_id`, so passing NULL there means the
+	// ROOT folder rather than "everywhere" — which is how reconcile came to check
+	// 2 of 20 files while reporting itself complete (known issue #50). Whole-
+	// library operations use this query; folder browsing uses that one.
+	//
+	// Keyset-paginated on (created_at, id) exactly as ListFiles is, so a library
+	// larger than one page is still read in full without OFFSET re-scanning.
+	//
+	ListAllFilesPage(ctx context.Context, arg ListAllFilesPageParams) ([]File, error)
 	ListChildFolders(ctx context.Context, arg ListChildFoldersParams) ([]Folder, error)
 	ListConnectedAccounts(ctx context.Context, userID uuid.UUID) ([]ConnectedAccount, error)
 	ListFileShards(ctx context.Context, fileID uuid.UUID) ([]FileShard, error)

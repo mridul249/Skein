@@ -400,6 +400,32 @@ func (m *MemoryStore) ListFiles(_ context.Context, userID uuid.UUID, p ListParam
 	return out, nil
 }
 
+// ListAllFiles returns every live file the user owns, in every folder.
+//
+// No folder predicate at all — that absence IS the method. See the interface
+// doc and known issue #50.
+func (m *MemoryStore) ListAllFiles(_ context.Context, userID uuid.UUID) ([]File, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := []File{}
+	for _, f := range m.files {
+		if f.UserID != userID || f.DeletedAt != nil || !IsListable(f.Status) {
+			continue
+		}
+		out = append(out, f)
+	}
+	// Same ordering the paged implementations use, so a caller cannot come to
+	// depend on an order only the fake provides.
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+		return out[i].ID.String() > out[j].ID.String()
+	})
+	return out, nil
+}
+
 // ListTrashed returns soft-deleted files.
 func (m *MemoryStore) ListTrashed(_ context.Context, userID uuid.UUID, limit int32) ([]File, error) {
 	m.mu.Lock()
