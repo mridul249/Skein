@@ -47,6 +47,21 @@ type stubDrive struct {
 	getStatus      int
 	forbiddenBody  string
 	deleteRequests []string
+
+	// listFiles is what a Drive list query returns, and listQueries records
+	// the `q` of every list request so a test can assert on the SCOPE of the
+	// query rather than only on what the stub chose to hand back.
+	listFiles   []stubFile
+	listQueries []string
+	listStatus  int
+}
+
+// stubFile is one entry in a stubbed Drive list response.
+type stubFile struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Size    string   `json:"size"`
+	Parents []string `json:"parents"`
 }
 
 func newStub(t *testing.T) *stubDrive {
@@ -101,6 +116,8 @@ func (s *stubDrive) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleUpload(w, r)
 	case r.Method == http.MethodDelete:
 		s.handleDelete(w, r)
+	case r.Method == http.MethodGet && r.URL.Query().Get("q") != "":
+		s.handleList(w, r)
 	case r.Method == http.MethodGet:
 		s.handleGet(w, r)
 	default:
@@ -223,6 +240,17 @@ func (s *stubDrive) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Length", strconv.Itoa(len(obj)))
 	_, _ = w.Write(obj)
+}
+
+func (s *stubDrive) handleList(w http.ResponseWriter, r *http.Request) {
+	s.listQueries = append(s.listQueries, r.URL.Query().Get("q"))
+	if s.listStatus != 0 {
+		w.WriteHeader(s.listStatus)
+		_, _ = w.Write([]byte(s.forbiddenBody))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"files": s.listFiles})
 }
 
 func lastPathSegment(p string) string {

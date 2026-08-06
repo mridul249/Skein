@@ -29,6 +29,9 @@ permanently destroys the file it belongs to. Manage your files
 through Skein, not here.
 `
 
+// folderMIME is Drive's marker for a container rather than a stored object.
+const folderMIME = "application/vnd.google-apps.folder"
+
 // FindFolder returns the id of the newest-safe app folder, or "" if none
 // exists.
 //
@@ -42,8 +45,9 @@ func (b *Backend) FindFolder(ctx context.Context, name string) (string, error) {
 	defer cancel()
 
 	q := fmt.Sprintf(
-		"name = %s and mimeType = 'application/vnd.google-apps.folder' "+
-			"and 'root' in parents and trashed = false", driveQuote(name))
+		"name = %s and mimeType = %s "+
+			"and 'root' in parents and trashed = false",
+		driveQuote(name), driveQuote(folderMIME))
 
 	endpoint := filesEndpoint + "?" + url.Values{
 		"q":                         {q},
@@ -91,7 +95,7 @@ func (b *Backend) CreateFolder(ctx context.Context, name string) (string, error)
 
 	body, err := json.Marshal(map[string]any{
 		"name":     name,
-		"mimeType": "application/vnd.google-apps.folder",
+		"mimeType": folderMIME,
 		"parents":  []string{"root"},
 	})
 	if err != nil {
@@ -299,27 +303,25 @@ func driveQuote(s string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
 }
 
-// List enumerates every object in the account's app folder, satisfying
+// List enumerates every object this client can see in the account, satisfying
 // storage.Lister.
 //
-// SCOPED TO THE APP FOLDER, not to Drive root, which is the difference from
-// ListRootShards above: shards and sidecar manifests are written with the app
-// folder as their parent, so that is the only place discovery can find them.
-// ListRootShards exists for the one-shot migration of objects written before
-// the folder existed and is not a substitute.
+// DELIBERATELY NOT SCOPED TO b.folderID. See storage.Lister for why: a folder
+// name derived from the user id is unresolvable after the rebuild that
+// recovery exists to survive, and scoping here turned seven intact files into
+// "0 manifests" on 2026-08-06. drive.file scope already bounds the result to
+// objects this OAuth client created, so an unscoped list is still only ever
+// Skein's own objects — including any left at root before the app folder
+// existed, which the folder-scoped query silently excluded.
+//
+// It also no longer returns empty when no app folder is resolved. That was a
+// silent lie: "I have no folder id" is not "this account is empty", and the
+// caller cannot tell the two apart from a nil slice.
 //
 // No name filter. Reconstruction asks for everything Skein wrote and decides
 // for itself what a manifest is; filtering here would put that knowledge in
-// two places, and `drive.file` scope already limits results to objects this
-// client created.
+// two places.
 func (b *Backend) List(ctx context.Context) ([]storage.ListedObject, error) {
-	if b.folderID == "" {
-		// No app folder resolved means nothing was ever written through this
-		// backend. An empty result is correct and is NOT the same as a failure
-		// to look, which the caller must classify as indeterminate.
-		return nil, nil
-	}
-
 	var out []storage.ListedObject
 	pageToken := ""
 	for {
@@ -340,8 +342,11 @@ func (b *Backend) listFolderPage(ctx context.Context, pageToken string) ([]stora
 	defer cancel()
 
 	values := url.Values{
-		"q":                 {"'" + b.folderID + "' in parents and trashed = false"},
-		"fields":            {"nextPageToken,files(id,name,size)"},
+		// No parent clause: everything this client created, anywhere.
+		// Folders are excluded because the app folder itself is one, and a
+		// container is not an object Skein stored.
+		"q":                 {"trashed = false and mimeType != " + driveQuote(folderMIME)},
+		"fields":            {"nextPageToken,files(id,name,size,parents)"},
 		"pageSize":          {"1000"},
 		"supportsAllDrives": {"false"},
 	}
@@ -368,9 +373,10 @@ func (b *Backend) listFolderPage(ctx context.Context, pageToken string) ([]stora
 	var page struct {
 		NextPageToken string `json:"nextPageToken"`
 		Files         []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			Size string `json:"size"`
+			ID      string   `json:"id"`
+			Name    string   `json:"name"`
+			Size    string   `json:"size"`
+			Parents []string `json:"parents"`
 		} `json:"files"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&page); err != nil {
@@ -379,10 +385,19 @@ func (b *Backend) listFolderPage(ctx context.Context, pageToken string) ([]stora
 
 	out := make([]storage.ListedObject, 0, len(page.Files))
 	for _, f := range page.Files {
+		// Drive models parents as a list, but an object Skein wrote has
+		// exactly one: uploads name a single parent and the folder migration
+		// moves rather than adds. Taking the first is the honest reading of
+		// "where does this live", and an object at root reports none.
+		parent := ""
+		if len(f.Parents) > 0 {
+			parent = f.Parents[0]
+		}
 		out = append(out, storage.ListedObject{
 			ProviderID: f.ID,
 			Name:       f.Name,
 			Size:       parseInt64(f.Size),
+			ParentID:   parent,
 		})
 	}
 	return out, page.NextPageToken, nil

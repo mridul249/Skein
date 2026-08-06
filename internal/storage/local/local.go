@@ -210,6 +210,11 @@ func (b *Backend) List(_ context.Context) ([]storage.ListedObject, error) {
 			ProviderID: e.Name(),
 			Name:       e.Name(),
 			Size:       info.Size(),
+			// Every object lives directly in the root, so the root IS the
+			// container. Reporting it keeps the local backend a faithful
+			// stand-in for recovery's folder handling rather than a special
+			// case that silently skips it.
+			ParentID: b.root,
 		})
 	}
 	return out, nil
