@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -54,9 +56,44 @@ type sharedDriveFixture struct {
 	// rebuild replaces svc and store with a fresh, EMPTY database, leaving
 	// every provider object untouched. See destroyDatabase.
 	rebuild  func(t *testing.T)
+	dir      *testUserDirectory
 	accounts []uuid.UUID
 	user1    uuid.UUID
 	user2    uuid.UUID
+}
+
+// testUserDirectory maps user ids to the durable email identity a manifest
+// records. Satisfies files.UserDirectory.
+type testUserDirectory struct {
+	mu     sync.Mutex
+	emails map[uuid.UUID]string
+}
+
+func (d *testUserDirectory) set(id uuid.UUID, email string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.emails[id] = email
+}
+
+func (d *testUserDirectory) EmailForUser(_ context.Context, id uuid.UUID) (string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	email, ok := d.emails[id]
+	if !ok {
+		return "", errors.New("no such user")
+	}
+	return email, nil
+}
+
+func (d *testUserDirectory) UserIDForEmail(_ context.Context, email string) (uuid.UUID, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for id, e := range d.emails {
+		if strings.EqualFold(e, email) {
+			return id, nil
+		}
+	}
+	return uuid.Nil, errors.New("no such user")
 }
 
 // destroyDatabase replaces the store with a brand new empty one, exactly as
@@ -142,10 +179,15 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 	throttled := map[uuid.UUID]bool{}
 	refuse := new(bool)
 
+	// A stand-in user directory. Emails are the DURABLE identity a manifest
+	// records, so a fixture without one cannot exercise recovery after a
+	// database rebuild — which is the case that matters most.
+	dir := &testUserDirectory{emails: map[uuid.UUID]string{}}
+
 	newSvc := func(t *testing.T) (files.ConformanceStore, *files.Service) {
 		t.Helper()
 		st := files.NewConformanceStore(t)
-		return st, files.NewService(
+		svc := files.NewService(
 			st,
 			files.NewStripingPlanner(planner, reserver),
 			multiResolver{backends: backends, throttled: throttled, refuseManifests: refuse},
@@ -153,6 +195,8 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 			files.Config{Encrypt: false, MaxUploadBytes: 1 << 40},
 			logger,
 		)
+		svc.SetUserDirectory(dir)
+		return st, svc
 	}
 	store, svc := newSvc(t)
 
@@ -162,10 +206,15 @@ func newSharedDrive(t *testing.T) *sharedDriveFixture {
 		throttled: throttled, refuseManifests: refuse, ring: ring,
 		user1: uuid.New(), user2: uuid.New(),
 	}
+	f.dir = dir
 	f.rebuild = func(t *testing.T) {
 		t.Helper()
 		f.store, f.svc = newSvc(t)
 	}
+	// Both fixture users have addresses from the start, so any test can rely
+	// on the email anchor existing.
+	dir.set(f.user1, "user1@example.com")
+	dir.set(f.user2, "user2@example.com")
 	return f
 }
 
