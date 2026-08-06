@@ -192,7 +192,7 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	if cfg.GoogleConfigured() {
 		oauthCfg = accounts.GoogleOAuthConfig(
 			cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL)
-	} else {
+	} else if shouldWarnAboutWebOAuth(o.desktopClientID != nil) {
 		lg.Warn("google oauth is not configured; drives cannot be connected",
 			slog.String("fix", "set SKEIN_GOOGLE_CLIENT_ID, _SECRET and _REDIRECT_URL"))
 	}
@@ -521,3 +521,19 @@ func (h sqliteHealth) Ping(ctx context.Context) error {
 	}
 	return nil
 }
+
+// shouldWarnAboutWebOAuth reports whether the "set SKEIN_GOOGLE_CLIENT_ID,
+// _SECRET and _REDIRECT_URL" warning applies to this build.
+//
+// SERVER ONLY. The desktop build never sets the web credentials and does not
+// need them: it connects drives over loopback PKCE using the
+// SKEIN_GOOGLE_DESKTOP_* pair, which has its own warning. Printing the web
+// variables on a desktop run sends the reader to fix three settings that would
+// change nothing for them, immediately next to a second warning naming the two
+// that would.
+//
+// Found 2026-08-06 by following docs/SETUP.md from a clean environment exactly
+// as written, which is what that page exists for. Package-level rather than
+// inline because a log message is precisely the kind of thing that drifts
+// unnoticed, and Build's logger has no seam a test can reach.
+func shouldWarnAboutWebOAuth(isDesktopBuild bool) bool { return !isDesktopBuild }

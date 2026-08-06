@@ -12,8 +12,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// TODO(#32): Finish migrating service_test.go to the backend-agnostic
-// conformance harness. Temporarily excluded from the `unused` linter.
+// The migration this file once carried a TODO(#32) for is finished: both
+// service_test.go and appfolder_test.go go through newConformanceStore, and
+// neither calls NewMemoryStore directly. Removed 2026-08-06 — a TODO naming
+// completed work is worse than none, because it invites the reader to redo it.
 
 // Same design as internal/auth/storeconformance_test.go, and for the same
 // reason: the exit bar is the existing suite passing unmodified against both

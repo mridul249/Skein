@@ -195,13 +195,21 @@ the toolchain.
 ### Headless Server (`cmd/skein`)
 
 ```bash
-git clone https://github.com/your-username/skein.git && cd skein
+git clone https://github.com/mridul249/Skein.git && cd Skein
 cp .env.example .env
-openssl rand -base64 32   # Set output as SKEIN_MASTER_KEY in .env
-make dev-db && make web && make build
-./bin/skein
 
+# BOTH are required. Skein refuses to start without either.
+openssl rand -base64 32   # -> SKEIN_MASTER_KEY in .env
+openssl rand -base64 48   # -> SKEIN_JWT_SECRET in .env
+
+make dev-db && make build
+
+# The binary does not read .env itself; `make run` does. Load it explicitly:
+set -a && source .env && set +a && ./bin/skein
 ```
+
+Then open <http://localhost:8080>. Connecting a Drive additionally needs a
+Google OAuth client — see [docs/SETUP.md](docs/SETUP.md).
 
 ### Desktop Application (`cmd/skein-desktop`)
 
@@ -212,7 +220,13 @@ sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
 make desktop   # Outputs bin/skein-desktop
 
+set -a && source .env && set +a && ./bin/skein-desktop
 ```
+
+The desktop app needs its own **Desktop app** OAuth client — a different one
+from the server's Web client, and they are not interchangeable. Set
+`SKEIN_GOOGLE_DESKTOP_CLIENT_ID` and `SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET`;
+[docs/SETUP.md](docs/SETUP.md) walks through both.
 
 > **Build Note:** On modern Linux distributions (e.g., Ubuntu 24.04+), `wails doctor` may report a missing `webkit2gtk-4.0` package. This is a false positive-`make desktop` explicitly targets the modern `4.1` ABI using `-tags webkit2_41`.
 

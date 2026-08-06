@@ -67,9 +67,17 @@ type Config struct {
 
 	// GoogleDesktopClientID is a Desktop app (RFC 8252) OAuth client id, used
 	// only by cmd/skein-desktop. It has no matching secret field on purpose —
-	// desktop clients do not use one — and it overrides the id compiled into
-	// the desktop binary via -ldflags, for anyone who wants their own API
-	// quota instead of Skein's shared one (Phase7 Task 4.4 point 6).
+	// it overrides the id compiled into the desktop binary via -ldflags, for
+	// anyone who wants their own API quota instead of Skein's shared one
+	// (Phase7 Task 4.4 point 6).
+	//
+	// A SECRET IS ALSO REQUIRED, via SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET. This
+	// comment previously said desktop clients do not use one; that is wrong
+	// and desktopoauth.Connect refuses to start without it, because Google
+	// demands a secret at token exchange even for Desktop-type clients. The
+	// secret is read with os.Getenv at the two call sites rather than living
+	// here, so it is deliberately absent from this struct — see
+	// desktopoauth.Connector and accounts.DesktopGoogleOAuthConfig.
 	GoogleDesktopClientID string `env:"SKEIN_GOOGLE_DESKTOP_CLIENT_ID"`
 
 	// PublicURL is the externally reachable base URL. Used to build share

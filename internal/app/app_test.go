@@ -50,3 +50,26 @@ func TestBuildWithSQLiteDoesNotRequirePostgres(t *testing.T) {
 		}
 	}
 }
+
+// A DESKTOP RUN MUST NOT BE TOLD TO SET SERVER VARIABLES.
+//
+// Found 2026-08-06 by following docs/SETUP.md from a clean environment. A
+// desktop start with no Google credentials printed two warnings in a row:
+//
+//	google oauth is not configured; drives cannot be connected
+//	  fix=set SKEIN_GOOGLE_CLIENT_ID, _SECRET and _REDIRECT_URL
+//	desktop oauth credentials are incomplete; ...
+//
+// The first names three variables the desktop build never reads. Setting all
+// three changes nothing, and it sits directly above the warning naming the two
+// that would actually help — so the more prominent advice is the wrong advice.
+func TestWebOAuthWarningIsServerOnly(t *testing.T) {
+	if shouldWarnAboutWebOAuth(true) {
+		t.Error("a desktop build was told to set SKEIN_GOOGLE_CLIENT_ID/_SECRET/_REDIRECT_URL, " +
+			"none of which it reads; the desktop warning names the right pair")
+	}
+	if !shouldWarnAboutWebOAuth(false) {
+		t.Error("a server build with no Google credentials was told nothing; " +
+			"drives cannot be connected and the reason must be said out loud")
+	}
+}
