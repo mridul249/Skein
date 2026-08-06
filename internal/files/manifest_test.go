@@ -296,6 +296,39 @@ func TestAManifestIsBoundToItsFileID(t *testing.T) {
 	}
 }
 
+// ENCRYPTION STATE TRAVELS WITH THE BYTES, not with the server's config.
+//
+// Found by audit before backfill shipped. Reconstruction used to take
+// is_encrypted from the recovering server's SKEIN_ENCRYPTION_ENABLED setting —
+// but that setting can differ between the instance that wrote the shards and
+// the one recovering them, and the READ path drives decryption from the row
+// (download.go: `encrypted: file.IsEncrypted`). A recovered row with the wrong
+// value makes the file unreadable, and it fails during a recovery.
+func TestAManifestCarriesTheFilesEncryptionState(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	file := f.uploadAs(t, f.user1, "encstate.bin", randomBytes(t, 3<<20))
+	stored, err := f.svc.Get(ctx, f.user1, file.ID)
+	if err != nil {
+		t.Fatalf("Get() = %v", err)
+	}
+
+	m, oerr := files.OpenManifest(f.ring, file.ID, findAnyManifest(t, f, file.ID))
+	if oerr != nil {
+		t.Fatalf("OpenManifest() = %v", oerr)
+	}
+
+	if m.IsEncrypted == nil {
+		t.Fatal("the manifest does not record whether the shards are encrypted; " +
+			"a recovering instance would have to guess from its own configuration")
+	}
+	if *m.IsEncrypted != stored.IsEncrypted {
+		t.Errorf("manifest is_encrypted = %v, the row says %v",
+			*m.IsEncrypted, stored.IsEncrypted)
+	}
+}
+
 // An unknown format version is REFUSED, not partially understood.
 //
 // A reader that meets a version it does not know and proceeds anyway is how a
