@@ -19,6 +19,7 @@ import (
 // whole files service for one route.
 type ManifestBackfiller interface {
 	BackfillManifestsForUser(ctx context.Context, userID uuid.UUID) (files.BackfillReport, error)
+	RewriteManifestsForUser(ctx context.Context, userID uuid.UUID) (files.BackfillReport, error)
 	ManifestCoverageForUser(ctx context.Context, userID uuid.UUID) (files.BackfillReport, error)
 }
 
@@ -64,7 +65,14 @@ func (h *System) BackfillManifests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ?rewrite=true regenerates manifests that already exist. Needed after a
+	// format change: a manifest missing a field cannot be repaired from the
+	// drives, only rewritten from the database, and ordinary backfill skips it
+	// precisely because a manifest is already there.
 	report, berr := h.backfill.BackfillManifestsForUser(r.Context(), userID)
+	if r.URL.Query().Get("rewrite") == "true" {
+		report, berr = h.backfill.RewriteManifestsForUser(r.Context(), userID)
+	}
 	if berr != nil {
 		httpx.WriteError(w, r, berr)
 		return

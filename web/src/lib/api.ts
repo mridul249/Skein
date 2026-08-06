@@ -468,8 +468,9 @@ export const api = {
    * Requires the operator token, which the caller supplies — the same gate as
    * the database dump, because this writes to every connected drive.
    */
-  async backfillManifests(operatorToken: string): Promise<BackfillReport> {
-    return request<BackfillReport>('/api/system/manifests/backfill', {
+  async backfillManifests(operatorToken: string, rewrite = false): Promise<BackfillReport> {
+    const q = rewrite ? '?rewrite=true' : '';
+    return request<BackfillReport>(`/api/system/manifests/backfill${q}`, {
       method: 'POST',
       headers: { 'X-Skein-Backup-Token': operatorToken },
     });
