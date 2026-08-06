@@ -486,6 +486,26 @@ func (q *Queries) PendingVerifiers(ctx context.Context) ([]string, error) {
 	return items, nil
 }
 
+const rebindAppFolderID = `-- name: RebindAppFolderID :exec
+UPDATE connected_accounts
+   SET app_folder_id = ?2,
+       updated_at    = ?3
+ WHERE id = ?1
+`
+
+type RebindAppFolderIDParams struct {
+	ID          string
+	AppFolderID *string
+	UpdatedAt   string
+}
+
+// RebindAppFolderID overwrites the folder id unconditionally. See the Postgres
+// copy for why recovery needs a write the single-shot SetAppFolderID forbids.
+func (q *Queries) RebindAppFolderID(ctx context.Context, arg RebindAppFolderIDParams) error {
+	_, err := q.db.ExecContext(ctx, rebindAppFolderID, arg.ID, arg.AppFolderID, arg.UpdatedAt)
+	return err
+}
+
 const setAccountStatus = `-- name: SetAccountStatus :exec
 UPDATE connected_accounts
    SET status     = ?2,

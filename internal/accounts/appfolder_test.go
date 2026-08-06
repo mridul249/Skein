@@ -442,3 +442,77 @@ func nameFromQuery(q string) string {
 	}
 	return strings.ReplaceAll(rest[:j], `\'`, `'`)
 }
+
+// THE WRITE SetAppFolderID DELIBERATELY REFUSES.
+//
+// The single-shot conditional UPDATE is right for first use — it is what makes
+// two racing processes converge on one folder — and it is exactly wrong for
+// recovery, whose whole job is correcting a folder id that is already set and
+// already points at the wrong place. This pins that the two writes differ, in
+// both dialects: the conformance harness re-runs this package against SQLite.
+func TestRebindAppFolderOverwritesAValueSetAppFolderIDWouldRefuse(t *testing.T) {
+	_, store, acct := newFolderService(t)
+	ctx := context.Background()
+
+	if _, err := store.SetAppFolderID(ctx, acct.ID, "wrong-folder"); err != nil {
+		t.Fatalf("SetAppFolderID() = %v", err)
+	}
+
+	// The premise: the single-shot write will not correct this.
+	if got, err := store.SetAppFolderID(ctx, acct.ID, "right-folder"); err == nil && got == "right-folder" {
+		t.Fatal("SetAppFolderID overwrote an existing folder id; the single-shot " +
+			"guarantee is gone and the rebind below is testing nothing")
+	}
+	if got, err := store.GetAppFolderID(ctx, acct.ID); err != nil || got != "wrong-folder" {
+		t.Fatalf("GetAppFolderID() = %q, %v; want the original still in place", got, err)
+	}
+
+	if err := store.RebindAppFolderID(ctx, acct.ID, "right-folder"); err != nil {
+		t.Fatalf("RebindAppFolderID() = %v", err)
+	}
+	got, err := store.GetAppFolderID(ctx, acct.ID)
+	if err != nil {
+		t.Fatalf("GetAppFolderID() = %v", err)
+	}
+	if got != "right-folder" {
+		t.Errorf("folder = %q after a rebind, want right-folder", got)
+	}
+}
+
+// The rebind must drop Resolver's cached backend. That backend captured the
+// OLD folder id when it was built, so without the invalidation every upload
+// for the rest of the process keeps writing to the folder just corrected —
+// the cache would silently undo the fix.
+func TestRebindAppFolderInvalidatesTheCachedBackend(t *testing.T) {
+	svc, _, acct := newFolderService(t)
+
+	var invalidated []uuid.UUID
+	svc.OnAccountInvalidated(func(id uuid.UUID) {
+		invalidated = append(invalidated, id)
+	})
+
+	if err := svc.RebindAppFolder(context.Background(), acct.ID, "right-folder"); err != nil {
+		t.Fatalf("RebindAppFolder() = %v", err)
+	}
+	if len(invalidated) != 1 || invalidated[0] != acct.ID {
+		t.Errorf("invalidated %v, want exactly [%s]; a stale backend keeps the old folder id",
+			invalidated, acct.ID)
+	}
+}
+
+// An empty folder id is a bug upstream, not a value to persist. Writing it
+// would unbind the account and send the next upload to Drive root.
+func TestRebindAppFolderRejectsAnEmptyFolder(t *testing.T) {
+	svc, store, acct := newFolderService(t)
+	ctx := context.Background()
+
+	if _, err := store.SetAppFolderID(ctx, acct.ID, "good-folder"); err != nil {
+		t.Fatalf("SetAppFolderID() = %v", err)
+	}
+	if err := svc.RebindAppFolder(ctx, acct.ID, ""); err == nil {
+		t.Error("RebindAppFolder(\"\") = nil, want an error")
+	}
+	if got, _ := store.GetAppFolderID(ctx, acct.ID); got != "good-folder" {
+		t.Errorf("folder = %q after a rejected rebind, want it untouched", got)
+	}
+}

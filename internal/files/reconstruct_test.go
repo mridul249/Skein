@@ -182,9 +182,20 @@ func TestReconstructRecoversFilesByteForByteAfterTheDatabaseIsDestroyed(t *testi
 				t.Errorf("%s shard %d: recovered mapping differs from the original\n got=%+v\nwant=%+v",
 					o.name, i, g, w)
 			}
-			if (g.AccountID == nil) != (w.AccountID == nil) ||
-				(g.AccountID != nil && *g.AccountID != *w.AccountID) {
-				t.Errorf("%s shard %d: recovered onto the wrong account", o.name, i)
+			// NOT compared against the ORIGINAL account id, which is exactly
+			// the thing a rebuild destroys: reconnecting a drive mints a new
+			// connected-account id, so the pre-loss id is gone and asserting
+			// on it would demand behaviour that cannot exist. What must hold
+			// is that the shard points at the drive REALLY HOLDING the object
+			// — checked against the provider, not against either database.
+			if g.AccountID == nil {
+				t.Errorf("%s shard %d: recovered with no account; the drive holding it is unknown",
+					o.name, i)
+				continue
+			}
+			if _, ok := f.objects(t, *g.AccountID)[g.ProviderID]; !ok {
+				t.Errorf("%s shard %d: points at account %s, which does not hold object %q",
+					o.name, i, *g.AccountID, g.ProviderID)
 			}
 		}
 	}

@@ -54,6 +54,30 @@ type BackendResolver interface {
 	For(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) (storage.Backend, error)
 }
 
+// FolderRebinder points an account's app folder at a folder that already holds
+// its objects.
+//
+// RECOVERY ONLY, and it exists because the app folder's name is derived from
+// the user id. A rebuilt database has a NEW user id, so it computes a name
+// that matches nothing, finds no folder, and creates an empty one — leaving
+// the recovered files' shards in a folder the install has stopped writing to.
+// Everything still works, because shards are addressed by provider id, but the
+// user is left with two Skein folders and every new upload going to the wrong
+// one.
+//
+// Reconstruction is the one place that learns the answer: it has just read
+// manifests OUT of the right folder. Rebinding there is reading the location
+// off the data rather than re-deriving it from an identity that is gone.
+//
+// Optional. A nil rebinder means recovery still restores every file and simply
+// does not consolidate the folders.
+type FolderRebinder interface {
+	// RebindAppFolder sets the account's app folder id. Implementations must
+	// accept a folder that differs from the stored one — unlike first-use
+	// resolution, this call is specifically the correction of a wrong value.
+	RebindAppFolder(ctx context.Context, accountID uuid.UUID, folderID string) error
+}
+
 // Service implements the file and folder use cases.
 type Service struct {
 	store    Store
@@ -75,6 +99,9 @@ type Service struct {
 
 	// users resolves the durable identity a manifest records.
 	users UserDirectory
+
+	// rebinder corrects an account's app folder after a recovery. Optional.
+	rebinder FolderRebinder
 }
 
 // WorkPool bounds concurrency and retries rate-limited provider calls.
@@ -120,6 +147,11 @@ func (s *Service) SetUserDirectory(d UserDirectory) { s.users = d }
 // during wiring. Nil means Reconstruct must be given account ids explicitly,
 // which is what the tests do.
 func (s *Service) SetAccountLister(a AccountLister) { s.accounts = a }
+
+// SetFolderRebinder installs the app-folder correction recovery applies. Nil
+// means recovery restores every file but leaves the account writing to a
+// different folder than the recovered shards sit in. See FolderRebinder.
+func (s *Service) SetFolderRebinder(r FolderRebinder) { s.rebinder = r }
 
 // runPooled runs fn through the pool when one is installed, inline otherwise.
 func (s *Service) runPooled(ctx context.Context, fn func(ctx context.Context) error) error {

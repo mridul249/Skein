@@ -215,6 +215,20 @@ func (m *MemoryStore) SetAppFolderID(_ context.Context, id uuid.UUID, folderID s
 	return folderID, nil
 }
 
+// RebindAppFolderID overwrites the folder id unconditionally, which is the
+// whole difference from SetAppFolderID above.
+func (m *MemoryStore) RebindAppFolderID(_ context.Context, id uuid.UUID, folderID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	acct, ok := m.accounts[id]
+	if !ok {
+		return skerr.ErrNotFound
+	}
+	acct.AppFolderID = folderID
+	m.accounts[id] = acct
+	return nil
+}
+
 // ClearAccountTokens wipes stored credentials, leaving the row and its id in
 // place. See the Store interface, and Service.Disconnect for why the row has
 // to survive.

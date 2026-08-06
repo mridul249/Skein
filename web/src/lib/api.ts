@@ -117,6 +117,7 @@ export interface ReconstructReport {
   shards_recovered: number;
   folders_recovered: number;
   files_already_present: number;
+  shards_unresolved: number;
 }
 
 export interface Folder {
