@@ -261,6 +261,9 @@ func (s *Server) mountSystem(api chi.Router) {
 		s.deps.DumpDB, s.deps.Logger)
 	// Nil leaves the key-export route reporting 404, like an unset token.
 	h.SetKeyring(s.deps.Keyring)
+	if s.deps.Files != nil {
+		h.SetBackfiller(s.deps.Files)
+	}
 
 	api.Route("/system", func(g chi.Router) {
 		// A Skein session is required on top of the operator token. Neither
@@ -273,6 +276,9 @@ func (s *Server) mountSystem(api chi.Router) {
 		// Same budget and the same operator token as the dump. The key is a
 		// smaller payload but a larger secret.
 		g.Get("/key-export", h.ExportKey)
+		// Manifest backfill writes to every connected drive, so it takes the
+		// same operator token and the same budget as the dump.
+		g.Post("/manifests/backfill", h.BackfillManifests)
 	})
 }
 

@@ -122,7 +122,10 @@ type ReconcileReport struct {
 func (s *Service) Reconcile(ctx context.Context, userID uuid.UUID) (ReconcileReport, error) {
 	report := ReconcileReport{StartedAt: time.Now(), Complete: true}
 
-	files, err := s.store.ListFiles(ctx, userID, ListParams{Limit: maxBulkFiles})
+	// ListAllFiles, NOT ListFiles: a nil ListParams.FolderID means the ROOT
+	// folder, not "everywhere". This operation swept 2 of the owner's 20 live
+	// files for that reason while reporting itself complete — known issue #50.
+	files, err := s.store.ListAllFiles(ctx, userID)
 	if err != nil {
 		return report, fmt.Errorf("list files: %w", err)
 	}

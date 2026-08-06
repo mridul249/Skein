@@ -223,6 +223,83 @@ func TestListAllFilesSpansFoldersAndExcludesTrash(t *testing.T) {
 	}
 }
 
+// RECONCILE'S THREE-STATE DESIGN, RE-CHECKED AT A REALISTIC FILE COUNT.
+//
+// Every previous three-state test ran over a one- or two-file fixture. Now
+// that reconcile actually sees the whole library, a rate-limited run has to
+// hold the same property over 20+ files across nested folders — a different
+// shape, because the per-file goroutines, the shared reason set and the
+// unchecked-shard accounting all now run at width.
+//
+// The property is unchanged and is the one that matters: a run that could not
+// check anything flags NOTHING and does not call itself complete.
+func TestReconcileThreeStateHoldsOverAWholeLibrary(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	buildSpanningLibrary(t, f)
+	// Small files: the fixture's drives are 8 MiB each, and this test is about
+	// file COUNT rather than byte volume.
+	for i := 0; i < 18; i++ {
+		f.uploadAs(t, f.user1, fmt.Sprintf("bulk-%02d.bin", i), randomBytes(t, 8192))
+	}
+
+	all, err := f.store.ListAllFiles(ctx, f.user1)
+	if err != nil {
+		t.Fatalf("ListAllFiles() = %v", err)
+	}
+	if len(all) < 20 {
+		t.Fatalf("library has %d files; this test needs 20+ to differ in shape "+
+			"from the two-file fixtures", len(all))
+	}
+
+	// A clean run over the whole library first, so the throttled run below is
+	// compared against a known-good baseline rather than against nothing.
+	clean, cerr := f.svc.Reconcile(ctx, f.user1)
+	if cerr != nil {
+		t.Fatalf("Reconcile() = %v", cerr)
+	}
+	if !clean.Complete {
+		t.Fatalf("a healthy whole-library run reported incomplete: %v", clean.IncompleteReasons)
+	}
+	if clean.FilesChecked != len(all) {
+		t.Errorf("clean run checked %d of %d files", clean.FilesChecked, len(all))
+	}
+	if len(clean.Damaged) != 0 {
+		t.Errorf("a healthy library reported %d damaged files", len(clean.Damaged))
+	}
+
+	// Now throttle every drive. Nothing can be checked.
+	for id := range f.backends {
+		f.throttle(id)
+	}
+	throttled, terr := f.svc.Reconcile(ctx, f.user1)
+	if terr != nil {
+		t.Fatalf("Reconcile() = %v", terr)
+	}
+
+	if throttled.Complete {
+		t.Error("a fully rate-limited whole-library run reported itself COMPLETE")
+	}
+	if len(throttled.Damaged) != 0 {
+		t.Errorf("%d files flagged DAMAGED by a run that could not read anything; "+
+			"this is the collapse the three-state design exists to prevent",
+			len(throttled.Damaged))
+	}
+	if throttled.FilesChecked != len(all) {
+		t.Errorf("throttled run enumerated %d of %d files; it must still SEE every "+
+			"file even when it cannot check them", throttled.FilesChecked, len(all))
+	}
+	if throttled.UncheckedShards == 0 {
+		t.Error("no shards reported unchecked by a fully throttled run")
+	}
+	if len(throttled.Unknown) != len(all) {
+		t.Errorf("%d of %d files listed as unknown; a file that could not be "+
+			"checked must be named, not silently omitted",
+			len(throttled.Unknown), len(all))
+	}
+}
+
 // Ownership holds on the whole-library read, so one user's sweep cannot see
 // another's files. Cheap to assert and it is the property multi-user isolation
 // rests on.
