@@ -119,10 +119,10 @@ Done.
 
 ## Need your own Google OAuth client?
 
-See [OAUTH](docs/OAUTH.md)
+See [OAUTH.md](OAUTH.md)
 
 ---
 
 ## Production deployment
 
-See [DEVELOPMENT](docs/DEVELOPMENT.md)
+See [DEVELOPMENT.md](DEVELOPMENT.md)
