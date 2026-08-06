@@ -93,6 +93,14 @@ type App struct {
 	Config *config.Config
 	Logger *slog.Logger
 
+	// Auth and Files are exposed for operator tooling that drives the wired
+	// services directly rather than over HTTP — see cmd/skein-recover, which
+	// exists because the manifest routes are unreachable in a disaster: the
+	// desktop server binds a random port and those routes need an operator
+	// token a desktop install has no reason to have set.
+	Auth  *auth.Service
+	Files *files.Service
+
 	closeDB  func()
 	listener net.Listener
 	httpSrv  *http.Server
@@ -340,6 +348,8 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	return &App{
 		Config:  cfg,
 		Logger:  lg,
+		Auth:    authSvc,
+		Files:   filesSvc,
 		closeDB: wired.close,
 		httpSrv: httpSrv,
 		workers: workers,
