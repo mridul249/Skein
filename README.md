@@ -153,6 +153,24 @@ Instead of relying on external proxies, process managers, or heavy system depend
 
 ---
 
+## Design Constraints & Tradeoffs
+
+Every architecture is a series of compromises. Skein unapologetically trades convenience for raw capacity and absolute client-side privacy:
+
+* **Capacity Over Parity (The RAID-0 Tradeoff):** Skein stripes blocks without parity to maximize your free storage pool. **The tradeoff:** If Google suspends one account, the files spanning it are lost. Skein is a high-capacity virtual drive, not a fault-tolerant backup vault.
+
+
+* **Privacy Over Collaboration:** Client-side envelope encryption makes generating simple "share links" mathematically impossible without compromising zero-knowledge guarantees. Your data is a vault, not a drop-box.
+
+
+* **Depth Over Breadth (The Google MVP):** We exclusively target Google Drive’s massive 15 GB free tier first. Mastering its aggressive API rate limits and 64 KiB frame streaming ensures future S3 integration will be trivial.
+
+
+* **Heavy Compute Over Thin Clients:** Skein is a desktop-bound storage controller. Managing concurrent chunk multiplexing, local AES-256 encryption, and persistent SQLite state requires desktop-class I/O, not a mobile app.
+
+
+---
+
 ## Quickstart
 
 ### Headless Server (`cmd/skein`)
