@@ -61,15 +61,15 @@ skein: configuration: SKEIN_JWT_SECRET must be at least 32 characters
 
 ### What every variable does, and what happens without it
 
-**Required — the process will not start:**
+**Required - the process will not start:**
 
 | Variable | Missing means |
 |---|---|
 | `SKEIN_MASTER_KEY` | `SKEIN_MASTER_KEY must decode to 32 bytes, got 0`. Encrypts every shard. **Lose it and your files are permanently unreadable.** |
 | `SKEIN_JWT_SECRET` | `must be at least 32 characters`. Signs access tokens. Rotating it signs everyone out; it does not touch stored files. |
-| `SKEIN_DATABASE_URL` | `SKEIN_DATABASE_URL is required` — **server only**. The desktop build uses SQLite and ignores it. |
+| `SKEIN_DATABASE_URL` | `SKEIN_DATABASE_URL is required` - **server only**. The desktop build uses SQLite and ignores it. |
 
-**Required for Drive to work — the app starts without them, but connecting a
+**Required for Drive to work - the app starts without them, but connecting a
 drive fails:**
 
 | Variable | Missing means |
@@ -82,10 +82,10 @@ drive fails:**
 
 | Variable | Default | Effect |
 |---|---|---|
-| `SKEIN_BACKUP_TOKEN` | unset | Unset means `/api/system/backup` and the manifest repair actions **return 404** — the routes do not exist rather than being locked. Not needed on desktop. |
+| `SKEIN_BACKUP_TOKEN` | unset | Unset means `/api/system/backup` and the manifest repair actions **return 404** - the routes do not exist rather than being locked. Not needed on desktop. |
 | `SKEIN_ROUTING_POLICY` | `most-available` | How shards spread over drives. See §6. |
 | `SKEIN_DOWNLOAD_DIR` | XDG Downloads | Desktop "Save to disk" target. |
-| `SKEIN_ENCRYPTION_ENABLED` | `true` | Turning it off leaves files written meanwhile in plaintext **permanently** — turning it back on does not re-encrypt them. |
+| `SKEIN_ENCRYPTION_ENABLED` | `true` | Turning it off leaves files written meanwhile in plaintext **permanently** - turning it back on does not re-encrypt them. |
 
 ---
 
@@ -99,14 +99,14 @@ wrong type. This has already cost one live debugging session.
 At <https://console.cloud.google.com> → **APIs & Services → Credentials**,
 enable the **Google Drive API** first, then:
 
-### Server — "Web application"
+### Server - "Web application"
 
 - Authorised redirect URI: exactly `SKEIN_GOOGLE_REDIRECT_URL`, default
   `http://localhost:8080/api/accounts/google/callback`. A trailing slash is a
   mismatch.
 - Fill `SKEIN_GOOGLE_CLIENT_ID` and `SKEIN_GOOGLE_CLIENT_SECRET`.
 
-### Desktop — "Desktop app"
+### Desktop - "Desktop app"
 
 - No redirect URI to configure; it uses a loopback port (RFC 8252 PKCE).
 - Fill `SKEIN_GOOGLE_DESKTOP_CLIENT_ID` **and**
@@ -151,7 +151,7 @@ about to touch.
 
 ## 5. First use
 
-1. **Register.** The first account is not special — registration is open, so on
+1. **Register.** The first account is not special - registration is open, so on
    anything reachable from a network, set `SKEIN_BACKUP_TOKEN` and put Skein
    behind something that restricts who can reach it.
 2. **Connect Google Drive** in Settings. Repeat for each account you want to
@@ -175,11 +175,11 @@ your Drive are unlabelled encrypted blobs.
 
 `SKEIN_ROUTING_POLICY` controls which drive each shard goes to:
 
-- **`most-available`** (default) — emptiest drive first. A striped file also
+- **`most-available`** (default) - emptiest drive first. A striped file also
   prefers a drive not already holding one of its shards, so a two-shard file
   lands on two drives rather than filling one.
-- **`priority`** — connection order; fills the first drive until it is full.
-- **`round-robin`** — rotates per upload, for per-drive request quotas.
+- **`priority`** - connection order; fills the first drive until it is full.
+- **`round-robin`** - rotates per upload, for per-drive request quotas.
 
 ---
 
@@ -191,7 +191,7 @@ belongs to which file and in what order. You need both.
 
 Skein has a third layer that covers losing the database entirely: **sidecar
 manifests**, written next to your shards in Drive. Recovery reads them back and
-rebuilds the file list from the drives alone. Verified end to end — database
+rebuilds the file list from the drives alone. Verified end to end - database
 moved aside, account re-registered, drives reconnected, files restored and
 downloaded byte-for-byte.
 
@@ -216,7 +216,7 @@ Full procedure, including restore: [BACKUP.md](BACKUP.md).
 | `dial tcp 127.0.0.1:5433: connect: connection refused` | `make dev-db` not run, or Docker is not up. Server only. |
 | `unauthorized_client` on connecting a drive | Web client used for the desktop build. §3. |
 | "No Google client secret is configured for this app." | `SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET` unset. §3. |
-| Everything starts, but nothing is configured | `.env` not loaded — the binaries do not read it. §4. |
+| Everything starts, but nothing is configured | `.env` not loaded - the binaries do not read it. §4. |
 | Backup or manifest repair returns 404 | `SKEIN_BACKUP_TOKEN` unset. That is by design. |
 
 ---

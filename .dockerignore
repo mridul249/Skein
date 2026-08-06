@@ -1,0 +1,40 @@
+# Keep the build context small and the image reproducible.
+#
+# Without this, `docker build` uploads web/node_modules and the whole .git
+# history on every run — hundreds of megabytes that are then discarded, and a
+# noticeably slower loop.
+
+.git
+.github
+
+# Reinstalled inside the frontend stage from package-lock.json, so a host copy
+# would only shadow it with whatever architecture the host happens to be.
+web/node_modules
+web/.test-build
+web/dist
+
+# THE EMBEDDED FRONTEND IS DELIBERATELY EXCLUDED. It is built inside the image
+# and copied from the frontend stage. Sending a host-built dist would make the
+# image depend on the state of the developer's working tree, which is exactly
+# the non-reproducibility this build is meant to avoid.
+internal/web/dist/*
+!internal/web/dist/.gitkeep
+
+bin
+dist
+backups
+coverage.out
+
+# Secrets and local state. .env in particular must never be baked into a layer.
+.env
+*.db
+*.db-shm
+*.db-wal
+
+# Owner-local planning notes; gitignored already, and not part of a build.
+PLAN
+
+cmd/skein-desktop/build
+cmd/skein-desktop/wailsjs
+
+**/.DS_Store

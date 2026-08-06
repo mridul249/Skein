@@ -20,9 +20,30 @@ const webRoot = resolve(here, '../..');
 
 const chrome = findChrome();
 if (!chrome) {
-  console.log('browser harness SKIPPED: no Chrome found.');
-  console.log('  Tried: CHROME_PATH, google-chrome, google-chrome-stable, chromium, chromium-browser.');
-  console.log('  Install Chrome or Chromium, or set CHROME_PATH, then re-run `npm run test:browser`.');
+  // A SKIP MUST NOT READ AS A PASS WHERE NOBODY IS WATCHING.
+  //
+  // This exited 0 unconditionally, which is right on a contributor's laptop
+  // and wrong in CI: a runner without Chrome would report the browser suite
+  // green while running none of it. That is structurally the same defect as
+  // the `tsc --noEmit` gate that checked nothing and exited 0 (2026-08-06) —
+  // a check incapable of failing is not a check.
+  //
+  // So the two cases are distinguished by intent rather than guessed at.
+  // REQUIRE_BROWSER_TESTS=1 in CI makes absent Chrome a hard failure; locally
+  // it stays an explicit, loud skip. CI sets it, so forgetting to install
+  // Chrome there breaks the build rather than passing quietly.
+  const required = process.env.REQUIRE_BROWSER_TESTS === '1';
+  const lines = [
+    `browser harness ${required ? 'FAILED' : 'SKIPPED'}: no Chrome found.`,
+    '  Tried: CHROME_PATH, google-chrome, google-chrome-stable, chromium, chromium-browser.',
+    '  Install Chrome or Chromium, or set CHROME_PATH, then re-run `npm run test:browser`.',
+  ];
+  if (required) {
+    lines.push('  REQUIRE_BROWSER_TESTS=1 is set, so this is an error rather than a skip.');
+    console.error(lines.join('\n'));
+    process.exit(1);
+  }
+  console.log(lines.join('\n'));
   process.exit(0);
 }
 

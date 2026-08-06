@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: skein
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-skein}
+      POSTGRES_DB: skein
+    volumes:
+      - skein-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skein -d skein"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  skein:
+    build:
+      context: .
+      target: web
+      args:
+        VERSION: ${SKEIN_VERSION:-docker}
+    image: ${SKEIN_IMAGE:-skein:local}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${SKEIN_PORT:-8080}:8080"
+    environment:
+      SKEIN_DATABASE_URL: postgres://skein:${POSTGRES_PASSWORD:-skein}@postgres:5432/skein?sslmode=disable
+      SKEIN_MASTER_KEY: ${SKEIN_MASTER_KEY:-}
+      SKEIN_JWT_SECRET: ${SKEIN_JWT_SECRET:-}
+      SKEIN_GOOGLE_CLIENT_ID: ${SKEIN_GOOGLE_CLIENT_ID:-}
+      SKEIN_GOOGLE_CLIENT_SECRET: ${SKEIN_GOOGLE_CLIENT_SECRET:-}
+      SKEIN_GOOGLE_REDIRECT_URL: ${SKEIN_GOOGLE_REDIRECT_URL:-http://localhost:8080/api/accounts/google/callback}
+      SKEIN_PUBLIC_URL: ${SKEIN_PUBLIC_URL:-http://localhost:8080}
+      # development by default: production requires an https SKEIN_PUBLIC_URL
+      # (refresh cookies are Secure-only), and the out-of-the-box URL is
+      # http://localhost:8080. Set SKEIN_ENV=production together with an https
+      # SKEIN_PUBLIC_URL when putting this behind a TLS proxy.
+      SKEIN_ENV: ${SKEIN_ENV:-development}
+      SKEIN_LOG_LEVEL: ${SKEIN_LOG_LEVEL:-info}
+      SKEIN_BACKUP_TOKEN: ${SKEIN_BACKUP_TOKEN:-}
+    volumes:
+      - ./data:/data
+    # The bind mount is created by the Docker daemon as root, which the
+    # non-root container user cannot write. Running as the host user keeps
+    # ./data writable AND keeps the setup file readable by the person who
+    # has to act on it. Override with SKEIN_UID/SKEIN_GID if needed.
+    user: "${SKEIN_UID:-1000}:${SKEIN_GID:-1000}"
+
+volumes:
+  skein-pgdata:
+    name: skein-pgdata

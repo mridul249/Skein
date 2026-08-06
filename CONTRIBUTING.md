@@ -55,7 +55,7 @@ make bench         # the streaming memory benchmark
 ```
 
 Every package should be green. `TestDisconnectThenReconnectRestoresAccess`
-in `internal/files` used to be an expected failure — a committed
+in `internal/files` used to be an expected failure - a committed
 reproduction of issue #19, where disconnecting a drive orphaned its shards
 permanently instead of making them temporarily unreachable. That issue is
 fixed: `Disconnect` soft deletes (status `disabled`, credentials cleared)

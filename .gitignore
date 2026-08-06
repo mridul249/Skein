@@ -11,3 +11,8 @@
 /coverage.out
 /backups
 /web/.test-build
+
+# Docker: generated secrets and the setup report. The master key may be the
+# only copy — see docs/DOCKER.md — so it must never be committed.
+/data
+skein-setup-info.txt

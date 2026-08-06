@@ -127,6 +127,15 @@ jobs:
         working-directory: web
         run: npm run build
 
+      # REQUIRE_BROWSER_TESTS=1 turns "no Chrome" from a skip into a failure.
+      # Without it a runner missing Chrome reports this suite green having run
+      # none of it, which is a gate structurally incapable of failing.
+      - name: Browser tests
+        working-directory: web
+        env:
+          REQUIRE_BROWSER_TESTS: "1"
+        run: npm run test:browser
+
       - name: Build Skein
         run: |
           mkdir -p bin

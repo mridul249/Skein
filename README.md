@@ -141,12 +141,12 @@ Existing storage aggregators force a trade-off between deployment complexity, fi
 ---
 ## The Engine: Polymorphic Server Architecture
 
-At its core, Skein is driven by a unified Go application runtime (`internal/app/app.go`) that operates polymorphically—running either as a headless daemon (`cmd/skein`) or seamlessly wrapped inside a cross-platform desktop UI (`cmd/skein-desktop` via Wails). 
+At its core, Skein is driven by a unified Go application runtime (`internal/app/app.go`) that operates polymorphically - running either as a headless daemon (`cmd/skein`) or seamlessly wrapped inside a cross-platform desktop UI (`cmd/skein-desktop` via Wails). 
 
 Instead of relying on external proxies, process managers, or heavy system dependencies, Skein handles its own network binding, asset distribution, and concurrent background tasks:
 
 * **Ephemeral Network Binding:** When running as a desktop app, Skein's HTTP server dynamically binds to an available loopback port (`127.0.0.1:0`). This eliminates local port collisions, allowing multiple desktop instances or background daemons to coexist without configuration tweaks.
-* **Autonomous Background Subsystem (`internal/worker/worker.go`):** Non-blocking goroutine loops handle array state management asynchronously. The worker engine continuously executes background routines—including `quota-sync` (polling storage capacity across drives), `reclaim-reservations` (releasing unused file chunks), `purge-oauth-states`, and `purge-sessions`—ensuring background cleanup never blocks active file I/O.
+* **Autonomous Background Subsystem (`internal/worker/worker.go`):** Non-blocking goroutine loops handle array state management asynchronously. The worker engine continuously executes background routines - including `quota-sync` (polling storage capacity across drives), `reclaim-reservations` (releasing unused file chunks), `purge-oauth-states`, and `purge-sessions` - ensuring background cleanup never blocks active file I/O.
 * **In-Process OAuth Loopback (`internal/desktopoauth/loopback.go`):** Rather than embedding login pages inside webviews, Skein boots an ephemeral, RFC 8252-compliant local HTTP listener to capture authorization codes directly from the user's default system browser, completing PKCE verification securely in memory.
 * **Zero-Dependency SPA Serving (`internal/web/embed.go`):** The compiled Vite/React frontend is embedded directly into the Go binary at compile time (`//go:embed all:dist`). Skein serves these assets in-memory with SPA routing fallbacks and immutable caching headers (`Cache-Control: public, max-age=31536000`), eliminating the need for Nginx or Apache.
 * **Deterministic Graceful Teardown:** During process termination (`SIGINT`/`SIGTERM`), Skein executes a controlled, zero-data-loss shutdown sequence: it drains active HTTP connections (`httpSrv.Shutdown`), blocks until in-flight background worker routines finish (`workers.Wait()`), and safely flushes and closes database connection pools.
@@ -173,9 +173,7 @@ Every architecture is a series of compromises. Skein unapologetically trades con
 
 ## Quickstart
 
-### Docker (recommended)
-
-Docker is the only dependency. No Go, no Node, no Postgres setup.
+Docker is the only dependency. No Go, no Node, no Postgres to set up.
 
 ```bash
 git clone https://github.com/mridul249/Skein.git && cd Skein
@@ -183,52 +181,35 @@ cp .env.example .env      # set the two Google OAuth values
 docker compose up
 ```
 
-Open <http://localhost:8080>, then read `data/skein-setup-info.txt` — it records
-the master key Skein generated for you, and **that file is the only copy**.
-Lose it and every uploaded file becomes permanently unreadable. Full notes:
-[docs/DOCKER.md](docs/DOCKER.md).
+Open <http://localhost:8080>.
 
-The desktop app is a native binary, not a container; `docker build --target
-desktop --output type=local,dest=./bin .` builds it for you without installing
-the toolchain.
+**Then read `data/skein-setup-info.txt`.** It records the master key Skein
+generated for you, and that file is **the only copy** - lose it and every
+uploaded file becomes permanently unreadable. Move it into a password manager
+before you upload anything.
 
-### Headless Server (`cmd/skein`)
+Google OAuth credentials are the only thing you have to supply; they cannot be
+generated. [docs/SETUP.md](docs/SETUP.md) §3 walks through creating them, and
+[docs/DOCKER.md](docs/DOCKER.md) covers volumes, TLS and the rest.
 
-```bash
-git clone https://github.com/mridul249/Skein.git && cd Skein
-cp .env.example .env
+### Desktop app
 
-# BOTH are required. Skein refuses to start without either.
-openssl rand -base64 32   # -> SKEIN_MASTER_KEY in .env
-openssl rand -base64 48   # -> SKEIN_JWT_SECRET in .env
-
-make dev-db && make build
-
-# The binary does not read .env itself; `make run` does. Load it explicitly:
-set -a && source .env && set +a && ./bin/skein
-```
-
-Then open <http://localhost:8080>. Connecting a Drive additionally needs a
-Google OAuth client — see [docs/SETUP.md](docs/SETUP.md).
-
-### Desktop Application (`cmd/skein-desktop`)
-
-The desktop wrapper runs the core server inside a native Wails window, using an ephemeral localhost port and native system browser OAuth (RFC 8252 PKCE):
+A native windowed binary, not a container. Build it with Docker so you do not
+need Go, Node, GTK and WebKit installed:
 
 ```bash
-sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
-make desktop   # Outputs bin/skein-desktop
-
-set -a && source .env && set +a && ./bin/skein-desktop
+docker build --target desktop --output type=local,dest=./bin .
+./bin/skein-desktop
 ```
 
-The desktop app needs its own **Desktop app** OAuth client — a different one
-from the server's Web client, and they are not interchangeable. Set
-`SKEIN_GOOGLE_DESKTOP_CLIENT_ID` and `SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET`;
-[docs/SETUP.md](docs/SETUP.md) walks through both.
+It needs its own **Desktop app** OAuth client, which is a different client from
+the server's Web one and not interchangeable - see
+[docs/SETUP.md](docs/SETUP.md) §3.
 
-> **Build Note:** On modern Linux distributions (e.g., Ubuntu 24.04+), `wails doctor` may report a missing `webkit2gtk-4.0` package. This is a false positive-`make desktop` explicitly targets the modern `4.1` ABI using `-tags webkit2_41`.
+### Running from source
+
+Building without Docker, running the test suites, and the `make` targets are
+covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -273,7 +254,7 @@ The trade is that verification needs `cosign` and network access, so
 `SHA256SUMS` stays useful on its own for anyone who will not install it.
 
 **Reproducible builds.** Two clean checkouts of the same commit, built at
-different paths, produce byte-identical binaries — verified 2026-08-06. This is
+different paths, produce byte-identical binaries - verified 2026-08-06. This is
 what `-trimpath` and `-buildvcs=false` in `scripts/release-artifacts.sh` are
 for: without the latter, Go stamps `vcs.modified`, which differs between a
 clean checkout and a dirty working tree. You can rebuild a tag yourself with
@@ -288,14 +269,14 @@ Deliberately out of scope, so nobody files them as bugs.
 | | Why |
 | --- | --- |
 | **Direct-from-disk uploads and parallel shard streams** | v2, behind the reservation rewrite. Uploads today stream through the browser one shard at a time. |
-| **Multi-tenancy** — workspace invites, shared folders, public share tokens | Skein is self-hosted, one instance per person. The isolation machinery exists and is verified, but shipping sharing invites shared instances, and registration is open by default, the backup route dumps every user's `password_hash`, and the download directory is process-wide. That is a different product with a security surface this one was not built for. |
+| **Multi-tenancy** - workspace invites, shared folders, public share tokens | Skein is self-hosted, one instance per person. The isolation machinery exists and is verified, but shipping sharing invites shared instances, and registration is open by default, the backup route dumps every user's `password_hash`, and the download directory is process-wide. That is a different product with a security surface this one was not built for. |
 | **Removing a drive that still holds files** | Disconnect refuses and names the files instead. A file striped across two drives is destroyed by removing one, so cascading the delete would let "unlink an account" destroy data on a drive you did not touch. A deliberate remove-with-files needs its own confirmation naming the exact files, and is v2. |
-| **Renaming or moving folders** | Manifests record the folder path as a snapshot of names, so a folder renamed after some files were uploaded reconstructs as two folders during recovery — contents split across both. Nothing is lost, but it appears at the moment you are least able to tolerate ambiguity. Correctness needs manifest staleness tracking, which is v2. |
+| **Renaming or moving folders** | Manifests record the folder path as a snapshot of names, so a folder renamed after some files were uploaded reconstructs as two folders during recovery - contents split across both. Nothing is lost, but it appears at the moment you are least able to tolerate ambiguity. Correctness needs manifest staleness tracking, which is v2. |
 | **Scheduled reconcile** | On-demand only. `reconciled_at` records when each file was last checked. |
 
 Known smaller gaps are tracked in the issue register. The top polish item for
 v1.1 is the account colour ramp, which collides with the semantic colours under
-colour-vision deficiency — measured, documented, and the fix is known.
+colour-vision deficiency - measured, documented, and the fix is known.
 
 ---
 
