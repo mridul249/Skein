@@ -50,7 +50,7 @@ export function Login() {
       <div className="w-full max-w-sm">
         <div className="mb-8">
           <h1 className="flex items-center gap-2">
-            <img src="/mark.svg" width="28" height="28" alt="" aria-hidden />
+            <img src="/logo.svg" width="28" height="28" alt="" aria-hidden />
             <Wordmark className="text-title" />
           </h1>
           <p className="mt-1 text-body text-muted">

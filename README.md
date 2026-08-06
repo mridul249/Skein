@@ -199,6 +199,55 @@ make desktop   # Outputs bin/skein-desktop
 
 ---
 
+## Verifying a download
+
+Every release publishes `SHA256SUMS` covering every binary, and a Sigstore
+signature over that file. The release build fails rather than publish an
+artifact without a checksum.
+
+**Check the bytes are intact:**
+
+```bash
+sha256sum -c SHA256SUMS
+```
+
+That catches corruption and truncation. It does not establish *who* built the
+files: anyone who can replace a binary can replace the checksum file beside it.
+For that, verify the signature.
+
+**Check the release came from this repository's CI:**
+
+```bash
+# Once: https://docs.sigstore.dev/system_config/installation/
+cosign verify-blob \
+  --certificate SHA256SUMS.pem \
+  --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github.com/mridul249/Skein/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+```
+
+Success means this file was signed by a GitHub Actions run in this repository,
+recorded in the public Rekor transparency log. Because `SHA256SUMS` commits to
+every artifact by hash, one signature covers the whole release.
+
+**Why Sigstore and not GPG.** A GPG release key is a long-lived secret someone
+has to hold, rotate, and not lose. The common failure is not a stolen key but a
+forgotten one, after which signatures stop and users learn to ignore the
+warning. Keyless signing has no secret to lose: the identity verified is
+"GitHub Actions, this repository", which is the question anyone actually has.
+The trade is that verification needs `cosign` and network access, so
+`SHA256SUMS` stays useful on its own for anyone who will not install it.
+
+**Reproducible builds.** Two clean checkouts of the same commit, built at
+different paths, produce byte-identical binaries — verified 2026-08-06. This is
+what `-trimpath` and `-buildvcs=false` in `scripts/release-artifacts.sh` are
+for: without the latter, Go stamps `vcs.modified`, which differs between a
+clean checkout and a dirty working tree. You can rebuild a tag yourself with
+`make release` and compare against the published `SHA256SUMS`.
+
+---
+
 ## Not in v1
 
 Deliberately out of scope, so nobody files them as bugs.

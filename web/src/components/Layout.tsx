@@ -53,8 +53,8 @@ export function Layout() {
                    max-md:order-2 max-md:border-t md:h-screen md:w-sidebar md:border-r"
       >
         <div className="hidden items-center gap-2.5 px-5 pb-4 pt-5 md:flex">
-          <img src="/mark.svg" width="20" height="20" alt="" aria-hidden />
-          <Wordmark className="text-heading" />
+          <img src="/logo.svg" width="20" height="20" alt="" aria-hidden />
+          <Wordmark className="text-heading" /> 
         </div>
 
         <nav className="flex gap-1 px-3 max-md:justify-around max-md:py-2 md:flex-col">

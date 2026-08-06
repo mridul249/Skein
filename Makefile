@@ -100,6 +100,19 @@ lint:
 		echo "SKIPPED frontend typecheck: web/node_modules is absent (run 'cd web && npm ci')"; \
 	fi
 
+## release: build the release binaries and SHA256SUMS into dist/
+#
+# The same script the release workflow runs, so a release can be reproduced
+# locally rather than only observed in CI. SIGN=1 also signs SHA256SUMS with
+# cosign (keyless; CI supplies the OIDC identity). Single-# so `make help`,
+# which greps for `## `, lists the target once rather than echoing this prose.
+release: web
+	./scripts/release-artifacts.sh
+
+## verify-release: check a downloaded release the way a user would
+verify-release:
+	@cd dist && sha256sum -c SHA256SUMS
+
 ## recover: build the manifest operator tool (see cmd/skein-recover)
 recover:
 	go build -tags desktop -o bin/skein-recover ./cmd/skein-recover
@@ -193,4 +206,5 @@ clean:
 	rm -rf bin $(WEB_DIST)/* web/node_modules
 
 .PHONY: help run build build-go desktop test test-short bench lint sqlc migrate \
-        migrate-down migrate-status web web-dev dev-db dev-db-down tools backup clean
+        migrate-down migrate-status web web-dev dev-db dev-db-down tools backup clean \
+        release verify-release
