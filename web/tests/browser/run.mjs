@@ -98,10 +98,20 @@ async function waitForVite(timeoutMs = 60_000) {
   while (Date.now() < deadline) {
     if (viteExited) return { ok: false, reason: describeExit(viteExited) };
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/tests/browser/fixture.html`);
+      // PER-REQUEST TIMEOUT, and it is load-bearing rather than tidiness.
+      //
+      // fetch() has NO default timeout. Against a socket that accepts a
+      // connection and never answers - something else holding the port, a
+      // half-dead server, a proxy - it hangs forever, so this loop never gets
+      // back to the viteExited check or to its own deadline. Measured: still
+      // hanging after 30s with no timeout set. The whole readiness check
+      // becomes an indefinite block, which is worse than the bug it replaced.
+      const res = await fetch(`http://127.0.0.1:${port}/tests/browser/fixture.html`, {
+        signal: AbortSignal.timeout(2_000),
+      });
       if (res.ok) return { ok: true };
     } catch {
-      /* not listening yet */
+      /* not listening yet, or it did not answer in time */
     }
     await sleep(250);
   }
