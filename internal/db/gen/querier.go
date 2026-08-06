@@ -36,6 +36,9 @@ type Querier interface {
 	//
 	ConsumeOAuthState(ctx context.Context, stateHash []byte) (OauthState, error)
 	CountFilesInFolder(ctx context.Context, arg CountFilesInFolderParams) (int64, error)
+	// CountFilesOnAccount is the total the listing above is a page of.
+	//
+	CountFilesOnAccount(ctx context.Context, arg CountFilesOnAccountParams) (int64, error)
 	CreateConnectedAccount(ctx context.Context, arg CreateConnectedAccountParams) (ConnectedAccount, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateFileShard(ctx context.Context, arg CreateFileShardParams) (FileShard, error)
@@ -73,6 +76,19 @@ type Querier interface {
 	// statement so two janitor runs cannot release the same reservation twice.
 	//
 	ExpiredReservations(ctx context.Context) ([]ExpiredReservationsRow, error)
+	// FilesOnAccount names the files that would be stranded by disconnecting one
+	// drive, newest first.
+	//
+	// BLOCKS A DESTRUCTIVE OPERATION, so its predicate is deliberately wide.
+	// deleted_at is NOT filtered: a trashed file's shards are still on the drive
+	// and Restore is meant to bring it back, so treating trash as absent would let
+	// a disconnect silently destroy a recoverable file. Only a purge, which
+	// removes the provider objects, actually frees the drive.
+	//
+	// LIMIT is the caller's, so the message can name a few files and say how many
+	// more there are rather than listing a thousand.
+	//
+	FilesOnAccount(ctx context.Context, arg FilesOnAccountParams) ([]FilesOnAccountRow, error)
 	// FindLiveFolder looks for an existing folder by name under a parent, so
 	// reconstruction reuses the user's folder rather than creating a duplicate.
 	//

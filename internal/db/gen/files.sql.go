@@ -29,6 +29,27 @@ func (q *Queries) CountFilesInFolder(ctx context.Context, arg CountFilesInFolder
 	return count, err
 }
 
+const countFilesOnAccount = `-- name: CountFilesOnAccount :one
+SELECT COUNT(DISTINCT f.id)
+  FROM files f
+  JOIN file_shards s ON s.file_id = f.id
+ WHERE f.user_id = $1
+   AND s.connected_account_id = $2
+`
+
+type CountFilesOnAccountParams struct {
+	UserID             uuid.UUID
+	ConnectedAccountID *uuid.UUID
+}
+
+// CountFilesOnAccount is the total the listing above is a page of.
+func (q *Queries) CountFilesOnAccount(ctx context.Context, arg CountFilesOnAccountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countFilesOnAccount, arg.UserID, arg.ConnectedAccountID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createFile = `-- name: CreateFile :one
 INSERT INTO files (id, user_id, folder_id, name, size_bytes, declared_mime,
                    is_striped, is_encrypted, status)
@@ -169,6 +190,58 @@ func (q *Queries) DeleteFileShards(ctx context.Context, fileID uuid.UUID) (int64
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const filesOnAccount = `-- name: FilesOnAccount :many
+SELECT DISTINCT f.id, f.name
+  FROM files f
+  JOIN file_shards s ON s.file_id = f.id
+ WHERE f.user_id = $1
+   AND s.connected_account_id = $2
+ ORDER BY f.name
+ LIMIT $3
+`
+
+type FilesOnAccountParams struct {
+	UserID             uuid.UUID
+	ConnectedAccountID *uuid.UUID
+	Limit              int32
+}
+
+type FilesOnAccountRow struct {
+	ID   uuid.UUID
+	Name string
+}
+
+// FilesOnAccount names the files that would be stranded by disconnecting one
+// drive, newest first.
+//
+// BLOCKS A DESTRUCTIVE OPERATION, so its predicate is deliberately wide.
+// deleted_at is NOT filtered: a trashed file's shards are still on the drive
+// and Restore is meant to bring it back, so treating trash as absent would let
+// a disconnect silently destroy a recoverable file. Only a purge, which
+// removes the provider objects, actually frees the drive.
+//
+// LIMIT is the caller's, so the message can name a few files and say how many
+// more there are rather than listing a thousand.
+func (q *Queries) FilesOnAccount(ctx context.Context, arg FilesOnAccountParams) ([]FilesOnAccountRow, error) {
+	rows, err := q.db.Query(ctx, filesOnAccount, arg.UserID, arg.ConnectedAccountID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FilesOnAccountRow{}
+	for rows.Next() {
+		var i FilesOnAccountRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const findLiveFolder = `-- name: FindLiveFolder :one

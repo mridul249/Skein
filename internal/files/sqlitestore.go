@@ -363,6 +363,48 @@ SELECT `+cols+`
 	}
 }
 
+// FilesOnAccount names files with a shard on the given account, and counts
+// them all. Trashed files are INCLUDED — see the Store interface for why.
+func (s *SQLiteStore) FilesOnAccount(ctx context.Context, userID, accountID uuid.UUID, limit int32) ([]string, int, error) {
+	var total int
+	if err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(DISTINCT f.id)
+  FROM files f
+  JOIN file_shards sh ON sh.file_id = f.id
+ WHERE f.user_id = ? AND sh.connected_account_id = ?`,
+		userID.String(), accountID.String()).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count files on account: %w", err)
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT DISTINCT f.name
+  FROM files f
+  JOIN file_shards sh ON sh.file_id = f.id
+ WHERE f.user_id = ? AND sh.connected_account_id = ?
+ ORDER BY f.name
+ LIMIT ?`, userID.String(), accountID.String(), limit)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list files on account: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var names []string
+	for rows.Next() {
+		var n string
+		if serr := rows.Scan(&n); serr != nil {
+			return nil, 0, fmt.Errorf("scan file on account: %w", serr)
+		}
+		names = append(names, n)
+	}
+	if rerr := rows.Err(); rerr != nil {
+		return nil, 0, fmt.Errorf("iterate files on account: %w", rerr)
+	}
+	return names, total, nil
+}
+
 func (s *SQLiteStore) ListTrashed(ctx context.Context, userID uuid.UUID, limit int32) ([]File, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,

@@ -148,6 +148,17 @@ func (s *Service) SetUserDirectory(d UserDirectory) { s.users = d }
 // which is what the tests do.
 func (s *Service) SetAccountLister(a AccountLister) { s.accounts = a }
 
+// FilesOnAccount names files with a shard on one drive, satisfying
+// accounts.DriveDependents.
+//
+// It exists so Disconnect can REFUSE rather than strand data. Deliberately a
+// thin pass-through: the interesting decision — that trashed files count, that
+// the check fails closed — belongs with the caller doing the refusing and the
+// store answering the question, not in a third place between them.
+func (s *Service) FilesOnAccount(ctx context.Context, userID, accountID uuid.UUID, limit int32) ([]string, int, error) {
+	return s.store.FilesOnAccount(ctx, userID, accountID, limit)
+}
+
 // SetFolderRebinder installs the app-folder correction recovery applies. Nil
 // means recovery restores every file but leaves the account writing to a
 // different folder than the recovered shards sit in. See FolderRebinder.

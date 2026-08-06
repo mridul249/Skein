@@ -63,7 +63,7 @@ func (m *MemoryStore) GetFolder(_ context.Context, userID, id uuid.UUID) (Folder
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	f, ok := m.folders[id]
-	if !ok || f.UserID != userID || f.DeletedAt != nil {
+	if !ok || f.UserID != userID {
 		return Folder{}, skerr.ErrNotFound
 	}
 	return f, nil
@@ -440,6 +440,40 @@ func (m *MemoryStore) ListTrashed(_ context.Context, userID uuid.UUID, limit int
 		}
 	}
 	return out, nil
+}
+
+// FilesOnAccount names files with a shard on the given account. Trashed files
+// are INCLUDED — see the Store interface for why.
+func (m *MemoryStore) FilesOnAccount(_ context.Context, userID, accountID uuid.UUID, limit int32) ([]string, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	seen := map[uuid.UUID]struct{}{}
+	for fileID, shards := range m.shards {
+		f, ok := m.files[fileID]
+		if !ok || f.UserID != userID {
+			continue
+		}
+		for _, sh := range shards {
+			if sh.AccountID != nil && *sh.AccountID == accountID {
+				seen[f.ID] = struct{}{}
+				break
+			}
+		}
+	}
+
+	names := make([]string, 0, len(seen))
+	for id := range seen {
+		names = append(names, m.files[id].Name)
+	}
+	// Sorted so a refusal message is stable across runs rather than reflecting
+	// map iteration order.
+	sort.Strings(names)
+	total := len(names)
+	if limit > 0 && int32(len(names)) > limit {
+		names = names[:limit]
+	}
+	return names, total, nil
 }
 
 // UpdateFile renames and/or moves a file.

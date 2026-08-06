@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/mridul249/Skein/internal/accounts"
 	"github.com/mridul249/Skein/internal/files"
 	"github.com/mridul249/Skein/internal/skerr"
@@ -176,5 +178,47 @@ func TestATrashedFileStillBlocksDisconnect(t *testing.T) {
 		t.Error("a trashed file did not block the disconnect; its shards are still " +
 			"on the drive and Restore is supposed to bring it back, so removing " +
 			"the drive would silently destroy a recoverable file")
+	}
+}
+
+// failingDependents is a dependency check that cannot answer.
+type failingDependents struct{ err error }
+
+func (f failingDependents) FilesOnAccount(context.Context, uuid.UUID, uuid.UUID, int32) ([]string, int, error) {
+	return nil, 0, f.err
+}
+
+// A CHECK THAT CANNOT RUN HAS NOT ESTABLISHED THE PRECONDITION.
+//
+// Found by mutation: replacing the error return in refuseIfFilesDependOn with
+// `return nil` left every other test green, because none of them makes the
+// check fail. That mutation is the whole guard silently disabled by any
+// database hiccup — the destructive path, reached by accident.
+//
+// Rule 8: a destructive operation establishes its own preconditions. It cannot
+// establish one from an answer it did not get, so it must fail closed.
+func TestDisconnectRefusesWhenTheDependencyCheckFails(t *testing.T) {
+	f := newDisconnectFixture(t)
+	ctx := context.Background()
+
+	f.acctSvc.SetDriveDependents(failingDependents{err: errors.New("database unavailable")})
+
+	derr := f.acctSvc.Disconnect(ctx, f.userID, f.ids[0])
+	if derr == nil {
+		t.Fatal("Disconnect() = nil when the dependency check could not run. " +
+			"An unanswered check is not a passed check, and proceeding is the " +
+			"destructive path the guard exists to prevent.")
+	}
+
+	// And nothing may have been mutated on the way to failing.
+	stored, gerr := f.accounts.GetAccount(ctx, f.userID, f.ids[0])
+	if gerr != nil {
+		t.Fatalf("GetAccount() = %v", gerr)
+	}
+	if stored.Status != accounts.StatusActive {
+		t.Errorf("status = %q after a failed check, want %q", stored.Status, accounts.StatusActive)
+	}
+	if len(stored.AccessTokenEnc) == 0 {
+		t.Error("credentials were cleared despite the disconnect failing")
 	}
 }

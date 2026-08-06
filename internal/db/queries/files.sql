@@ -249,3 +249,33 @@ SELECT * FROM folders
    AND name = $2
    AND deleted_at IS NULL
  LIMIT 1;
+
+-- FilesOnAccount names the files that would be stranded by disconnecting one
+-- drive, newest first.
+--
+-- BLOCKS A DESTRUCTIVE OPERATION, so its predicate is deliberately wide.
+-- deleted_at is NOT filtered: a trashed file's shards are still on the drive
+-- and Restore is meant to bring it back, so treating trash as absent would let
+-- a disconnect silently destroy a recoverable file. Only a purge, which
+-- removes the provider objects, actually frees the drive.
+--
+-- LIMIT is the caller's, so the message can name a few files and say how many
+-- more there are rather than listing a thousand.
+--
+-- name: FilesOnAccount :many
+SELECT DISTINCT f.id, f.name
+  FROM files f
+  JOIN file_shards s ON s.file_id = f.id
+ WHERE f.user_id = $1
+   AND s.connected_account_id = $2
+ ORDER BY f.name
+ LIMIT $3;
+
+-- CountFilesOnAccount is the total the listing above is a page of.
+--
+-- name: CountFilesOnAccount :one
+SELECT COUNT(DISTINCT f.id)
+  FROM files f
+  JOIN file_shards s ON s.file_id = f.id
+ WHERE f.user_id = $1
+   AND s.connected_account_id = $2;

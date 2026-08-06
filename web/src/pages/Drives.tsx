@@ -124,9 +124,15 @@ export function Drives() {
           setConfirming(null);
         }}
       >
-        Files with a shard on it become unreadable until you reconnect this same
-        Google account. Nothing is deleted from Google, and the link between those
-        files and this drive is kept.
+        Nothing is deleted from Google, and the link between your files and this
+        drive is kept, so reconnecting the same Google account restores access.
+        {' '}
+        <strong className="text-text">
+          If any file still has data on this drive, Skein will refuse and tell
+          you which files to delete first.
+        </strong>{' '}
+        A file spread across several drives cannot be made whole by removing one
+        of them, so nothing is deleted on your behalf.
       </Modal>
 
       {configError && (

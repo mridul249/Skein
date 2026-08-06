@@ -230,6 +230,19 @@ type Store interface {
 	// had to remember to loop would be the same defect one layer along.
 	ListAllFiles(ctx context.Context, userID uuid.UUID) ([]File, error)
 	ListTrashed(ctx context.Context, userID uuid.UUID, limit int32) ([]File, error)
+
+	// FilesOnAccount names the files that would be stranded by disconnecting
+	// one drive, and reports how many there are in total.
+	//
+	// It backs a REFUSAL, so its predicate is deliberately wide: trashed files
+	// count. Their shards are still on the drive and Restore is meant to bring
+	// them back, so treating trash as absent would let a disconnect silently
+	// destroy a recoverable file. Only a purge, which removes the provider
+	// objects, actually frees the drive.
+	//
+	// limit bounds the NAMES, not the count, so a message can say "and 900
+	// more" rather than listing them.
+	FilesOnAccount(ctx context.Context, userID, accountID uuid.UUID, limit int32) (names []string, total int, err error)
 	UpdateFile(ctx context.Context, userID, id uuid.UUID, name string, folderID *uuid.UUID) (File, error)
 	SoftDeleteFile(ctx context.Context, userID, id uuid.UUID) (int64, error)
 	RestoreFile(ctx context.Context, userID, id uuid.UUID) (int64, error)

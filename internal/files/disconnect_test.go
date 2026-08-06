@@ -187,6 +187,11 @@ func newDisconnectFixture(t *testing.T) *disconnectFixture {
 		logger,
 	)
 
+	// Wired exactly as app.go wires it, so the disconnect refusal is
+	// exercised here rather than only in production. A fixture that skipped
+	// this would test a Disconnect the shipped binary does not have.
+	acctSvc.SetDriveDependents(svc)
+
 	return &disconnectFixture{
 		svc: svc, files: fileStore, accounts: acctStore, acctSvc: acctSvc,
 		backends: backends, ids: ids, subs: subs, userID: userID, ring: ring,
@@ -253,9 +258,26 @@ func TestDisconnectThenReconnectRestoresAccess(t *testing.T) {
 	}
 
 	// 2. Disconnect through the real service method, not by touching rows.
+	//
+	// THE REFUSAL IS LIFTED FOR THIS TEST, DELIBERATELY. Block 3 made
+	// Disconnect refuse while a file still has shards on the drive, which is
+	// exactly the situation constructed above — so with the guard active this
+	// scenario is now unreachable through the front door.
+	//
+	// The properties below are still the ones that matter and must not be
+	// lost: #19 was about shard rows keeping their drive link and their
+	// provider object ids across a disconnect, so a reconnect restores access.
+	// The guard changes WHEN a disconnect is allowed, not what it must
+	// preserve when it happens — a drive whose files were deleted, or one
+	// disconnected before the guard existed, still reaches this code.
+	//
+	// Bypassing at the fixture boundary rather than weakening the guard: the
+	// refusal has its own tests in disconnectrefusal_test.go.
+	f.acctSvc.SetDriveDependents(nil)
 	if derr := f.acctSvc.Disconnect(ctx, f.userID, victim); derr != nil {
 		t.Fatalf("Disconnect() = %v", derr)
 	}
+	f.acctSvc.SetDriveDependents(f.svc)
 
 	// The database's ON DELETE SET NULL fires only if the row actually went.
 	// A soft delete leaves it in place and this does nothing.

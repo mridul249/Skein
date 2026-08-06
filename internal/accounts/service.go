@@ -50,6 +50,11 @@ type Service struct {
 	// About requests.
 	flight singleflight.Group
 
+	// dependents answers "does any file still live on this drive", for the
+	// refusal in Disconnect. Nil means the guard is inactive. See
+	// DriveDependents for why the dependency points this way.
+	dependents DriveDependents
+
 	// mu guards invalidators, which are registered during wiring but fired
 	// from request goroutines, and the desktop OAuth credentials below.
 	mu           sync.RWMutex
@@ -857,6 +862,27 @@ func (s *Service) Disconnect(ctx context.Context, userID, accountID uuid.UUID) e
 	if acct.Status == StatusDisabled {
 		return skerr.ErrNotFound
 	}
+
+	// THE PRECONDITION THIS OPERATION ESTABLISHES FOR ITSELF.
+	//
+	// Disconnecting a drive that still holds shards leaves every file with a
+	// shard there undownloadable, and says nothing about it. The tempting fix
+	// — delete those files' shards too — is far worse: a file striped across
+	// drives A and B is destroyed by removing A, so cascading to B means an
+	// action worded "unlink an account" permanently destroys data on a drive
+	// the user did not touch. No confirmation dialog makes that safe.
+	//
+	// So this refuses instead, and names what is in the way. Deliberate
+	// removal-with-files is a different operation needing its own confirmation
+	// that names the exact files destroyed (known issue #22), not a reuse of
+	// this one.
+	//
+	// CHECKED BEFORE ANYTHING IS WRITTEN. A refusal that has already cleared
+	// the credentials is not a refusal.
+	if err := s.refuseIfFilesDependOn(ctx, userID, accountID, acct.Email); err != nil {
+		return err
+	}
+
 	if err := s.store.ClearAccountTokens(ctx, accountID); err != nil {
 		return fmt.Errorf("clear account tokens: %w", err)
 	}
@@ -865,6 +891,80 @@ func (s *Service) Disconnect(ctx context.Context, userID, accountID uuid.UUID) e
 	}
 	s.invalidate(accountID)
 	return nil
+}
+
+// DriveDependents reports which of a user's files have a shard on one drive.
+//
+// A NARROW INTERFACE, and it points the way it does on purpose: files already
+// depends on accounts (it resolves backends through it), so accounts cannot
+// import files back. This is the one fact accounts needs from that side, and
+// it is supplied at wiring rather than taken as a package dependency.
+//
+// Optional. A nil dependents source means Disconnect behaves exactly as it did
+// before this guard existed — which is what the accounts package's own tests
+// use, and what keeps this from silently becoming load-bearing in a build that
+// never wired it.
+type DriveDependents interface {
+	// FilesOnAccount names up to limit files with a shard on the account and
+	// reports the total. Trashed files count: their shards are still on the
+	// drive and Restore is meant to bring them back.
+	FilesOnAccount(ctx context.Context, userID, accountID uuid.UUID, limit int32) (names []string, total int, err error)
+}
+
+// SetDriveDependents installs the check Disconnect refuses on. Wired in app.go.
+func (s *Service) SetDriveDependents(d DriveDependents) { s.dependents = d }
+
+// disconnectNameLimit is how many file names a refusal lists before summarising.
+// Enough to recognise what is in the way, few enough to read.
+const disconnectNameLimit = 5
+
+// refuseIfFilesDependOn returns a conflict naming the files that block a
+// disconnect, or nil when the drive can be removed.
+func (s *Service) refuseIfFilesDependOn(ctx context.Context, userID, accountID uuid.UUID, email string) error {
+	if s.dependents == nil {
+		return nil
+	}
+	names, total, err := s.dependents.FilesOnAccount(ctx, userID, accountID, disconnectNameLimit)
+	if err != nil {
+		// FAIL CLOSED. A check that cannot run has not established the
+		// precondition, and proceeding would be the destructive path this
+		// exists to prevent.
+		return fmt.Errorf("check files on drive: %w", err)
+	}
+	if total == 0 {
+		return nil
+	}
+
+	shown := names
+	if len(shown) > disconnectNameLimit {
+		shown = shown[:disconnectNameLimit]
+	}
+	listed := strings.Join(shown, ", ")
+	if total > len(shown) {
+		listed = fmt.Sprintf("%s and %d more", listed, total-len(shown))
+	}
+
+	label := email
+	if label == "" {
+		label = "this drive"
+	}
+	s.log.InfoContext(ctx, "refused to disconnect a drive that still holds file data",
+		slog.String("account_id", accountID.String()),
+		slog.Int("files", total))
+
+	return skerr.Public(skerr.ErrConflict,
+		"%d %s still stored on %s: %s. Delete them first — disconnecting "+
+			"now would leave them unreadable, and files spread across several "+
+			"drives would lose the parts held elsewhere too.",
+		total, plural(total, "file is", "files are"), label, listed)
+}
+
+// plural picks the right form for a count.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // OnAccountInvalidated registers a callback fired when an account's

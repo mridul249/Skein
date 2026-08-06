@@ -269,6 +269,11 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	// while its shards sit in the old one; this lets reconstruction correct
 	// that from what it actually found. See files.FolderRebinder.
 	filesSvc.SetFolderRebinder(accountsSvc)
+	// Disconnect refuses while any file still has a shard on the drive.
+	// Wired the other way round from everything above: accounts asks files a
+	// single question, through a one-method interface, because files already
+	// depends on accounts and the import cannot go both ways.
+	accountsSvc.SetDriveDependents(filesSvc)
 	// The durable identity manifests record, so a rebuilt database can still
 	// claim them. Without this, recovery after losing the database finds
 	// nothing — see the manifest UserEmail field.

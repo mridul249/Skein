@@ -313,6 +313,35 @@ func (s *PGStore) ListAllFiles(ctx context.Context, userID uuid.UUID) ([]File, e
 }
 
 // ListTrashed returns soft-deleted files.
+// FilesOnAccount names files with a shard on the given account, and counts
+// them all. Trashed files are INCLUDED — see the Store interface for why.
+func (s *PGStore) FilesOnAccount(ctx context.Context, userID, accountID uuid.UUID, limit int32) ([]string, int, error) {
+	total, err := s.q.CountFilesOnAccount(ctx, gen.CountFilesOnAccountParams{
+		UserID:             userID,
+		ConnectedAccountID: &accountID,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("count files on account: %w", err)
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	rows, err := s.q.FilesOnAccount(ctx, gen.FilesOnAccountParams{
+		UserID:             userID,
+		ConnectedAccountID: &accountID,
+		Limit:              limit,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("list files on account: %w", err)
+	}
+	names := make([]string, 0, len(rows))
+	for _, r := range rows {
+		names = append(names, r.Name)
+	}
+	return names, int(total), nil
+}
+
 func (s *PGStore) ListTrashed(ctx context.Context, userID uuid.UUID, limit int32) ([]File, error) {
 	rows, err := s.q.ListTrashedFiles(ctx, gen.ListTrashedFilesParams{UserID: userID, Limit: limit})
 	if err != nil {
