@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -223,6 +224,113 @@ func TestReconstructRecoversFilesByteForByteAfterTheDatabaseIsDestroyed(t *testi
 			continue
 		}
 		t.Logf("%s: %d bytes recovered byte-for-byte", o.name, len(got))
+	}
+}
+
+// THE DRY RUN WRITES NOTHING, which is the claim the two-step Recovery UI
+// rests on: the user is shown what a restore would do, and is told nothing has
+// happened yet. If a "scan" mutated the database, that sentence is a lie and
+// the confirmation step is theatre.
+//
+// Asserted by destroying the database, scanning, and checking the database is
+// STILL EMPTY — not by trusting the report's own dry_run flag.
+func TestReconstructDryRunWritesNothing(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	data := randomBytes(t, 6<<20)
+	file := f.uploadAs(t, f.user1, "preview.bin", data)
+	f.destroyDatabase(t)
+
+	preview, err := f.svc.ReconstructDryRun(ctx, f.user1, f.accounts)
+	if err != nil {
+		t.Fatalf("ReconstructDryRun() = %v", err)
+	}
+	if !preview.DryRun {
+		t.Error("the report does not mark itself as a dry run")
+	}
+	// It must still REPORT what it would do, or the preview is useless.
+	if preview.FilesRecovered != 1 {
+		t.Errorf("preview reported %d files recoverable, want 1", preview.FilesRecovered)
+	}
+	if preview.ShardsRecovered == 0 {
+		t.Error("preview reported no shards recoverable")
+	}
+
+	// ...and the database is untouched.
+	if _, gerr := f.svc.Get(ctx, f.user1, file.ID); gerr == nil {
+		t.Fatal("the dry run WROTE the file row; the UI's 'nothing has been " +
+			"written yet' is a lie and the confirm step is theatre")
+	}
+	listed, lerr := f.svc.List(ctx, f.user1, files.ListParams{Limit: 50})
+	if lerr != nil {
+		t.Fatalf("List() = %v", lerr)
+	}
+	if len(listed) != 0 {
+		t.Errorf("%d files in the listing after a dry run, want 0", len(listed))
+	}
+
+	// And a real run afterwards still recovers everything — the preview must
+	// not have consumed anything.
+	real, rerr := f.svc.Reconstruct(ctx, f.user1, f.accounts)
+	if rerr != nil {
+		t.Fatalf("Reconstruct() after a dry run = %v", rerr)
+	}
+	if real.FilesRecovered != 1 {
+		t.Errorf("the real run recovered %d files after a preview, want 1",
+			real.FilesRecovered)
+	}
+	if _, gerr := f.svc.Get(ctx, f.user1, file.ID); gerr != nil {
+		t.Errorf("the file did not come back after the real run: %v", gerr)
+	}
+}
+
+// The preview's numbers must match what the real run actually does. A preview
+// that overstates sends someone into a restore expecting more than they get.
+func TestTheDryRunPredictsWhatTheRealRunDoes(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	folder, ferr := f.svc.CreateFolder(ctx, f.user1, nil, "Docs")
+	if ferr != nil {
+		t.Fatalf("CreateFolder() = %v", ferr)
+	}
+	fid := folder.ID
+	for i := 0; i < 3; i++ {
+		data := randomBytes(t, 1<<20)
+		var target *uuid.UUID
+		if i == 0 {
+			target = &fid
+		}
+		if _, uerr := f.svc.Upload(ctx, files.UploadRequest{
+			UserID: f.user1, Name: fmt.Sprintf("f%d.bin", i),
+			Size: int64(len(data)), FolderID: target,
+		}, bytes.NewReader(data)); uerr != nil {
+			t.Fatalf("Upload(%d) = %v", i, uerr)
+		}
+	}
+	f.destroyDatabase(t)
+
+	preview, err := f.svc.ReconstructDryRun(ctx, f.user1, f.accounts)
+	if err != nil {
+		t.Fatalf("ReconstructDryRun() = %v", err)
+	}
+	real, rerr := f.svc.Reconstruct(ctx, f.user1, f.accounts)
+	if rerr != nil {
+		t.Fatalf("Reconstruct() = %v", rerr)
+	}
+
+	if preview.FilesRecovered != real.FilesRecovered {
+		t.Errorf("preview said %d files, the run recovered %d",
+			preview.FilesRecovered, real.FilesRecovered)
+	}
+	if preview.ShardsRecovered != real.ShardsRecovered {
+		t.Errorf("preview said %d shards, the run recovered %d",
+			preview.ShardsRecovered, real.ShardsRecovered)
+	}
+	if preview.FoldersRecovered != real.FoldersRecovered {
+		t.Errorf("preview said %d folders, the run recreated %d",
+			preview.FoldersRecovered, real.FoldersRecovered)
 	}
 }
 
