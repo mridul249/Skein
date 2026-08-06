@@ -121,6 +121,15 @@ type ListedObject struct {
 	// files.ManifestName one.
 	Name string
 	Size int64
+
+	// ParentID is the provider container the object sits in — a Drive folder
+	// id, a local directory. Empty when the implementation cannot report one.
+	//
+	// It exists for recovery. A rebuilt database has forgotten which folder
+	// this account's objects live in, and the folder cannot be re-derived
+	// (see the comment on Lister.List). Reading it back off the objects that
+	// were actually found is the only source of truth left.
+	ParentID string
 }
 
 // Lister enumerates the objects Skein has written to one account.
@@ -137,8 +146,23 @@ type ListedObject struct {
 // unavailable listing is exactly how a recovery decides files are gone when
 // they are not.
 type Lister interface {
-	// List returns every object Skein wrote to this account, scoped to its
-	// app folder. Implementations page internally and return the whole set.
+	// List returns every object Skein wrote to this account, WHEREVER it
+	// wrote it. Implementations page internally and return the whole set.
+	//
+	// NOT SCOPED TO THE APP FOLDER, and that is the entire point. Scoping it
+	// was a live recovery failure on 2026-08-06: the app folder is named with
+	// a per-user suffix derived from the user id, a rebuilt database mints a
+	// NEW user id, so the recovered install computed a different folder name,
+	// found nothing, created an empty folder, and reported "0 manifests" over
+	// seven perfectly intact files. Recovery cannot depend on a name derived
+	// from the thing recovery has lost.
+	//
+	// Listing wider is safe. The provider grant is already narrow — Drive's
+	// drive.file scope only ever returns objects this client created — so
+	// "everything visible" IS "everything Skein wrote". Objects belonging to
+	// another Skein user on the same provider account may appear; deciding
+	// whose they are is the caller's job, done by manifest claim, and it is
+	// a decision the caller already has to make.
 	List(ctx context.Context) ([]ListedObject, error)
 }
 
