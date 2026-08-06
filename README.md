@@ -62,16 +62,16 @@ $ skein status
 
 ## Screenshots
 <p align="center">
-<img src="public/P4.png" width="95%">
+<img src="public/P1.png" width="95%">
 </p>
 
 <p align="center">
 <img src="public/P2.png" width="48%">
-<img src="public/P5.png" width="48%">
+<img src="public/P3.png" width="48%">
 </p>
 
 <p align="center">
-<img src="public/P3.png" width="95%">
+<img src="public/P4.png" width="95%">
 </p>
 
 ---
