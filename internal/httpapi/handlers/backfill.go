@@ -19,11 +19,15 @@ import (
 // whole files service for one route.
 type ManifestBackfiller interface {
 	BackfillManifestsForUser(ctx context.Context, userID uuid.UUID) (files.BackfillReport, error)
+	ManifestCoverageForUser(ctx context.Context, userID uuid.UUID) (files.BackfillReport, error)
 }
 
 // SetBackfiller wires manifest backfill. Nil leaves the route reporting 404,
 // exactly as an unset operator token does.
-func (h *System) SetBackfiller(b ManifestBackfiller) { h.backfill = b }
+func (h *System) SetBackfiller(b ManifestBackfiller) {
+	h.backfill = b
+	h.coverage = b
+}
 
 // BackfillManifests handles POST /api/system/manifests/backfill.
 //

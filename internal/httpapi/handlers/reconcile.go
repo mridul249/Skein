@@ -62,7 +62,12 @@ func (h *Files) Reconstruct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	report, rerr := h.svc.ReconstructAll(r.Context(), userID)
+	// ?dry_run=true previews without writing. The UI's first step: an
+	// operation someone runs when things have already gone wrong should show
+	// what it found before it changes anything.
+	dryRun := r.URL.Query().Get("dry_run") == "true"
+
+	report, rerr := h.svc.ReconstructAll(r.Context(), userID, dryRun)
 	if rerr != nil {
 		httpx.WriteError(w, r, rerr)
 		return

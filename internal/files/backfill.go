@@ -41,6 +41,9 @@ const (
 	// BackfillFailed — the accounts were reachable and the write did not
 	// succeed. A real failure, distinct from not being able to look.
 	BackfillFailed BackfillState = "failed"
+	// BackfillUncovered — this file has no manifest and none was attempted.
+	// Only produced by a coverage read; a real run either writes or fails.
+	BackfillUncovered BackfillState = "uncovered"
 )
 
 // BackfillResult is one file's line in the report.
@@ -86,6 +89,9 @@ type BackfillReport struct {
 	StartedAt  time.Time `json:"started_at"`
 	FinishedAt time.Time `json:"finished_at"`
 
+	// DryRun is true for a coverage read, which writes nothing.
+	DryRun bool `json:"dry_run"`
+
 	// Complete is false when any account could not be listed. A run that could
 	// not see every drive must not present its coverage as the whole truth.
 	Complete          bool     `json:"complete"`
@@ -112,7 +118,15 @@ type BackfillReport struct {
 // A file whose accounts could not be listed is INDETERMINATE. It is not
 // covered, not failed, and the run is not complete.
 func (s *Service) BackfillManifests(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID) (BackfillReport, error) {
-	report := BackfillReport{StartedAt: time.Now(), Complete: true}
+	return s.backfillManifests(ctx, userID, accountIDs, false)
+}
+
+// backfillManifests is the shared implementation. dryRun reports coverage
+// without writing, which is what ManifestCoverageForUser needs — one code path
+// so the numbers a user sees before acting are produced by the same logic that
+// acts.
+func (s *Service) backfillManifests(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID, dryRun bool) (BackfillReport, error) {
+	report := BackfillReport{StartedAt: time.Now(), Complete: true, DryRun: dryRun}
 
 	// One listing per account, up front. Coverage is a question about what is
 	// AT THE PROVIDER, and asking it per file would be N listings of the same
@@ -139,7 +153,7 @@ func (s *Service) BackfillManifests(ctx context.Context, userID uuid.UUID, accou
 	}
 
 	for _, f := range files {
-		result := s.backfillOne(ctx, userID, f, present)
+		result := s.backfillOne(ctx, userID, f, present, dryRun)
 		report.Results = append(report.Results, result)
 
 		report.Coverage.Files++
@@ -155,7 +169,7 @@ func (s *Service) BackfillManifests(ctx context.Context, userID uuid.UUID, accou
 		case BackfillIndeterminate:
 			report.Coverage.Indeterminate++
 			report.Complete = false
-		case BackfillFailed:
+		case BackfillFailed, BackfillUncovered:
 			report.Coverage.Uncovered++
 		}
 	}
@@ -179,6 +193,24 @@ func (s *Service) BackfillManifests(ctx context.Context, userID uuid.UUID, accou
 	return report, nil
 }
 
+// ManifestCoverageForUser reports coverage WITHOUT writing anything.
+//
+// A read-only counterpart to backfill, so the UI can state whether the drives
+// are actually a recovery source before offering to change anything. Asking
+// "am I recoverable?" must not be an operation that mutates storage — a user
+// checking their safety net should not be surprised by writes to four Drive
+// accounts.
+func (s *Service) ManifestCoverageForUser(ctx context.Context, userID uuid.UUID) (BackfillReport, error) {
+	if s.accounts == nil {
+		return BackfillReport{}, fmt.Errorf("files: no account lister wired")
+	}
+	ids, err := s.accounts.AccountIDsForUser(ctx, userID)
+	if err != nil {
+		return BackfillReport{}, fmt.Errorf("list connected drives: %w", err)
+	}
+	return s.backfillManifests(ctx, userID, ids, true)
+}
+
 // BackfillManifestsForUser runs backfill across every drive the user has
 // connected. The HTTP entry point; BackfillManifests takes explicit account
 // ids so tests can name them.
@@ -194,7 +226,7 @@ func (s *Service) BackfillManifestsForUser(ctx context.Context, userID uuid.UUID
 }
 
 // backfillOne covers a single file.
-func (s *Service) backfillOne(ctx context.Context, userID uuid.UUID, f File, present map[uuid.UUID]map[uuid.UUID]bool) BackfillResult {
+func (s *Service) backfillOne(ctx context.Context, userID uuid.UUID, f File, present map[uuid.UUID]map[uuid.UUID]bool, dryRun bool) BackfillResult {
 	result := BackfillResult{FileID: f.ID}
 
 	// A manifest promising recovery of a file with a confirmed-missing shard
@@ -245,6 +277,12 @@ func (s *Service) backfillOne(ctx context.Context, userID uuid.UUID, f File, pre
 
 	if len(missing) == 0 {
 		result.State = BackfillAlreadyCovered
+		return result
+	}
+	if dryRun {
+		// Coverage only: say what IS, write nothing. Uncovered rather than
+		// failed — nothing was attempted, so nothing failed.
+		result.State = BackfillUncovered
 		return result
 	}
 

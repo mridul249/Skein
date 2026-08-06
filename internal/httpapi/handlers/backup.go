@@ -43,6 +43,7 @@ type System struct {
 	sqlDB    *sql.DB
 	keyring  *skcrypto.Keyring
 	backfill ManifestBackfiller
+	coverage ManifestBackfiller
 	log      *slog.Logger
 }
 
