@@ -49,7 +49,7 @@ export function coverageSummary(report: BackfillReport | null): string {
   if (!report.complete || c.indeterminate > 0) {
     return (
       `${c.covered} of ${recoverable} files have manifests, but some drives ` +
-      `could not be checked — the real figure may be higher or lower.`
+      `could not be checked, so the real figure may be higher or lower.`
     );
   }
   if (recoverable === 0) {
@@ -86,7 +86,7 @@ export function restoreSummary(report: ReconstructReport): string[] {
   const lines: string[] = [];
 
   if (report.files_recovered === 0 && report.files_already_present === 0) {
-    lines.push('Nothing was recovered — no manifests were found on your drives.');
+    lines.push('Nothing was recovered. No manifests were found on your drives.');
   } else {
     lines.push(
       `Recovered ${report.files_recovered} ${plural(report.files_recovered, 'file')}, ` +
@@ -121,12 +121,12 @@ export function restoreSummary(report: ReconstructReport): string[] {
     lines.push(
       `${report.shards_unresolved} ${plural(report.shards_unresolved, 'shard')} could not be located ` +
         `on any drive that was read, so some files here cannot be downloaded yet. ` +
-        `Connect every drive you used and run this again — it will fill in what is missing.`,
+        `Connect every drive you used and run this again to fill in what is missing.`,
     );
   }
   if (!report.complete) {
     lines.push(
-      'This run was incomplete — some drives could not be scanned, so there may be more to recover. ' +
+      'This run was incomplete. Some drives could not be scanned, so there may be more to recover. ' +
         'Running it again is safe.',
     );
   }

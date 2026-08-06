@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { HardDrive, LogOut, ShieldCheck, Trash2, Files } from 'lucide-react';
+import { LogOut, ShieldCheck, SlidersHorizontal, Trash2, Files } from 'lucide-react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 
@@ -77,8 +77,8 @@ export function Layout() {
           <NavLink to="/settings" className={navClass}>
             {({ isActive }) => (
               <>
-                <HardDrive size={17} className={isActive ? 'text-accent' : ''} aria-hidden />
-                <span className="max-md:sr-only">Drives</span>
+                <SlidersHorizontal size={17} className={isActive ? 'text-accent' : ''} aria-hidden />
+                <span className="max-md:sr-only">Settings</span>
               </>
             )}
           </NavLink>

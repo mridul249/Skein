@@ -5,17 +5,124 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>Skein</title>
+<!--
+  STYLING RULES FOR THIS FILE, which are not the app's rules.
+
+  This page renders on 127.0.0.1:<port> immediately after the OAuth callback,
+  so the URL that produced it carries the authorization code and the state.
+  Two constraints follow, and both are asserted by landing_test.go:
+
+    1. Nothing from the request may reach the markup. Every string here is
+       server-composed from a fixed set; see landingModel.
+    2. Nothing may load from anywhere. No <link>, no @import, no absolute URL,
+       no fetch. That rules out the app's stylesheet AND its vendored fonts, so
+       the type stack falls back to the system UI font rather than IBM Plex.
+       Matching the product exactly is not worth a network request on a page
+       that exists for one and a half seconds.
+
+  Colours are the real design tokens from web/tailwind.config.js, inlined
+  because they cannot be imported. If the palette changes there, this is a
+  second place to update; it is a dozen values on a page that never changes
+  otherwise, which is a better trade than a build step for one file.
+-->
+<style>
+  :root {
+    --canvas: #0e1014;
+    --surface: #15181e;
+    --border: #2f3540;
+    --text: #e7eaf0;
+    --muted: #a4acbb;
+    --faint: #848da0;
+    --accent: #c48af0;
+    --success: #6ddc8a;
+    --warning: #eab464;
+  }
+
+  html {
+    box-sizing: border-box;
+    -webkit-text-size-adjust: 100%;
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--canvas);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    /* The app is dark-only, and so is this. Declaring it stops the browser
+       painting a white frame around the card for a frame or two. */
+    color-scheme: dark;
+  }
+
+  main {
+    width: 100%;
+    max-width: 26rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px 28px 24px;
+    text-align: center;
+  }
+
+  /* The mark: three strands over one, which is the product's own idea rather
+     than decoration. Inline SVG, so it costs no request. */
+  .mark { display: block; margin: 0 auto 18px; }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  p { margin: 0; color: var(--muted); }
+
+  .fallback {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--faint);
+  }
+
+  /* Status tint is carried by an icon and by the words, never by colour
+     alone: the heading says "Drive connected" or "Could not connect", so the
+     page reads correctly with no colour perception at all. */
+  .state-ok { color: var(--success); }
+  .state-warn { color: var(--warning); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    main { animation: rise 220ms ease-out both; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: none; }
+    }
+  }
+</style>
 </head>
 <body>
 <main role="main">
+  <svg class="mark" width="34" height="34" viewBox="0 0 34 34" fill="none"
+       aria-hidden="true" focusable="false">
+    <path d="M6 9c7 0 7 16 14 16M11 9c7 0 7 16 14 16M16 9c7 0 7 16 12 16"
+          stroke="{{.Tint}}" stroke-width="1.75" stroke-linecap="round"
+          opacity="0.9"/>
+  </svg>
   <h1>{{.Heading}}</h1>
   <p>{{.Body}}</p>
-  <p><small>{{.Fallback}}</small></p>
+  <p class="fallback">{{.Fallback}}</p>
 </main>
 <script>
 // Close the tab once the desktop app has what it needs. Pop-up and tab
 // policies block window.close() for tabs the script did not itself open,
-// which is the common case here — the fallback copy above is always
+// which is the common case here - the fallback copy above is always
 // rendered, so a blocked close leaves a page that still tells the user what
 // to do rather than one that appears stuck.
 setTimeout(function () { window.close(); }, 1500);

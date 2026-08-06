@@ -91,7 +91,7 @@ export function ProviderMisconfiguredBanner({
       <p className="mt-1 text-caption text-muted">
         {message ??
           "Skein's Google client credentials are missing or wrong, so drive access cannot be refreshed."}{' '}
-        This is a server setting — reconnecting a drive will not fix it. On the
+        This is a server setting, so reconnecting a drive will not fix it. On the
         desktop app, set{' '}
         <code className="text-text">SKEIN_GOOGLE_DESKTOP_CLIENT_ID</code> and{' '}
         <code className="text-text">SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET</code>; on a

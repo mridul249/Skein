@@ -10,8 +10,6 @@ import {
   DriveStatusBadge,
   ProviderMisconfiguredBanner,
 } from '../components/DriveHealth';
-import { Settings } from '../components/Settings';
-import { useSession } from '../lib/session';
 import { AccountChip } from '../components/AccountChip';
 
 /** Drives: connect, sync and disconnect the accounts that hold the bytes. */
@@ -19,8 +17,6 @@ export function Drives() {
   const qc = useQueryClient();
   const [banner, setBanner] = useState('');
   const [tone, setTone] = useState<'error' | 'ok'>('ok');
-  const { user } = useSession();
-  const [settingsOpen, setSettingsOpen] = useState(false);
   /**
    * Set when any request reports provider_misconfigured.
    *
@@ -139,33 +135,20 @@ export function Drives() {
         <ProviderMisconfiguredBanner message={configError} className="mb-4" />
       )}
 
-      <Settings
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        email={user?.email ?? ''}
-        driveCount={drives.length}
-        onManageDrives={() => setSettingsOpen(false)}
-      />
-
+      {/* No <h1> here: this renders inside the Settings page, which owns the
+          page heading. A second one would put two top-level headings on the
+          same document and read as two pages stacked. */}
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         {/* Capped in characters, not pixels. At a monospace body face this
             sentence is ~85 cells wide and pushed the primary action onto its
             own row at 1280px; wrapping the prose instead keeps the action
             where Design.md §4 puts it. */}
         <div className="max-w-prose">
-          <h1 className="text-title font-semibold text-text">Drives</h1>
-          <p className="mt-1 text-body text-muted">
+          <p className="text-body text-muted">
             Skein sees only the files it created. It cannot read anything already in your Drive.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => setSettingsOpen(true)}
-          >
-            Settings
-          </button>
           <button
           type="button"
           className="btn-primary"

@@ -174,3 +174,54 @@ func TestErrorMessageForReturnsOnlyFixedStrings(t *testing.T) {
 		}
 	}
 }
+
+// THE ONE FIELD THAT IS NOT ESCAPED TEXT.
+//
+// Styling the page added Tint, which interpolates into an SVG stroke
+// attribute. Every other field lands in element content, where html/template
+// escapes anything hostile into inert text; an attribute is the one context on
+// this page where a crafted value could do more than look wrong.
+//
+// So it is a constant chosen by the constructor, never computed and never
+// derived from the request. This asserts that for every path the page has,
+// including the error path whose CODE comes from the provider — the only input
+// that reaches these functions at all.
+func TestLandingTintIsAlwaysAFixedColour(t *testing.T) {
+	allowed := map[string]bool{tintSuccess: true, tintWarning: true, tintNeutral: true}
+
+	models := []landingModel{
+		successLanding(),
+		duplicateLanding(),
+		failureLanding("access_denied"),
+		failureLanding("server_error"),
+		// Hostile codes: an unknown code must not influence the tint any more
+		// than it influences the body text.
+		failureLanding(`" onload="alert(1)`),
+		failureLanding("</svg><script>alert(1)</script>"),
+		failureLanding(""),
+	}
+	for i, m := range models {
+		if !allowed[m.Tint] {
+			t.Errorf("model %d has tint %q, which is not one of the three constants; "+
+				"this value is interpolated into an SVG attribute", i, m.Tint)
+		}
+	}
+}
+
+// And the rendered page must not carry a hostile code into the markup, tint or
+// otherwise. The existing echo tests cover the body; this covers the attribute
+// context the mark introduced.
+func TestLandingPageAttributesSurviveAHostileErrorCode(t *testing.T) {
+	rec := callbackResponse(t, `error=%22+onload%3D%22alert(1)`)
+	body := rec.Body.String()
+
+	for _, forbidden := range []string{"onload=", "alert(1)", "</svg><script"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("landing page emitted %q from a provider error code:\n%s", forbidden, body)
+		}
+	}
+	// The mark still renders, with one of the fixed tints.
+	if !strings.Contains(body, tintWarning) {
+		t.Errorf("the failure page did not render its mark with the warning tint:\n%s", body)
+	}
+}

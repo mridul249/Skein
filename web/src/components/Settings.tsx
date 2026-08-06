@@ -121,7 +121,7 @@ function Panel({ id, children }: { id: Tab; children: React.ReactNode }) {
   );
 }
 
-function GeneralPanel({ email }: { email: string }) {
+export function GeneralPanel({ email }: { email: string }) {
   return (
     <Panel id="general">
       <dl className="space-y-3">
@@ -214,7 +214,7 @@ function PasswordField({
   );
 }
 
-function SecurityPanel() {
+export function SecurityPanel() {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');

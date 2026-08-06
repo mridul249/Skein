@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/mridul249/Skein/internal/config"
 	"github.com/mridul249/Skein/internal/httpapi"
@@ -197,6 +198,80 @@ func TestBundleDoesNotUseWebStorage(t *testing.T) {
 			}
 		}
 	}
+}
+
+// PRODUCT COPY USES PLAIN PUNCTUATION.
+//
+// Asserted against the SHIPPED BUNDLE rather than the sources, because that is
+// the only place the distinction between copy and commentary resolves itself:
+// comments explaining a decision are stripped by the build and may use whatever
+// punctuation reads best, while a string that survives minification is text a
+// user reads.
+//
+// A LONE em dash is allowed and is not prose: `—` on its own is the placeholder
+// for an absent value in a table cell (format.ts, ShardMap, Trash), where a
+// hyphen would read as data rather than as emptiness. What is banned is an em
+// dash INSIDE a sentence, which is the house style for product copy.
+func TestBundleCopyAvoidsEmDashesInSentences(t *testing.T) {
+	fsys, err := web.FS()
+	if err != nil {
+		t.Skipf("no frontend bundle embedded (%v); run `make web` first", err)
+	}
+	entries, err := readAllJS(fsys)
+	if err != nil {
+		t.Fatalf("read bundle: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Skip("no JavaScript in the bundle")
+	}
+
+	for name, body := range entries {
+		for _, snippet := range emDashSentences(body) {
+			t.Errorf("%s ships an em dash in product copy: %q\n"+
+				"Use a comma, a full stop, or a colon. A bare \"—\" as an "+
+				"empty-value placeholder is fine and is not matched here.",
+				name, snippet)
+		}
+	}
+}
+
+// emDashSentences returns each em dash in body that has a word character within
+// a few positions on BOTH sides, which is what distinguishes "a — b" inside a
+// sentence from a standalone placeholder glyph.
+func emDashSentences(body string) []string {
+	var out []string
+	runes := []rune(body)
+	for i, r := range runes {
+		if r != '—' {
+			continue
+		}
+		if hasWordNear(runes, i, -1) && hasWordNear(runes, i, +1) {
+			lo := max(0, i-45)
+			hi := min(len(runes), i+45)
+			out = append(out, string(runes[lo:hi]))
+		}
+	}
+	return out
+}
+
+// hasWordNear reports whether a letter appears within three runes of i in the
+// given direction, skipping the spaces that normally surround an em dash.
+func hasWordNear(runes []rune, i, dir int) bool {
+	for step := 1; step <= 3; step++ {
+		j := i + dir*step
+		if j < 0 || j >= len(runes) {
+			return false
+		}
+		switch {
+		case unicode.IsLetter(runes[j]):
+			return true
+		case runes[j] == ' ':
+			continue
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // readAllJS returns every .js file in the built bundle, keyed by path.

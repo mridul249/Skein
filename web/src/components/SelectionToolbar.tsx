@@ -112,7 +112,7 @@ export function BulkOutcomeNotice({
         <ul className="mt-2 space-y-1">
           {reasons.map((r) => (
             <li key={r.reason} className="text-caption text-muted">
-              <span className="tabular text-text">{r.count}</span> — {r.reason}
+              <span className="tabular text-text">{r.count}</span>: {r.reason}
             </li>
           ))}
         </ul>

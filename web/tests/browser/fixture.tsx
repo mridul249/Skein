@@ -18,7 +18,7 @@ import '../../src/styles/index.css';
 import { Layout } from '../../src/components/Layout';
 import { Files } from '../../src/pages/Files';
 import { Trash } from '../../src/pages/Trash';
-import { Drives } from '../../src/pages/Drives';
+import { SettingsPage } from '../../src/pages/SettingsPage';
 import { Login } from '../../src/pages/Login';
 import { UploadsProvider, useUploads } from '../../src/lib/uploads-context';
 import { DownloadsProvider } from '../../src/lib/downloads-context';
@@ -336,7 +336,7 @@ createRoot(document.getElementById('root')!).render(
               <Route element={<Layout />}>
                 <Route index element={<Files />} />
                 <Route path="trash" element={<Trash />} />
-                <Route path="settings" element={<Drives />} />
+                <Route path="settings" element={<SettingsPage />} />
               </Route>
             </Routes>
           </MemoryRouter>

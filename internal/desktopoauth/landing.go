@@ -30,7 +30,25 @@ type landingModel struct {
 	Heading  string
 	Body     string
 	Fallback string
+
+	// Tint is the mark's stroke colour, and it is a CONSTANT chosen by the
+	// three constructors below, never computed and never derived from input.
+	//
+	// It interpolates into an SVG attribute, which is the one place on this
+	// page where a hostile string would not merely be escaped text. Keeping it
+	// to the three constants here means the template cannot be made to emit
+	// anything else, and TestLandingTintIsAlwaysAFixedColour asserts it.
+	Tint string
 }
+
+// The mark's three tints. Colour is never the only signal — the heading says
+// "Drive connected" or "Could not connect" in words — so these are decoration
+// that reinforces the text rather than carrying meaning alone.
+const (
+	tintSuccess = "#6ddc8a" // --success
+	tintWarning = "#eab464" // --warning
+	tintNeutral = "#c48af0" // --accent
+)
 
 // The fallback line is always rendered, not injected by script. A blocked
 // window.close() must leave a page that tells the user what to do.
@@ -92,6 +110,7 @@ func successLanding() landingModel {
 		Heading:  "Drive connected",
 		Body:     "Skein has what it needs. You can return to the app.",
 		Fallback: closeFallback,
+		Tint:     tintSuccess,
 	}
 }
 
@@ -102,6 +121,7 @@ func failureLanding(code string) landingModel {
 		Heading:  "Could not connect",
 		Body:     errorMessageFor(code),
 		Fallback: "You can close this window and try again from Skein.",
+		Tint:     tintWarning,
 	}
 }
 
@@ -112,5 +132,6 @@ func duplicateLanding() landingModel {
 		Heading:  "Already connected",
 		Body:     "This authorisation was already received.",
 		Fallback: closeFallback,
+		Tint:     tintNeutral,
 	}
 }

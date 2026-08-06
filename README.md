@@ -199,10 +199,29 @@ make desktop   # Outputs bin/skein-desktop
 
 ---
 
+## Not in v1
+
+Deliberately out of scope, so nobody files them as bugs.
+
+| | Why |
+| --- | --- |
+| **Direct-from-disk uploads and parallel shard streams** | v2, behind the reservation rewrite. Uploads today stream through the browser one shard at a time. |
+| **Multi-tenancy** — workspace invites, shared folders, public share tokens | Skein is self-hosted, one instance per person. The isolation machinery exists and is verified, but shipping sharing invites shared instances, and registration is open by default, the backup route dumps every user's `password_hash`, and the download directory is process-wide. That is a different product with a security surface this one was not built for. |
+| **Removing a drive that still holds files** | Disconnect refuses and names the files instead. A file striped across two drives is destroyed by removing one, so cascading the delete would let "unlink an account" destroy data on a drive you did not touch. A deliberate remove-with-files needs its own confirmation naming the exact files, and is v2. |
+| **Renaming or moving folders** | Manifests record the folder path as a snapshot of names, so a folder renamed after some files were uploaded reconstructs as two folders during recovery — contents split across both. Nothing is lost, but it appears at the moment you are least able to tolerate ambiguity. Correctness needs manifest staleness tracking, which is v2. |
+| **Scheduled reconcile** | On-demand only. `reconciled_at` records when each file was last checked. |
+
+Known smaller gaps are tracked in the issue register. The top polish item for
+v1.1 is the account colour ramp, which collides with the semantic colours under
+colour-vision deficiency — measured, documented, and the fix is known.
+
+---
+
 ## Documentation Index
 
 | Guide | Description |
 | --- | --- |
+| [docs/SETUP.md](docs/SETUP.md) | **Start here.** Prerequisites, OAuth for both client types, every setting, first run |
 | [docs/INSTALL.md](docs/INSTALL.md) | Step-by-step setup and OAuth client setup |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Environment variables and runtime configuration |
 | [docs/BACKUP.md](docs/BACKUP.md) | Disaster recovery, master key management, and manifest recovery |

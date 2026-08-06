@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { Layout } from './components/Layout';
-import { Drives } from './pages/Drives';
+import { SettingsPage } from './pages/SettingsPage';
 import { Files } from './pages/Files';
 import { Login } from './pages/Login';
 import { Trash } from './pages/Trash';
@@ -78,7 +78,7 @@ function App() {
               <Route element={user ? <Layout /> : <Navigate to="/login" replace />}>
                 <Route path="/" element={<Files />} />
                 <Route path="/trash" element={<Trash />} />
-                <Route path="/settings" element={<Drives />} />
+                <Route path="/settings" element={<SettingsPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
