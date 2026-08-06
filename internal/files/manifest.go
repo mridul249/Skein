@@ -83,15 +83,32 @@ type ManifestShard struct {
 // which is exactly why docs/BACKUP.md insists the exported key must not live
 // beside the data.
 type Manifest struct {
-	Version        int             `json:"version"`
-	FileID         uuid.UUID       `json:"file_id"`
-	UserID         uuid.UUID       `json:"user_id"`
-	FileName       string          `json:"file_name"`
-	PlainSizeBytes int64           `json:"plain_size_bytes"`
-	MimeType       string          `json:"mime_type,omitempty"`
-	FolderPath     []string        `json:"folder_path,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	Shards         []ManifestShard `json:"shards"`
+	Version        int       `json:"version"`
+	FileID         uuid.UUID `json:"file_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	FileName       string    `json:"file_name"`
+	PlainSizeBytes int64     `json:"plain_size_bytes"`
+	MimeType       string    `json:"mime_type,omitempty"`
+	FolderPath     []string  `json:"folder_path,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+
+	// IsEncrypted is a PROPERTY OF THE STORED BYTES, so it must travel with
+	// them rather than be inferred at recovery time.
+	//
+	// Found by audit before backfill, 2026-08-06. Reconstruction previously
+	// took this from the server's current SKEIN_ENCRYPTION_ENABLED setting,
+	// which is a setting that can differ between the instance that wrote the
+	// shards and the one recovering them. The read path drives decryption from
+	// the ROW (download.go: `encrypted: file.IsEncrypted`), so a recovered row
+	// carrying the wrong value makes the file unreadable — and it would fail
+	// during a recovery, which is the worst possible place to discover it.
+	//
+	// A pointer so a manifest written before this field existed decodes as
+	// nil rather than as a confident `false`. Reconstruction falls back to the
+	// server setting only in that case, and says so.
+	IsEncrypted *bool `json:"is_encrypted,omitempty"`
+
+	Shards []ManifestShard `json:"shards"`
 }
 
 // ManifestFor builds the manifest describing one committed file.
@@ -99,6 +116,7 @@ type Manifest struct {
 // folderPath is the file's folder chain from the root, outermost first, so a
 // reconstruction can recreate the tree. Empty for a file at the root.
 func ManifestFor(f File, folderPath []string) Manifest {
+	encrypted := f.IsEncrypted
 	m := Manifest{
 		Version:        ManifestVersion,
 		FileID:         f.ID,
@@ -108,6 +126,7 @@ func ManifestFor(f File, folderPath []string) Manifest {
 		MimeType:       f.DeclaredMime,
 		FolderPath:     folderPath,
 		CreatedAt:      f.CreatedAt,
+		IsEncrypted:    &encrypted,
 		Shards:         make([]ManifestShard, 0, len(f.Shards)),
 	}
 	for _, sh := range f.Shards {

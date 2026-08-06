@@ -154,6 +154,22 @@ func (s *Service) Upload(ctx context.Context, req UploadRequest, r io.Reader) (F
 // manifest. Best-effort: a manifest that cannot name the folder tree is still
 // worth far more than no manifest, so a failure here yields an empty path
 // rather than skipping the write.
+//
+// KNOWN DIVERGENCE BETWEEN UPLOAD-TIME AND BACKFILL, found by audit before
+// backfill shipped and verified by test rather than reasoned about. GetFolder
+// filters `deleted_at IS NULL`. At upload time the folder is necessarily live,
+// so the path always resolves. At BACKFILL time it may not: trashing a folder
+// also trashes its files, but Restore clears a file's deleted_at WITHOUT
+// checking its folder, so a restored file can be live under a trashed folder.
+// The path then resolves to nil and the manifest carries no folder — a
+// reconstruction would place that file at the root.
+//
+// Accepted rather than fixed, deliberately: the alternative is a
+// trash-inclusive folder read across three store implementations to recover a
+// folder name for a file whose folder the user has already thrown away, and
+// placing such a file at the root on recovery is defensible. It is recorded
+// here, and reported by the backfill run, so it is a known limitation rather
+// than a silent difference discovered mid-recovery.
 func (s *Service) folderPathFor(ctx context.Context, userID uuid.UUID, folderID *uuid.UUID) []string {
 	if folderID == nil {
 		return nil

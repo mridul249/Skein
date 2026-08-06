@@ -307,6 +307,19 @@ func (s *Service) applyManifest(ctx context.Context, userID uuid.UUID, m Manifes
 		return err
 	}
 
+	// The manifest's own value wins. Falling back to the server's current
+	// setting is only correct for a manifest written before the field existed,
+	// and it is worth a warning: encryption state is a property of the stored
+	// bytes, and the read path drives decryption from this row.
+	encrypted := s.encrypt
+	if m.IsEncrypted != nil {
+		encrypted = *m.IsEncrypted
+	} else {
+		s.log.WarnContext(ctx, "manifest predates the is_encrypted field; assuming the server's current setting",
+			slog.String("file_id", m.FileID.String()),
+			slog.Bool("assumed_encrypted", encrypted))
+	}
+
 	inserted, err := s.store.InsertReconstructedFile(ctx, ReconstructedFile{
 		ID:           m.FileID,
 		UserID:       userID,
@@ -315,7 +328,7 @@ func (s *Service) applyManifest(ctx context.Context, userID uuid.UUID, m Manifes
 		SizeBytes:    m.PlainSizeBytes,
 		DeclaredMime: m.MimeType,
 		IsStriped:    len(m.Shards) > 1,
-		IsEncrypted:  s.encrypt,
+		IsEncrypted:  encrypted,
 		CreatedAt:    m.CreatedAt,
 	})
 	if err != nil {
