@@ -126,12 +126,16 @@ func (p *Planner) Plan(ctx context.Context, userID uuid.UUID, plainSize int64) (
 		return Plan{}, ErrInsufficientPool(plainSize, pooled, len(ordered))
 	}
 
+	// placed counts how many of THIS file's shards each drive already holds,
+	// so the next one can prefer a drive that has none. See placeShard.
+	placed := map[uuid.UUID]int{}
+
 	var offset int64
 	for offset < plainSize {
 		remaining := plainSize - offset
 		want := min(remaining, p.shardSize)
 
-		shard, res, perr := p.placeShard(ctx, ordered, want, uploadID)
+		shard, res, perr := p.placeShard(ctx, ordered, want, uploadID, placed)
 		if perr != nil {
 			// Unwind: release everything reserved so far so a failed
 			// plan does not strand capacity until the janitor runs.
@@ -140,6 +144,7 @@ func (p *Planner) Plan(ctx context.Context, userID uuid.UUID, plainSize int64) (
 		}
 
 		shard.PlainOffset = offset
+		placed[shard.AccountID]++
 		plan.Shards = append(plan.Shards, shard)
 		plan.Reservations = append(plan.Reservations, res)
 		offset += shard.PlainSize
@@ -155,7 +160,59 @@ func (p *Planner) Plan(ctx context.Context, userID uuid.UUID, plainSize int64) (
 
 // placeShard finds an account that can take one shard, shrinking it if no
 // single account can hold a full one.
-func (p *Planner) placeShard(ctx context.Context, candidates []Candidate, want int64, uploadID uuid.UUID) (Shard, Reservation, error) {
+//
+// SPREAD FIRST, THEN POLICY. `placed` counts this file's shards per drive, and
+// a drive holding none of them is tried before a drive already holding some.
+//
+// Without it, most-available puts an entire file on one drive whenever that
+// drive stays in front after each debit — which it does whenever the gap
+// between drives exceeds a shard. A 400 MB file on two nearly-empty 15 GB
+// drives put BOTH shards on one of them, twice in a row, reported 2026-08-06.
+// Nothing was corrupt; every byte was stored and the file downloaded. But one
+// drive fills while its neighbour idles, transfer cannot overlap, and a file
+// the user believes is spread across their drives is not.
+//
+// The preference is deliberately weak, and both limits matter:
+//
+//   - Only a drive that can hold the FULL wanted shard jumps the queue.
+//     Otherwise a nearly-full drive would attract a sliver of every file and
+//     fragment uploads into many tiny shards, which costs more than the
+//     uneven fill it set out to fix.
+//   - It is a preference, never a requirement. If no fresh drive can take the
+//     shard, the normal policy order runs unchanged and the shard lands on a
+//     drive already used. An upload that could succeed must never fail because
+//     the layout was not as pretty as it could have been.
+//
+// PolicyPriority is exempt. Its documented contract is that the first drive is
+// used until it is full, so spreading would contradict the thing the user
+// chose it for.
+func (p *Planner) placeShard(ctx context.Context, candidates []Candidate, want int64,
+	uploadID uuid.UUID, placed map[uuid.UUID]int) (Shard, Reservation, error) {
+
+	if p.policy != PolicyPriority && len(placed) > 0 {
+		for _, c := range candidates {
+			if placed[c.AccountID] > 0 {
+				continue
+			}
+			// Advisory, like Plan's pooled-space check: it skips a hopeless
+			// candidate without a database round trip. The reservation below
+			// is what ENFORCES the full-shard rule — it asks for the whole
+			// shard and never shrinks, so a drive without room simply loses.
+			// Removing this line changes cost, not behaviour; removing the
+			// no-shrink property is what would fragment uploads.
+			if c.Free() < p.overhead(want) {
+				continue
+			}
+			res, err := p.reserver.Reserve(ctx, c.AccountID, p.overhead(want), uploadID)
+			if err != nil {
+				// ErrNoCapacity here is the same benign race as below: fall
+				// through to the ordinary pass rather than failing.
+				continue
+			}
+			return Shard{AccountID: c.AccountID, PlainSize: want}, res, nil
+		}
+	}
+
 	for _, c := range candidates {
 		free := c.Free()
 		if free <= 0 {
