@@ -30,6 +30,39 @@ func (h *System) SetBackfiller(b ManifestBackfiller) {
 	h.coverage = b
 }
 
+// AllowWithoutOperatorToken drops the operator-token requirement for the
+// manifest routes.
+//
+// SET ONLY ON THE DESKTOP BUILD, and the reasoning is about who the "operator"
+// is rather than about convenience. The token exists because the server build
+// is reachable by anyone who can hit the port, registration is open, and the
+// gated routes either export a secret or write to every connected drive. On
+// the desktop build the server binds 127.0.0.1 on a random port inside the
+// user's own session, and the person clicking the button IS the operator —
+// there is no second party the token protects them from.
+//
+// Requiring it there had a concrete cost: a desktop install has no reason to
+// set SKEIN_BACKUP_TOKEN, so the Recovery UI could show only an explanation of
+// why it could not act, and repairing manifests needed a separate command-line
+// tool. That is a bad procedure for something a user runs during a disaster.
+//
+// The key-export and database-dump routes keep the token on BOTH builds: those
+// hand over a secret, and the reasoning above does not extend to them.
+func (h *System) AllowWithoutOperatorToken() { h.manifestsOpen = true }
+
+// manifestsGateOpen reports whether the manifest routes may run for this
+// request. Either the operator token matched, or this is a desktop build where
+// the token is not required.
+func (h *System) manifestsGateOpen(r *http.Request) bool {
+	if h.manifestsOpen {
+		return true
+	}
+	if h.token == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(r.Header.Get(BackupTokenHeader)), []byte(h.token)) == 1
+}
+
 // BackfillManifests handles POST /api/system/manifests/backfill.
 //
 // WHY IT IS GATED LIKE THE BACKUP ROUTE. It writes to every connected drive,
@@ -44,12 +77,15 @@ func (h *System) SetBackfiller(b ManifestBackfiller) {
 // request succeeded and the report says which drives could not be reached.
 // An error status would discard the coverage the client just earned.
 func (h *System) BackfillManifests(w http.ResponseWriter, r *http.Request) {
-	if h.token == "" || h.backfill == nil {
+	if h.backfill == nil {
 		http.NotFound(w, r)
 		return
 	}
-	presented := r.Header.Get(BackupTokenHeader)
-	if subtle.ConstantTimeCompare([]byte(presented), []byte(h.token)) != 1 {
+	if !h.manifestsGateOpen(r) {
+		if h.token == "" {
+			http.NotFound(w, r)
+			return
+		}
 		h.log.WarnContext(r.Context(), "manifest backfill token rejected",
 			slog.String("request_id", middleware.RequestIDFrom(r.Context())))
 		httpx.WriteJSON(w, r, http.StatusForbidden, httpx.ErrorBody{

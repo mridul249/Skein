@@ -22,6 +22,17 @@ type recoveryStatusResponse struct {
 	// can explain why Backfill is unavailable instead of showing a button that
 	// 404s.
 	BackupTokenSet bool `json:"backup_token_set"`
+
+	// ManifestsWritable says whether this build can write manifests without an
+	// operator token — true on desktop, where the person clicking the button
+	// is the operator. The UI uses it to decide whether to ask for a token at
+	// all, rather than showing a field nobody can fill in.
+	ManifestsWritable bool `json:"manifests_writable"`
+
+	// ManifestsWritableWithoutToken is true on the desktop build. The UI uses
+	// it to decide whether to show a token field at all, rather than asking
+	// for a credential the install has no reason to have.
+	ManifestsWritableWithoutToken bool `json:"manifests_writable_without_token"`
 }
 
 // RecoveryStatus handles GET /api/system/recovery.
@@ -44,7 +55,11 @@ func (h *System) RecoveryStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := recoveryStatusResponse{BackupTokenSet: h.token != ""}
+	out := recoveryStatusResponse{
+		BackupTokenSet:                h.token != "",
+		ManifestsWritable:             h.manifestsOpen || h.token != "",
+		ManifestsWritableWithoutToken: h.manifestsOpen,
+	}
 	if h.keyring != nil {
 		out.KeyID = h.keyring.KeyIDString()
 	}

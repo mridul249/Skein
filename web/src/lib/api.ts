@@ -66,6 +66,10 @@ export interface FileItem {
 export interface RecoveryStatus {
   key_id: string;
   backup_token_set: boolean;
+  /** Whether this build can write manifests at all. */
+  manifests_writable: boolean;
+  /** True on desktop, where the operator token is not required. */
+  manifests_writable_without_token: boolean;
 }
 
 /** One drive's scan outcome. `scanned: false` is INDETERMINATE, not empty. */
