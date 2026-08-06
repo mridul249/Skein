@@ -50,9 +50,22 @@ func openDesktopDB(t *testing.T) (*sql.DB, string) {
 	return sqlDB, path
 }
 
-// THE PROPERTY. Concurrent writers, one of them holding the write lock for a
-// while, must all succeed within a deadline shorter than a user would tolerate
-// — rather than failing with "context deadline exceeded" as they did live.
+// Concurrent writers under sustained write pressure must all succeed within
+// the quota worker's own deadline.
+//
+// HONEST LIMITATION, STATED RATHER THAN IMPLIED: this test is NOT the
+// load-bearing one. It passes against the unfixed pool as well — verified by
+// mutation — because reproducing the live failure needs the lock held longer
+// than the writers' deadline, and the production upload path does not do that
+// (CreateShard is a single INSERT; the only transaction in that store is
+// short). An earlier draft of this test DID hold a 4s transaction and did go
+// red, but it was modelling a shape the system does not have, which is a
+// fixture manufacturing a difference rather than absorbing one.
+//
+// What actually pins the fix is the two CONFIGURATION tests below, which go
+// red under mutation. This one is kept as a regression guard against a future
+// change that reintroduces long-held write transactions — it would catch that
+// where the config tests could not.
 func TestConcurrentWritersDoNotExhaustTheirDeadline(t *testing.T) {
 	sqlDB, _ := openDesktopDB(t)
 	ctx := context.Background()
@@ -66,27 +79,33 @@ func TestConcurrentWritersDoNotExhaustTheirDeadline(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// A transaction that holds the write lock, standing in for the shard
-	// inserts of an upload in flight.
-	tx, err := sqlDB.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE contention SET v = 'holder' WHERE id = 1`); err != nil {
-		t.Fatalf("holder write: %v", err)
-	}
-	// Held LONGER THAN THE WRITERS' DEADLINE, which is what an upload does: it
-	// keeps the lock across a multi-second Drive transfer while the 30s quota
-	// sweep fires into that window under a 3s deadline.
+	// SUSTAINED WRITE PRESSURE, which is what an upload actually produces.
 	//
-	// A shorter hold does NOT reproduce the bug — verified, not assumed: with
-	// a 250ms hold this test passed even against the unfixed pool, because the
-	// 5s busy_timeout absorbed it. The hold has to outlast the deadline for
-	// the contention to be visible at all.
+	// The production upload path does NOT hold a long transaction — it issues
+	// one INSERT per shard (files/sqlitestore.go CreateShard), and the only
+	// transaction in that store is SoftDeleteFolderTree, which is short. So
+	// modelling this as "one goroutine holds the lock for four seconds" would
+	// be testing a shape the system does not have. Checked rather than
+	// assumed.
+	//
+	// What it DOES produce is a steady stream of short writes for the length
+	// of a multi-minute transfer, with the 30s quota sweep firing into it. The
+	// writer below reproduces that.
+	stop := make(chan struct{})
+	var pressure sync.WaitGroup
+	pressure.Add(1)
 	go func() {
-		time.Sleep(4 * time.Second)
-		_ = tx.Rollback()
+		defer pressure.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_, _ = sqlDB.ExecContext(ctx, `UPDATE contention SET v = 'upload' WHERE id = 1`)
+		}
 	}()
+	t.Cleanup(func() { close(stop); pressure.Wait() })
 
 	// Eight writers under the quota worker's 3s deadline, one per storage
 	// account, as the live failure had.
