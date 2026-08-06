@@ -63,7 +63,15 @@ export function SettingsPage() {
   }, [active]);
 
   return (
-    <div className="mx-auto max-w-3xl">
+    // NO WIDTH CONSTRAINT HERE. Layout already wraps every route in
+    // `mx-auto max-w-content` (1280px), so a second `max-w-3xl` clamped
+    // Settings to 768px while Files and Trash filled the space - the Drives
+    // list in particular went from full width to half of it when it moved
+    // under this route.
+    //
+    // Individual panels cap their own prose where a long line would be hard
+    // to read; the page does not decide that for them.
+    <div>
       <h1 className="text-title font-semibold text-text">Settings</h1>
 
       {/* Announced for screen readers, because switching tabs changes the

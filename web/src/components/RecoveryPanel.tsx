@@ -123,7 +123,11 @@ export function RecoveryPanel() {
   }
 
   return (
-    <div className="space-y-6">
+    // Capped to match the other settings panels: this is dense prose about
+    // recovery, and full 1280px lines are hard to follow. The Drives tab is
+    // deliberately NOT capped - it is a list of cards that should use the
+    // space Layout gives it.
+    <div className="max-w-2xl space-y-6">
       {error && (
         <p role="alert" className="text-caption text-danger">
           {error}

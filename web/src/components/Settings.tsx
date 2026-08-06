@@ -113,17 +113,24 @@ export function Settings({ open, onClose, email, driveCount, onManageDrives }: S
   );
 }
 
-function Panel({ id, children }: { id: Tab; children: React.ReactNode }) {
-  return (
-    <div role="tabpanel" id={`settings-panel-${id}`} aria-labelledby={`settings-tab-${id}`}>
-      {children}
-    </div>
-  );
+// Panel caps the reading width of a settings body.
+//
+// NO role="tabpanel" HERE. SettingsPage owns that on its own container, and
+// declaring it again nested one level deeper produced two tabpanels with the
+// same id - a duplicate id and a nested role, both wrong for a screen reader.
+// Introduced when Settings moved from a dialog to a route; removed 2026-08-06.
+//
+// The width cap lives here rather than on the page because it is a property of
+// PROSE, not of the route: the Drives tab is a list of cards that should use
+// the full 1280px Layout gives it, while a paragraph at that width is hard to
+// read. Each panel opts in.
+function Panel({ children }: { children: React.ReactNode }) {
+  return <div className="max-w-2xl">{children}</div>;
 }
 
 export function GeneralPanel({ email }: { email: string }) {
   return (
-    <Panel id="general">
+    <Panel>
       <dl className="space-y-3">
         <div>
           <dt className="text-caption text-muted">Signed in as</dt>
@@ -148,7 +155,7 @@ function AccountsPanel({
   onManageDrives: () => void;
 }) {
   return (
-    <Panel id="accounts">
+    <Panel>
       <p className="mb-4 text-body text-text">
         {driveCount === 0
           ? 'No drives are connected yet.'
@@ -269,7 +276,7 @@ export function SecurityPanel() {
   }
 
   return (
-    <Panel id="security">
+    <Panel>
       <form onSubmit={submit} className="space-y-4">
         <PasswordField
           label="Current password"
