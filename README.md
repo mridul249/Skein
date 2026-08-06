@@ -173,6 +173,25 @@ Every architecture is a series of compromises. Skein unapologetically trades con
 
 ## Quickstart
 
+### Docker (recommended)
+
+Docker is the only dependency. No Go, no Node, no Postgres setup.
+
+```bash
+git clone https://github.com/mridul249/Skein.git && cd Skein
+cp .env.example .env      # set the two Google OAuth values
+docker compose up
+```
+
+Open <http://localhost:8080>, then read `data/skein-setup-info.txt` — it records
+the master key Skein generated for you, and **that file is the only copy**.
+Lose it and every uploaded file becomes permanently unreadable. Full notes:
+[docs/DOCKER.md](docs/DOCKER.md).
+
+The desktop app is a native binary, not a container; `docker build --target
+desktop --output type=local,dest=./bin .` builds it for you without installing
+the toolchain.
+
 ### Headless Server (`cmd/skein`)
 
 ```bash
@@ -271,6 +290,7 @@ colour-vision deficiency — measured, documented, and the fix is known.
 | Guide | Description |
 | --- | --- |
 | [docs/SETUP.md](docs/SETUP.md) | **Start here.** Prerequisites, OAuth for both client types, every setting, first run |
+| [docs/DOCKER.md](docs/DOCKER.md) | Running with Docker, the generated master key, building the desktop binary |
 | [docs/INSTALL.md](docs/INSTALL.md) | Step-by-step setup and OAuth client setup |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Environment variables and runtime configuration |
 | [docs/BACKUP.md](docs/BACKUP.md) | Disaster recovery, master key management, and manifest recovery |
