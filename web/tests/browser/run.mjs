@@ -10,6 +10,7 @@
  * browser should not fail a suite it cannot run; it should say so.
  */
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -47,7 +48,31 @@ if (!chrome) {
   process.exit(0);
 }
 
-const port = 5200 + Math.floor(Math.random() * 300);
+// A PORT NOBODY ELSE HOLDS, asked of the kernel rather than guessed.
+//
+// This used to be `5200 + random(300)` with --strictPort, which is a race
+// against anything else on the machine: Vite EXITS IMMEDIATELY when the port
+// is taken, and the harness did not watch for that. It polled a dead port
+// instead, and eventually printed "vite did not start" with no reason - which
+// is exactly the false negative seen in CI. Binding port 0 and reading back
+// what the kernel assigned removes the guess entirely.
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      // Closed before Vite binds it. A brief window remains in which another
+      // process could take it, but it is far narrower than a random guess,
+      // and viteExited below now turns that into a clear error rather than a
+      // 20-second silence.
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+const port = await freePort();
 const vite = spawn('npx', ['vite', '--port', String(port), '--strictPort'], {
   cwd: webRoot,
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -57,23 +82,46 @@ let viteLog = '';
 vite.stdout.on('data', (d) => { viteLog += d; });
 vite.stderr.on('data', (d) => { viteLog += d; });
 
-async function waitForVite() {
-  for (let i = 0; i < 80; i++) {
-    await sleep(250);
+// WATCH THE PROCESS, NOT THE LOG. Vite's stdout format is not an API and
+// changes between versions; whether the port answers is the actual question.
+// The exit watcher is what makes a real failure - crash, missing dependency,
+// port collision - fail fast and say why, instead of timing out silently.
+let viteExited = null;
+vite.on('exit', (c, sig) => { viteExited = { code: c, signal: sig }; });
+vite.on('error', (e) => { viteExited = { code: null, signal: null, error: e.message }; });
+
+// READINESS IS A PROBE, and it asks for the fixture the tests actually load
+// rather than for `/`: Vite answers the root before the TypeScript pipeline is
+// warm, so a root probe can succeed while the first real request still fails.
+async function waitForVite(timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (viteExited) return { ok: false, reason: describeExit(viteExited) };
     try {
       const res = await fetch(`http://127.0.0.1:${port}/tests/browser/fixture.html`);
-      if (res.ok) return true;
+      if (res.ok) return { ok: true };
     } catch {
-      /* not up yet */
+      /* not listening yet */
     }
+    await sleep(250);
   }
-  return false;
+  return { ok: false, reason: `it did not answer on port ${port} within ${timeoutMs / 1000}s` };
+}
+
+function describeExit({ code, signal, error }) {
+  if (error) return `it could not be started: ${error}`;
+  if (signal) return `it was killed by ${signal}`;
+  return `it exited with code ${code}`;
 }
 
 let code = 1;
 try {
-  if (!(await waitForVite())) {
-    console.error('browser harness FAILED: vite did not start.\n' + viteLog);
+  const ready = await waitForVite();
+  if (!ready.ok) {
+    console.error(
+      `browser harness FAILED: vite did not start - ${ready.reason}.\n` +
+        (viteLog.trim() || '(vite produced no output)'),
+    );
     process.exit(1);
   }
 
