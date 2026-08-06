@@ -5,6 +5,7 @@ import type { BackfillReport, ReconstructReport } from '../src/lib/api';
 import {
   coverageSummary,
   coverageVerdict,
+  isWarningLine,
   restoreSummary,
   unscannedAccounts,
 } from '../src/lib/recovery';
@@ -38,6 +39,7 @@ function restore(over: Partial<ReconstructReport> = {}): ReconstructReport {
     shards_recovered: 0,
     folders_recovered: 0,
     files_already_present: 0,
+    shards_unresolved: 0,
     ...over,
   };
 }
@@ -141,4 +143,69 @@ test('unreadable manifests are reported as files that were NOT recovered', () =>
 test('already-present files are distinguished from newly recovered ones', () => {
   const lines = restoreSummary(restore({ files_recovered: 0, files_already_present: 7 }));
   assert.match(lines.join(' '), /already in the database and left untouched/);
+});
+
+// A FILE WITH NO SHARDS IS WORSE THAN A FILE NOT RECOVERED, because it looks
+// fine. On 2026-08-06 a live user was handed "Recovered 7 files, 0 shards" and
+// nothing else — every file listed, previewed, and failed to download. The
+// summary must say what the number MEANS, not just print it.
+test('unplaceable shards are called out as files that will not download', () => {
+  const lines = restoreSummary(
+    restore({ files_recovered: 7, shards_recovered: 0, shards_unresolved: 14 }),
+  );
+  const text = lines.join(' ');
+  assert.match(text, /14 shards could not be located/);
+  assert.match(text, /cannot be downloaded/);
+  // And it must tell the user what to DO about it.
+  assert.match(text, /Connect every drive/);
+});
+
+test('a clean restore says nothing about unplaceable shards', () => {
+  const lines = restoreSummary(
+    restore({ files_recovered: 3, shards_recovered: 13, shards_unresolved: 0 }),
+  );
+  assert.equal(/could not be located/.test(lines.join(' ')), false);
+});
+
+// The two are independent: a run can place every shard it found and still have
+// failed to read a drive, and it can read every drive and still be told about a
+// shard whose object is missing. Collapsing them into one sentence would hide
+// whichever came second.
+test('unplaceable shards and an unreadable drive are separate sentences', () => {
+  const lines = restoreSummary(
+    restore({ files_recovered: 1, shards_recovered: 1, shards_unresolved: 2, complete: false }),
+  );
+  assert.equal(
+    lines.filter((l) => /could not be located/.test(l)).length,
+    1,
+    'the unplaceable-shard sentence is missing or duplicated',
+  );
+  assert.equal(
+    lines.filter((l) => /run was incomplete/.test(l)).length,
+    1,
+    'the incompleteness sentence is missing or duplicated',
+  );
+});
+
+// STYLING FOLLOWS THE WORDING, and the predicate lives beside the wording so
+// it cannot drift from it. RecoveryPanel inlined /incomplete/ once, which
+// silently mis-styled the unplaceable-shard sentence added later: the most
+// alarming line the panel can print rendered in the calmest colour it has.
+test('every bad-news line from restoreSummary is a warning line', () => {
+  const lines = restoreSummary(
+    restore({
+      files_recovered: 1,
+      shards_recovered: 1,
+      shards_unresolved: 2,
+      manifests_unreadable: 3,
+      complete: false,
+    }),
+  );
+  const warned = lines.filter(isWarningLine);
+  assert.equal(warned.length, 3, `expected 3 warning lines, got: ${JSON.stringify(lines)}`);
+});
+
+test('a clean restore has no warning lines', () => {
+  const lines = restoreSummary(restore({ files_recovered: 3, shards_recovered: 13 }));
+  assert.equal(lines.filter(isWarningLine).length, 0);
 });

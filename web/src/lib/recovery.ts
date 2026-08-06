@@ -109,6 +109,21 @@ export function restoreSummary(report: ReconstructReport): string[] {
         `Those files exist but were not recovered.`,
     );
   }
+  // SAID PLAINLY, BEFORE the generic incompleteness line.
+  //
+  // A file whose shards could not be placed is listable, previewable and
+  // undownloadable — strictly worse than not recovering it, because it looks
+  // fine. A live user was left in exactly that state on 2026-08-06 by a
+  // summary that read "Recovered 7 files, 0 shards" and said nothing about
+  // what that meant. The count is not enough; the consequence has to be
+  // spelled out.
+  if (report.shards_unresolved > 0) {
+    lines.push(
+      `${report.shards_unresolved} ${plural(report.shards_unresolved, 'shard')} could not be located ` +
+        `on any drive that was read, so some files here cannot be downloaded yet. ` +
+        `Connect every drive you used and run this again — it will fill in what is missing.`,
+    );
+  }
   if (!report.complete) {
     lines.push(
       'This run was incomplete — some drives could not be scanned, so there may be more to recover. ' +
@@ -116,6 +131,20 @@ export function restoreSummary(report: ReconstructReport): string[] {
     );
   }
   return lines;
+}
+
+/**
+ * isWarningLine reports whether a restoreSummary line is bad news.
+ *
+ * THE PREDICATE LIVES WITH THE SENTENCES IT MATCHES. RecoveryPanel used to
+ * inline `/incomplete/.test(line)`, which silently mis-styled the
+ * unplaceable-shard sentence added later: "some files here cannot be
+ * downloaded yet" rendered in muted grey, the calmest styling on the panel,
+ * for the most alarming thing it can say. A component matching on wording it
+ * does not own will drift from it every time the wording grows.
+ */
+export function isWarningLine(line: string): boolean {
+  return /incomplete|could not be located|could not be read/.test(line);
 }
 
 function plural(n: number, one: string, many?: string): string {
