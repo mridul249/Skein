@@ -311,6 +311,58 @@ SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
 	return s.attachShards(ctx, files)
 }
 
+// ListAllFiles returns every live file the user owns, in every folder, paging
+// internally. No folder predicate — see the interface doc and issue #50.
+func (s *SQLiteStore) ListAllFiles(ctx context.Context, userID uuid.UUID) ([]File, error) {
+	out := []File{}
+	var cursorAt, cursorID string
+
+	for {
+		var (
+			rows *sql.Rows
+			err  error
+		)
+		const cols = `id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
+       is_striped, is_encrypted, status, created_at, updated_at, deleted_at, reconciled_at`
+		if cursorAt == "" {
+			rows, err = s.db.QueryContext(ctx, `
+SELECT `+cols+`
+  FROM files
+ WHERE user_id = ?
+   AND deleted_at IS NULL
+   AND status IN ('ready', 'partially_missing', 'corrupted')
+ ORDER BY created_at DESC, id DESC
+ LIMIT ?`, userID.String(), ListAllPageSize)
+		} else {
+			rows, err = s.db.QueryContext(ctx, `
+SELECT `+cols+`
+  FROM files
+ WHERE user_id = ?
+   AND deleted_at IS NULL
+   AND status IN ('ready', 'partially_missing', 'corrupted')
+   AND (created_at < ? OR (created_at = ? AND id < ?))
+ ORDER BY created_at DESC, id DESC
+ LIMIT ?`, userID.String(), cursorAt, cursorAt, cursorID, ListAllPageSize)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("list all files: %w", err)
+		}
+		page, serr := s.scanFiles(rows)
+		_ = rows.Close()
+		if serr != nil {
+			return nil, serr
+		}
+		out = append(out, page...)
+
+		if len(page) < ListAllPageSize {
+			return out, nil
+		}
+		last := page[len(page)-1]
+		cursorAt = s.fmt(last.CreatedAt)
+		cursorID = last.ID.String()
+	}
+}
+
 func (s *SQLiteStore) ListTrashed(ctx context.Context, userID uuid.UUID, limit int32) ([]File, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, user_id, folder_id, name, size_bytes, declared_mime, content_sha256,
