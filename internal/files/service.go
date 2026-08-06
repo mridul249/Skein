@@ -54,6 +54,30 @@ type BackendResolver interface {
 	For(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) (storage.Backend, error)
 }
 
+// FolderRebinder points an account's app folder at a folder that already holds
+// its objects.
+//
+// RECOVERY ONLY, and it exists because the app folder's name is derived from
+// the user id. A rebuilt database has a NEW user id, so it computes a name
+// that matches nothing, finds no folder, and creates an empty one — leaving
+// the recovered files' shards in a folder the install has stopped writing to.
+// Everything still works, because shards are addressed by provider id, but the
+// user is left with two Skein folders and every new upload going to the wrong
+// one.
+//
+// Reconstruction is the one place that learns the answer: it has just read
+// manifests OUT of the right folder. Rebinding there is reading the location
+// off the data rather than re-deriving it from an identity that is gone.
+//
+// Optional. A nil rebinder means recovery still restores every file and simply
+// does not consolidate the folders.
+type FolderRebinder interface {
+	// RebindAppFolder sets the account's app folder id. Implementations must
+	// accept a folder that differs from the stored one — unlike first-use
+	// resolution, this call is specifically the correction of a wrong value.
+	RebindAppFolder(ctx context.Context, accountID uuid.UUID, folderID string) error
+}
+
 // Service implements the file and folder use cases.
 type Service struct {
 	store    Store
@@ -72,6 +96,12 @@ type Service struct {
 
 	// accounts names the drives a user has connected, for reconstruction.
 	accounts AccountLister
+
+	// users resolves the durable identity a manifest records.
+	users UserDirectory
+
+	// rebinder corrects an account's app folder after a recovery. Optional.
+	rebinder FolderRebinder
 }
 
 // WorkPool bounds concurrency and retries rate-limited provider calls.
@@ -95,10 +125,33 @@ type AccountLister interface {
 	AccountIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 }
 
+// UserDirectory resolves a user's durable identity — their email address.
+//
+// A one-method interface for the same reason WorkPool and AccountLister are:
+// this package must not import internal/auth. auth.Service satisfies it.
+//
+// Needed because a manifest has to carry something that survives losing the
+// database. User ids are random UUIDs minted at registration; email is what
+// the user re-enters when rebuilding, and is UNIQUE per instance.
+type UserDirectory interface {
+	EmailForUser(ctx context.Context, userID uuid.UUID) (string, error)
+	UserIDForEmail(ctx context.Context, email string) (uuid.UUID, error)
+}
+
+// SetUserDirectory installs the identity lookup manifests and reconstruction
+// need. Nil means manifests carry no email, which makes them unrecoverable
+// after a database rebuild — so it is wired in app.go and only tests omit it.
+func (s *Service) SetUserDirectory(d UserDirectory) { s.users = d }
+
 // SetAccountLister installs the account source reconstruction scans. Called
 // during wiring. Nil means Reconstruct must be given account ids explicitly,
 // which is what the tests do.
 func (s *Service) SetAccountLister(a AccountLister) { s.accounts = a }
+
+// SetFolderRebinder installs the app-folder correction recovery applies. Nil
+// means recovery restores every file but leaves the account writing to a
+// different folder than the recovered shards sit in. See FolderRebinder.
+func (s *Service) SetFolderRebinder(r FolderRebinder) { s.rebinder = r }
 
 // runPooled runs fn through the pool when one is installed, inline otherwise.
 func (s *Service) runPooled(ctx context.Context, fn func(ctx context.Context) error) error {

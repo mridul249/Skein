@@ -93,6 +93,14 @@ type App struct {
 	Config *config.Config
 	Logger *slog.Logger
 
+	// Auth and Files are exposed for operator tooling that drives the wired
+	// services directly rather than over HTTP — see cmd/skein-recover, which
+	// exists because the manifest routes are unreachable in a disaster: the
+	// desktop server binds a random port and those routes need an operator
+	// token a desktop install has no reason to have set.
+	Auth  *auth.Service
+	Files *files.Service
+
 	closeDB  func()
 	listener net.Listener
 	httpSrv  *http.Server
@@ -257,6 +265,14 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	// Reconstruction scans every drive the user has connected, including
 	// disabled ones — a disconnected drive still holds shards and manifests.
 	filesSvc.SetAccountLister(accountsSvc)
+	// After a recovery the account is bound to a freshly created app folder
+	// while its shards sit in the old one; this lets reconstruction correct
+	// that from what it actually found. See files.FolderRebinder.
+	filesSvc.SetFolderRebinder(accountsSvc)
+	// The durable identity manifests record, so a rebuilt database can still
+	// claim them. Without this, recovery after losing the database finds
+	// nothing — see the manifest UserEmail field.
+	filesSvc.SetUserDirectory(authSvc)
 
 	var desktopConnect handlers.DesktopConnector
 	if o.desktopConnect != nil {
@@ -336,6 +352,8 @@ func Build(ctx context.Context, opts ...Option) (*App, error) {
 	return &App{
 		Config:  cfg,
 		Logger:  lg,
+		Auth:    authSvc,
+		Files:   filesSvc,
 		closeDB: wired.close,
 		httpSrv: httpSrv,
 		workers: workers,

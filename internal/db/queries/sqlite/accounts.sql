@@ -77,6 +77,15 @@ RETURNING app_folder_id;
 -- name: GetAppFolderID :one
 SELECT app_folder_id FROM connected_accounts WHERE id = ?;
 
+-- RebindAppFolderID overwrites the folder id unconditionally. See the Postgres
+-- copy for why recovery needs a write the single-shot SetAppFolderID forbids.
+--
+-- name: RebindAppFolderID :exec
+UPDATE connected_accounts
+   SET app_folder_id = ?2,
+       updated_at    = ?3
+ WHERE id = ?1;
+
 -- name: SetAccountStatus :exec
 UPDATE connected_accounts
    SET status     = ?2,

@@ -44,6 +44,13 @@ type multiResolver struct {
 	// manifest write while leaving shard writes untouched. A pointer so the
 	// fixture can flip it after the resolver has been handed to the service.
 	refuseManifests *bool
+	// parents overrides the ParentID a listing reports, keyed by object name.
+	//
+	// The local backend keeps every object in one directory and so reports one
+	// parent for all of them, which cannot express the case recovery has to get
+	// right: TWO folders on ONE drive, holding two different users' data. A
+	// pointer for the same reason as refuseManifests.
+	parents *map[string]string
 }
 
 func (m multiResolver) For(_ context.Context, _ uuid.UUID, accountID *uuid.UUID) (storage.Backend, error) {
@@ -60,7 +67,35 @@ func (m multiResolver) For(_ context.Context, _ uuid.UUID, accountID *uuid.UUID)
 	if m.refuseManifests != nil && *m.refuseManifests {
 		return manifestRefusingBackend{Backend: b}, nil
 	}
+	if m.parents != nil && len(*m.parents) > 0 {
+		return reparentingBackend{Backend: b, parents: *m.parents}, nil
+	}
 	return b, nil
+}
+
+// reparentingBackend rewrites the ParentID of listed objects by name, so a
+// test can place two users' objects in two different folders on one drive.
+// Objects with no entry keep whatever the underlying backend reported.
+type reparentingBackend struct {
+	storage.Backend
+	parents map[string]string
+}
+
+func (r reparentingBackend) List(ctx context.Context) ([]storage.ListedObject, error) {
+	lister, ok := r.Backend.(storage.Lister)
+	if !ok {
+		return nil, errors.New("underlying backend cannot list")
+	}
+	objs, err := lister.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range objs {
+		if p, found := r.parents[objs[i].Name]; found {
+			objs[i].ParentID = p
+		}
+	}
+	return objs, nil
 }
 
 // manifestRefusingBackend rejects manifest writes and passes everything else

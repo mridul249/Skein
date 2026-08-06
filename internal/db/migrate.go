@@ -58,11 +58,41 @@ func OpenSQLite(ctx context.Context, path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create sqlite directory: %w", err)
 	}
-	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
+	dsn := path + "?_pragma=busy_timeout(30000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+
+	// ONE CONNECTION. SQLite permits exactly one writer, and this is the fix
+	// for a live stall reported 2026-08-06: a 400 MB upload froze at 4.1 MB
+	// while every storage account logged
+	// "set storage account error: context deadline exceeded".
+	//
+	// database/sql opens connections without limit by default. That turns
+	// SQLite's single write lock into N goroutines racing a busy_timeout: an
+	// upload holds the lock across its shard inserts, the 30s quota sweep
+	// fires into that window under a 3s deadline, and the sweep loses every
+	// time. The user also saw a SMALL upload stall when started alongside a
+	// large one — the same contention from the other side.
+	//
+	// Capping the pool makes database/sql QUEUE writers in Go instead. That is
+	// fair (FIFO), bounded, and converts lock contention into a wait rather
+	// than an error. Raising busy_timeout ALONE would not do it: the losers
+	// still race, so the failure returns under enough load. The longer timeout
+	// stays as a backstop for contention SQLite resolves internally, such as a
+	// WAL checkpoint.
+	//
+	// The cost is real and accepted: reads serialise behind writes too. This
+	// is a single-user desktop database, and a correct wait is worth more than
+	// a concurrent failure. If read throughput ever matters, the answer is a
+	// second read-only pool, not a larger writer pool.
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	// No lifetime cap: recycling the single connection would drop the
+	// per-connection PRAGMAs set via the DSN.
+	sqlDB.SetConnMaxLifetime(0)
+
 	if err := MigrateSQLite(ctx, sqlDB); err != nil {
 		_ = sqlDB.Close()
 		return nil, err

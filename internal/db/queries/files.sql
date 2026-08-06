@@ -108,6 +108,29 @@ SELECT * FROM files
  ORDER BY created_at DESC, id DESC
  LIMIT $2;
 
+-- ListAllFilesPage returns one page of EVERY live file a user owns, in every
+-- folder at every depth.
+--
+-- THE ABSENCE OF A folder_id PREDICATE IS THE POINT. ListFiles above filters
+-- `folder_id IS NOT DISTINCT FROM $folder_id`, so passing NULL there means the
+-- ROOT folder rather than "everywhere" — which is how reconcile came to check
+-- 2 of 20 files while reporting itself complete (known issue #50). Whole-
+-- library operations use this query; folder browsing uses that one.
+--
+-- Keyset-paginated on (created_at, id) exactly as ListFiles is, so a library
+-- larger than one page is still read in full without OFFSET re-scanning.
+--
+-- name: ListAllFilesPage :many
+SELECT * FROM files
+ WHERE user_id = $1
+   AND deleted_at IS NULL
+   AND status IN ('ready', 'partially_missing', 'corrupted')
+   AND (sqlc.narg('cursor_created_at')::timestamptz IS NULL
+        OR (created_at, id) < (sqlc.narg('cursor_created_at')::timestamptz,
+                               sqlc.narg('cursor_id')::uuid))
+ ORDER BY created_at DESC, id DESC
+ LIMIT $2;
+
 -- name: ListTrashedFiles :many
 SELECT * FROM files
  WHERE user_id = $1 AND deleted_at IS NOT NULL

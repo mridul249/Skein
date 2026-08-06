@@ -100,6 +100,12 @@ lint:
 		echo "SKIPPED frontend typecheck: web/node_modules is absent (run 'cd web && npm ci')"; \
 	fi
 
+## recover: build the manifest operator tool (see cmd/skein-recover)
+recover:
+	go build -tags desktop -o bin/skein-recover ./cmd/skein-recover
+	@echo "built bin/skein-recover — run it with the app STOPPED, e.g."
+	@echo "  ./bin/skein-recover -email you@example.com status"
+
 ## sqlc: regenerate internal/db/gen from queries (never hand-edit the output)
 sqlc:
 	$(GOBIN)/sqlc generate

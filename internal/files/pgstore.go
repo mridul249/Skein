@@ -276,6 +276,42 @@ func (s *PGStore) ListFiles(ctx context.Context, userID uuid.UUID, p ListParams)
 	return s.attachShards(ctx, mapFiles(rows))
 }
 
+// ListAllFiles returns every live file the user owns, paging internally.
+//
+// The loop is here rather than in the caller deliberately: a caller that had
+// to remember to page would be the same omission-shaped defect as issue #50
+// one layer along.
+func (s *PGStore) ListAllFiles(ctx context.Context, userID uuid.UUID) ([]File, error) {
+	out := []File{}
+	var (
+		cursorAt pgtype.Timestamptz
+		cursorID *uuid.UUID
+	)
+	for {
+		rows, err := s.q.ListAllFilesPage(ctx, gen.ListAllFilesPageParams{
+			UserID:          userID,
+			Limit:           ListAllPageSize,
+			CursorCreatedAt: cursorAt,
+			CursorID:        cursorID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list all files: %w", err)
+		}
+		for _, r := range rows {
+			out = append(out, toFile(r))
+		}
+		// A short page is the last page. Advancing the cursor on a full page
+		// and stopping otherwise is what makes this terminate.
+		if len(rows) < ListAllPageSize {
+			return out, nil
+		}
+		last := rows[len(rows)-1]
+		cursorAt = last.CreatedAt
+		id := last.ID
+		cursorID = &id
+	}
+}
+
 // ListTrashed returns soft-deleted files.
 func (s *PGStore) ListTrashed(ctx context.Context, userID uuid.UUID, limit int32) ([]File, error) {
 	rows, err := s.q.ListTrashedFiles(ctx, gen.ListTrashedFilesParams{UserID: userID, Limit: limit})

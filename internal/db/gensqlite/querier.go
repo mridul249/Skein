@@ -144,6 +144,10 @@ type Querier interface {
 	// production caller.
 	PendingStateCount(ctx context.Context) (int64, error)
 	PendingVerifiers(ctx context.Context) ([]string, error)
+	// RebindAppFolderID overwrites the folder id unconditionally. See the Postgres
+	// copy for why recovery needs a write the single-shot SetAppFolderID forbids.
+	//
+	RebindAppFolderID(ctx context.Context, arg RebindAppFolderIDParams) error
 	RecordSecurityEvent(ctx context.Context, arg RecordSecurityEventParams) error
 	// RevokeAllUserSessions signs a user out everywhere.
 	//

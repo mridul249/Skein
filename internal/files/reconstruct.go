@@ -32,6 +32,15 @@ type AccountScan struct {
 	ManifestsFound int `json:"manifests_found"`
 	// Reason explains a failed scan, for the operator.
 	Reason string `json:"reason,omitempty"`
+
+	// parents maps each manifest found on this account to the provider folder
+	// it was found in. Unexported: it is working state for the folder rebind
+	// below, not something a caller or the UI has any use for.
+	parents map[uuid.UUID]string
+
+	// objects is every provider object id seen on this account, used to
+	// resolve where a shard actually lives. Unexported for the same reason.
+	objects map[string]struct{}
 }
 
 // ReconstructReport is one run's result.
@@ -59,6 +68,16 @@ type ReconstructReport struct {
 	// decrypted. Each one is a file that exists and was NOT recovered.
 	ManifestsUnreadable int `json:"manifests_unreadable"`
 
+	// ManifestsForOtherUsers is how many belonged to a different account on a
+	// shared Google Drive. Reported rather than silent so a user recovering
+	// nothing can tell "there was nothing of mine here" from "I found things
+	// and they were someone else's".
+	ManifestsForOtherUsers int `json:"manifests_for_other_users"`
+
+	// DryRun is true when this report describes what WOULD happen. Nothing was
+	// written.
+	DryRun bool `json:"dry_run"`
+
 	FilesRecovered   int `json:"files_recovered"`
 	ShardsRecovered  int `json:"shards_recovered"`
 	FoldersRecovered int `json:"folders_recovered"`
@@ -66,6 +85,16 @@ type ReconstructReport struct {
 	// already had. On a re-run this is everything, which is what idempotence
 	// looks like from the outside.
 	FilesAlreadyPresent int `json:"files_already_present"`
+
+	// ShardsUnresolved counts shards whose object was not found on any drive
+	// this run could read.
+	//
+	// IT MUST BE REPORTED, not swallowed. A file row with missing shard rows
+	// is a file that lists, previews and then fails to download — the exact
+	// state a live user was left in on 2026-08-06 ("Recovered 7 files, 0
+	// shards"). Recovery is allowed to be partial; it is not allowed to look
+	// complete while being partial.
+	ShardsUnresolved int `json:"shards_unresolved"`
 }
 
 // Reconstruct rebuilds database rows from the sidecar manifests on a user's
@@ -94,7 +123,24 @@ type ReconstructReport struct {
 // Google account and therefore see each other's manifest objects; multi-user
 // isolation was established in Session 4 and must not regress here.
 func (s *Service) Reconstruct(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID) (ReconstructReport, error) {
+	return s.reconstruct(ctx, userID, accountIDs, false)
+}
+
+// ReconstructDryRun reports what a reconstruction WOULD recover, writing
+// nothing.
+//
+// The UI's first step. A single button that mutates the database is the wrong
+// shape for an operation someone runs when things have already gone wrong:
+// they should see what was found before anything is written. Sharing one code
+// path with the real run is what makes the preview trustworthy — a separate
+// estimator could disagree with the thing it is previewing.
+func (s *Service) ReconstructDryRun(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID) (ReconstructReport, error) {
+	return s.reconstruct(ctx, userID, accountIDs, true)
+}
+
+func (s *Service) reconstruct(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID, dryRun bool) (ReconstructReport, error) {
 	report := ReconstructReport{
+		DryRun:    dryRun,
 		StartedAt: time.Now(),
 		Complete:  true,
 		Accounts:  make([]AccountScan, 0, len(accountIDs)),
@@ -144,6 +190,54 @@ func (s *Service) Reconstruct(ctx context.Context, userID uuid.UUID, accountIDs 
 	}
 	report.ManifestsFound = len(found)
 
+	// WHERE EACH SHARD ACTUALLY LIVES, read off the drives rather than taken
+	// from the manifest.
+	//
+	// A manifest records each shard's location as a connected-account id, and
+	// that id is database-local: it dies with the database and reconnecting
+	// mints a new one. Trusting it after a rebuild inserts a foreign key that
+	// no longer resolves — every shard row rejected, the file row kept, and
+	// the user handed a library of files with zero shards. That reached a live
+	// user on 2026-08-06.
+	//
+	// The provider object id IS durable, so the honest question is not "which
+	// account did this used to be on" but "which account is holding this
+	// object now". The scan above already listed every object on every drive,
+	// so the answer is in hand and is VERIFIED rather than declared — it also
+	// repairs a shard that was moved between drives, which the recorded id
+	// would get wrong even with the database intact.
+	objectHome := map[string]uuid.UUID{}
+	for _, scan := range scans {
+		for objectID := range scan.objects {
+			objectHome[objectID] = scan.AccountID
+		}
+	}
+
+	// live is the set of accounts this run can see. It backs the fallback for
+	// a manifest whose object was not found — see resolveShardAccount.
+	live := make(map[uuid.UUID]struct{}, len(accountIDs))
+	for _, id := range accountIDs {
+		live[id] = struct{}{}
+	}
+
+	// The caller's durable identity, resolved once. Empty when no directory is
+	// wired (tests) or the lookup fails — in which case only the user-id
+	// anchor applies and a rebuilt database recovers nothing, which is the
+	// pre-fix behaviour rather than a new failure.
+	var callerEmail string
+	if s.users != nil {
+		if email, eerr := s.users.EmailForUser(ctx, userID); eerr == nil {
+			callerEmail = strings.ToLower(strings.TrimSpace(email))
+		}
+	}
+	var skippedOther int
+
+	// claimed records which manifests turned out to be this user's, so the
+	// folder rebind below considers only folders holding THIS user's data.
+	// Rebinding on any manifest found would point the account at another
+	// Skein user's folder when two share a Google account.
+	claimed := map[uuid.UUID]struct{}{}
+
 	// Apply in a deterministic order so a run's log is readable and two runs
 	// over the same data do the same things in the same sequence.
 	ids := make([]uuid.UUID, 0, len(found))
@@ -167,14 +261,27 @@ func (s *Service) Reconstruct(ctx context.Context, userID uuid.UUID, accountIDs 
 			continue
 		}
 
-		// OWNERSHIP. A manifest belonging to another user is skipped outright
-		// and is not an error: on a shared Google account it is the expected
-		// case, not a fault.
-		if m.UserID != userID {
+		// OWNERSHIP, ON TWO ANCHORS — and the second one is what makes real
+		// recovery possible.
+		//
+		// The user id matches while the database survives. After a REBUILD it
+		// never matches: registration mints a fresh random UUID, so every
+		// manifest carries an id that no longer exists. The owner hit exactly
+		// this — fresh database, same email, both drives reconnected,
+		// 12 files recovered as ZERO.
+		//
+		// So a manifest is also claimable by EMAIL, which is unique per
+		// instance and is what the user re-enters when rebuilding. Isolation
+		// is unchanged: a different email still recovers nothing, because
+		// email is exactly as unforgeable here as a user id was — both come
+		// out of a manifest only readable with the master key.
+		if !s.claims(ctx, userID, callerEmail, m) {
+			skippedOther++
 			continue
 		}
+		claimed[id] = struct{}{}
 
-		if err := s.applyManifest(ctx, userID, m, &report); err != nil {
+		if err := s.applyManifest(ctx, userID, m, &report, dryRun, objectHome, live); err != nil {
 			report.Complete = false
 			reasons["a file could not be written to the database"] = struct{}{}
 			s.log.WarnContext(ctx, "could not apply a manifest",
@@ -183,13 +290,20 @@ func (s *Service) Reconstruct(ctx context.Context, userID uuid.UUID, accountIDs 
 		}
 	}
 
+	if !dryRun {
+		s.rebindFolders(ctx, scans, claimed)
+	}
+
 	for r := range reasons {
 		report.IncompleteReasons = append(report.IncompleteReasons, r)
 	}
 	sort.Strings(report.IncompleteReasons)
 
+	report.ManifestsForOtherUsers = skippedOther
+
 	report.FinishedAt = time.Now()
 	s.log.InfoContext(ctx, "reconstruct finished",
+		slog.Int("other_users", skippedOther),
 		slog.Int("accounts", len(report.Accounts)),
 		slog.Int("manifests", report.ManifestsFound),
 		slog.Int("unreadable", report.ManifestsUnreadable),
@@ -203,7 +317,7 @@ func (s *Service) Reconstruct(ctx context.Context, userID uuid.UUID, accountIDs 
 // ReconstructAll runs reconstruction across every drive the user has
 // connected. It is the entry point the HTTP handler uses; Reconstruct takes
 // explicit account ids so tests can name them.
-func (s *Service) ReconstructAll(ctx context.Context, userID uuid.UUID) (ReconstructReport, error) {
+func (s *Service) ReconstructAll(ctx context.Context, userID uuid.UUID, dryRun bool) (ReconstructReport, error) {
 	if s.accounts == nil {
 		return ReconstructReport{}, fmt.Errorf("files: no account lister wired")
 	}
@@ -211,7 +325,129 @@ func (s *Service) ReconstructAll(ctx context.Context, userID uuid.UUID) (Reconst
 	if err != nil {
 		return ReconstructReport{}, fmt.Errorf("list connected drives: %w", err)
 	}
-	return s.Reconstruct(ctx, userID, ids)
+	return s.reconstruct(ctx, userID, ids, dryRun)
+}
+
+// claims reports whether this caller owns the manifest.
+//
+// Two anchors, checked in order of strength:
+//
+//  1. The user id matches — the normal case, and the only one available while
+//     the database that wrote the manifest is still alive.
+//  2. The email matches — the RECOVERY case. A rebuilt database mints a new
+//     user id, so this is the only thing that can still match. Compared
+//     case-insensitively because users.email is UNIQUE NOCASE and the address
+//     someone retypes will not always match its stored casing.
+//
+// An empty email on either side never matches: a manifest written before this
+// field existed cannot be claimed by email, and falls back to the user id
+// alone. That is the correct conservative reading — it means such a manifest
+// is unrecoverable after a rebuild, which is a real limitation, not a reason
+// to relax the check.
+func (s *Service) claims(ctx context.Context, userID uuid.UUID, callerEmail string, m Manifest) bool {
+	if m.UserID == userID {
+		return true
+	}
+	if callerEmail == "" || m.UserEmail == "" {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(m.UserEmail), callerEmail) {
+		return false
+	}
+	// Claimed by email: the manifest was written by a previous incarnation of
+	// this account. Logged because it is the signature of a genuine recovery
+	// and an operator should be able to see it happen.
+	s.log.InfoContext(ctx, "claiming a manifest by email after a database rebuild",
+		slog.String("file_id", m.FileID.String()),
+		slog.String("previous_user_id", m.UserID.String()))
+	return true
+}
+
+// resolveShardAccount decides which connected account holds one shard.
+//
+// Two sources, in order of how much they can be trusted:
+//
+//  1. WHERE THE OBJECT WAS ACTUALLY SEEN. The scan listed every object on
+//     every reachable drive, so this is observation rather than record. It
+//     survives a database rebuild, which the manifest own account id does
+//     not, and it is also correct when a shard has been moved between drives.
+//
+//  2. The account id the manifest recorded, but ONLY if that id is one of the
+//     accounts in this run. After a rebuild it never is; with the database
+//     intact it always is. Keeping it covers the case where a drive is
+//     connected but its listing came back short - the recorded id is then
+//     better than nothing and no worse than what the database already held.
+//
+// Anything else is unresolvable, and the caller must say so rather than guess.
+// A shard is not a thing to be approximately located: the download path reads
+// bytes from wherever this says, so a wrong answer is a corrupt file rather
+// than a missing one.
+func resolveShardAccount(ms ManifestShard, objectHome map[string]uuid.UUID,
+	live map[uuid.UUID]struct{}) (*uuid.UUID, bool) {
+
+	if ms.ProviderObjectID != "" {
+		if id, seen := objectHome[ms.ProviderObjectID]; seen {
+			return &id, true
+		}
+	}
+	if ms.AccountID != nil {
+		if _, ok := live[*ms.AccountID]; ok {
+			return ms.AccountID, true
+		}
+	}
+	return nil, false
+}
+
+// rebindFolders points each scanned account at the folder its recovered data
+// actually lives in.
+//
+// BEST EFFORT, AND DELIBERATELY SO. Every file has already been recovered by
+// the time this runs; the rebind only decides where the NEXT upload goes. A
+// failure here must not turn a successful recovery into a reported failure, so
+// it is logged and never touches report.Complete.
+//
+// Only claimed manifests are counted, and the winner is the folder holding the
+// most of them. A single folder is the normal case; the count is what keeps a
+// stray object — one left at root before app folders existed, or moved by hand
+// — from outvoting the folder holding everything else.
+func (s *Service) rebindFolders(ctx context.Context, scans []AccountScan, claimed map[uuid.UUID]struct{}) {
+	if s.rebinder == nil || len(claimed) == 0 {
+		return
+	}
+	for _, scan := range scans {
+		if !scan.Scanned || len(scan.parents) == 0 {
+			continue
+		}
+		counts := map[string]int{}
+		for fileID, parent := range scan.parents {
+			if _, ours := claimed[fileID]; ours {
+				counts[parent]++
+			}
+		}
+		best, bestN := "", 0
+		for parent, n := range counts {
+			// Ties broken by folder id so two runs over the same drive make
+			// the same choice rather than alternating.
+			if n > bestN || (n == bestN && parent < best) {
+				best, bestN = parent, n
+			}
+		}
+		if best == "" {
+			continue
+		}
+		if err := s.rebinder.RebindAppFolder(ctx, scan.AccountID, best); err != nil {
+			s.log.WarnContext(ctx, "recovered files but could not repoint the drive's app folder; "+
+				"new uploads will go to a different folder than the recovered ones",
+				slog.String("account_id", scan.AccountID.String()),
+				slog.String("folder_id", best),
+				slog.String("error", err.Error()))
+			continue
+		}
+		s.log.InfoContext(ctx, "repointed a drive at the folder holding its recovered files",
+			slog.String("account_id", scan.AccountID.String()),
+			slog.String("folder_id", best),
+			slog.Int("manifests", bestN))
+	}
 }
 
 // scanAccount lists one account and fetches every manifest it holds.
@@ -244,10 +480,15 @@ func (s *Service) scanAccount(ctx context.Context, userID, accountID uuid.UUID) 
 	}
 
 	scan.Scanned = true
+	scan.parents = map[uuid.UUID]string{}
+	// objects is every provider id this account holds. It is how a shard's
+	// CURRENT home is discovered — see the objectHome map in reconstruct.
+	scan.objects = make(map[string]struct{}, len(objects))
 	out := map[uuid.UUID][]byte{}
 	var why []string
 
 	for _, obj := range objects {
+		scan.objects[obj.ProviderID] = struct{}{}
 		if !IsManifestName(obj.Name) {
 			continue
 		}
@@ -256,6 +497,9 @@ func (s *Service) scanAccount(ctx context.Context, userID, accountID uuid.UUID) 
 			continue // not one of ours, or a name we do not understand
 		}
 		scan.ManifestsFound++
+		if obj.ParentID != "" {
+			scan.parents[fileID] = obj.ParentID
+		}
 
 		body, ferr := s.fetchManifest(ctx, backend, obj)
 		if ferr != nil {
@@ -301,7 +545,12 @@ func (s *Service) fetchManifest(ctx context.Context, backend storage.Backend, ob
 const maxManifestBytes = 8 << 20
 
 // applyManifest writes one recovered file and its shards.
-func (s *Service) applyManifest(ctx context.Context, userID uuid.UUID, m Manifest, report *ReconstructReport) error {
+func (s *Service) applyManifest(ctx context.Context, userID uuid.UUID, m Manifest, report *ReconstructReport,
+	dryRun bool, objectHome map[string]uuid.UUID, live map[uuid.UUID]struct{}) error {
+	if dryRun {
+		return s.previewManifest(ctx, userID, m, report, objectHome, live)
+	}
+
 	folderID, err := s.ensureFolderPath(ctx, userID, m.FolderPath, report)
 	if err != nil {
 		return err
@@ -348,11 +597,31 @@ func (s *Service) applyManifest(ctx context.Context, userID uuid.UUID, m Manifes
 		if derr != nil {
 			digest = nil // a manifest without a usable digest is still worth recovering
 		}
+
+		acct, ok := resolveShardAccount(ms, objectHome, live)
+		if !ok {
+			// The object was not seen on any drive this run could read, and
+			// the recorded account is not one of them either. Skipping is the
+			// honest outcome: inserting a NULL account would record a shard
+			// whose location is unknown, and the download path would report a
+			// disconnected drive for a shard that may be perfectly fine on a
+			// drive that simply was not scanned. The counter and the
+			// incomplete flag say so, and a re-run fills it in.
+			report.ShardsUnresolved++
+			report.Complete = false
+			s.log.WarnContext(ctx, "could not locate a shard on any scanned drive; "+
+				"re-run recovery with every drive connected",
+				slog.String("file_id", m.FileID.String()),
+				slog.Int("shard_index", int(ms.Index)),
+				slog.String("provider_object_id", ms.ProviderObjectID))
+			continue
+		}
+
 		added, serr := s.store.InsertReconstructedShard(ctx, NewShard{
 			ID:          uuid.New(),
 			FileID:      m.FileID,
 			Index:       ms.Index,
-			AccountID:   ms.AccountID,
+			AccountID:   acct,
 			ProviderID:  ms.ProviderObjectID,
 			SizeBytes:   ms.CiphertextSize,
 			PlainSize:   ms.PlainSize,
@@ -364,6 +633,55 @@ func (s *Service) applyManifest(ctx context.Context, userID uuid.UUID, m Manifes
 		}
 		if added {
 			report.ShardsRecovered++
+		}
+	}
+	return nil
+}
+
+// previewManifest counts what applying this manifest WOULD do, writing
+// nothing. It answers the same questions applyManifest does, from reads only.
+func (s *Service) previewManifest(ctx context.Context, userID uuid.UUID, m Manifest, report *ReconstructReport,
+	objectHome map[string]uuid.UUID, liveAccounts map[uuid.UUID]struct{}) error {
+	if _, err := s.store.GetFile(ctx, userID, m.FileID); err == nil {
+		report.FilesAlreadyPresent++
+		return nil
+	}
+	report.FilesRecovered++
+
+	// THE SAME RESOLUTION THE REAL RUN USES. Counting len(m.Shards) here would
+	// promise shards the real run then cannot place, and the preview exists
+	// precisely so that someone can trust the numbers before anything is
+	// written. A preview that disagrees with the run it previews is worse than
+	// no preview.
+	for _, ms := range m.Shards {
+		if _, ok := resolveShardAccount(ms, objectHome, liveAccounts); ok {
+			report.ShardsRecovered++
+		} else {
+			report.ShardsUnresolved++
+			report.Complete = false
+		}
+	}
+
+	// A folder is counted as recreated only if no live one of that name exists
+	// under that parent — the same condition EnsureFolder applies.
+	existing, err := s.store.ListFolders(ctx, userID)
+	if err != nil {
+		// Best effort: the FILE counts are what the preview is for, and a
+		// folder count that cannot be computed is worth less than failing the
+		// whole preview over. Logged rather than swallowed so an under-count
+		// is explicable rather than mysterious.
+		s.log.WarnContext(ctx, "could not count recoverable folders for the preview",
+			slog.String("error", err.Error()))
+		return nil
+	}
+	live := map[string]bool{}
+	for _, f := range existing {
+		live[f.Name] = true
+	}
+	for _, name := range m.FolderPath {
+		if !live[name] {
+			report.FoldersRecovered++
+			live[name] = true
 		}
 	}
 	return nil

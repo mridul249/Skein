@@ -194,6 +194,18 @@ func (s *SQLiteStore) SetAppFolderID(ctx context.Context, id uuid.UUID, folderID
 	return derefString(got), nil
 }
 
+// RebindAppFolderID overwrites the folder id. See the Postgres copy.
+func (s *SQLiteStore) RebindAppFolderID(ctx context.Context, id uuid.UUID, folderID string) error {
+	if err := s.q.RebindAppFolderID(ctx, gensqlite.RebindAppFolderIDParams{
+		ID:          id.String(),
+		AppFolderID: &folderID,
+		UpdatedAt:   s.fmt(s.now()),
+	}); err != nil {
+		return fmt.Errorf("rebind app folder id: %w", err)
+	}
+	return nil
+}
+
 // DeleteAccount unlinks an account the user owns. Not the disconnect path --
 // see the note on DeleteConnectedAccount in queries/sqlite/accounts.sql.
 func (s *SQLiteStore) DeleteAccount(ctx context.Context, userID, id uuid.UUID) (int64, error) {

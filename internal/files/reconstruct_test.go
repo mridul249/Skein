@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -181,9 +182,20 @@ func TestReconstructRecoversFilesByteForByteAfterTheDatabaseIsDestroyed(t *testi
 				t.Errorf("%s shard %d: recovered mapping differs from the original\n got=%+v\nwant=%+v",
 					o.name, i, g, w)
 			}
-			if (g.AccountID == nil) != (w.AccountID == nil) ||
-				(g.AccountID != nil && *g.AccountID != *w.AccountID) {
-				t.Errorf("%s shard %d: recovered onto the wrong account", o.name, i)
+			// NOT compared against the ORIGINAL account id, which is exactly
+			// the thing a rebuild destroys: reconnecting a drive mints a new
+			// connected-account id, so the pre-loss id is gone and asserting
+			// on it would demand behaviour that cannot exist. What must hold
+			// is that the shard points at the drive REALLY HOLDING the object
+			// — checked against the provider, not against either database.
+			if g.AccountID == nil {
+				t.Errorf("%s shard %d: recovered with no account; the drive holding it is unknown",
+					o.name, i)
+				continue
+			}
+			if _, ok := f.objects(t, *g.AccountID)[g.ProviderID]; !ok {
+				t.Errorf("%s shard %d: points at account %s, which does not hold object %q",
+					o.name, i, *g.AccountID, g.ProviderID)
 			}
 		}
 	}
@@ -223,6 +235,113 @@ func TestReconstructRecoversFilesByteForByteAfterTheDatabaseIsDestroyed(t *testi
 			continue
 		}
 		t.Logf("%s: %d bytes recovered byte-for-byte", o.name, len(got))
+	}
+}
+
+// THE DRY RUN WRITES NOTHING, which is the claim the two-step Recovery UI
+// rests on: the user is shown what a restore would do, and is told nothing has
+// happened yet. If a "scan" mutated the database, that sentence is a lie and
+// the confirmation step is theatre.
+//
+// Asserted by destroying the database, scanning, and checking the database is
+// STILL EMPTY — not by trusting the report's own dry_run flag.
+func TestReconstructDryRunWritesNothing(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	data := randomBytes(t, 6<<20)
+	file := f.uploadAs(t, f.user1, "preview.bin", data)
+	f.destroyDatabase(t)
+
+	preview, err := f.svc.ReconstructDryRun(ctx, f.user1, f.accounts)
+	if err != nil {
+		t.Fatalf("ReconstructDryRun() = %v", err)
+	}
+	if !preview.DryRun {
+		t.Error("the report does not mark itself as a dry run")
+	}
+	// It must still REPORT what it would do, or the preview is useless.
+	if preview.FilesRecovered != 1 {
+		t.Errorf("preview reported %d files recoverable, want 1", preview.FilesRecovered)
+	}
+	if preview.ShardsRecovered == 0 {
+		t.Error("preview reported no shards recoverable")
+	}
+
+	// ...and the database is untouched.
+	if _, gerr := f.svc.Get(ctx, f.user1, file.ID); gerr == nil {
+		t.Fatal("the dry run WROTE the file row; the UI's 'nothing has been " +
+			"written yet' is a lie and the confirm step is theatre")
+	}
+	listed, lerr := f.svc.List(ctx, f.user1, files.ListParams{Limit: 50})
+	if lerr != nil {
+		t.Fatalf("List() = %v", lerr)
+	}
+	if len(listed) != 0 {
+		t.Errorf("%d files in the listing after a dry run, want 0", len(listed))
+	}
+
+	// And a real run afterwards still recovers everything — the preview must
+	// not have consumed anything.
+	real, rerr := f.svc.Reconstruct(ctx, f.user1, f.accounts)
+	if rerr != nil {
+		t.Fatalf("Reconstruct() after a dry run = %v", rerr)
+	}
+	if real.FilesRecovered != 1 {
+		t.Errorf("the real run recovered %d files after a preview, want 1",
+			real.FilesRecovered)
+	}
+	if _, gerr := f.svc.Get(ctx, f.user1, file.ID); gerr != nil {
+		t.Errorf("the file did not come back after the real run: %v", gerr)
+	}
+}
+
+// The preview's numbers must match what the real run actually does. A preview
+// that overstates sends someone into a restore expecting more than they get.
+func TestTheDryRunPredictsWhatTheRealRunDoes(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	folder, ferr := f.svc.CreateFolder(ctx, f.user1, nil, "Docs")
+	if ferr != nil {
+		t.Fatalf("CreateFolder() = %v", ferr)
+	}
+	fid := folder.ID
+	for i := 0; i < 3; i++ {
+		data := randomBytes(t, 1<<20)
+		var target *uuid.UUID
+		if i == 0 {
+			target = &fid
+		}
+		if _, uerr := f.svc.Upload(ctx, files.UploadRequest{
+			UserID: f.user1, Name: fmt.Sprintf("f%d.bin", i),
+			Size: int64(len(data)), FolderID: target,
+		}, bytes.NewReader(data)); uerr != nil {
+			t.Fatalf("Upload(%d) = %v", i, uerr)
+		}
+	}
+	f.destroyDatabase(t)
+
+	preview, err := f.svc.ReconstructDryRun(ctx, f.user1, f.accounts)
+	if err != nil {
+		t.Fatalf("ReconstructDryRun() = %v", err)
+	}
+	real, rerr := f.svc.Reconstruct(ctx, f.user1, f.accounts)
+	if rerr != nil {
+		t.Fatalf("Reconstruct() = %v", rerr)
+	}
+
+	if preview.FilesRecovered != real.FilesRecovered {
+		t.Errorf("preview said %d files, the run recovered %d",
+			preview.FilesRecovered, real.FilesRecovered)
+	}
+	if preview.ShardsRecovered != real.ShardsRecovered {
+		t.Errorf("preview said %d shards, the run recovered %d",
+			preview.ShardsRecovered, real.ShardsRecovered)
+	}
+	if preview.FoldersRecovered != real.FoldersRecovered {
+		t.Errorf("preview said %d folders, the run recreated %d",
+			preview.FoldersRecovered, real.FoldersRecovered)
 	}
 }
 
@@ -463,4 +582,162 @@ func randomBytes(t *testing.T, n int) []byte {
 		t.Fatalf("rand: %v", err)
 	}
 	return b
+}
+
+// REAL DISASTER RECOVERY: a fresh database, the same person, the same drives.
+//
+// THE SCENARIO THE OWNER ACTUALLY HIT, 2026-08-06. Database moved aside,
+// re-registered the same address, reconnected both Drive accounts, ran a
+// scan — and recovered NOTHING of 12 files. Registration mints a fresh random
+// user id, so every manifest carried an id that no longer existed and the
+// ownership filter skipped all of them.
+//
+// This is the case sidecar manifests exist for. Anything that works only while
+// the original database survives is not disaster recovery.
+func TestANewDatabaseRecoversTheSameAccountsFiles(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	const email = "owner@example.com"
+	f.dir.set(f.user1, email)
+
+	// A library worth recovering: striped, and one file in a folder.
+	folder, ferr := f.svc.CreateFolder(ctx, f.user1, nil, "Documents")
+	if ferr != nil {
+		t.Fatalf("CreateFolder() = %v", ferr)
+	}
+	fid := folder.ID
+	original := randomBytes(t, 6<<20)
+	if _, uerr := f.svc.Upload(ctx, files.UploadRequest{
+		UserID: f.user1, Name: "important.bin", Size: int64(len(original)), FolderID: &fid,
+	}, bytes.NewReader(original)); uerr != nil {
+		t.Fatalf("Upload() = %v", uerr)
+	}
+	f.uploadAs(t, f.user1, "also-mine.bin", randomBytes(t, 3<<20))
+
+	// ---- The database is lost. ----
+	f.destroyDatabase(t)
+
+	// The user re-registers the SAME address and gets a DIFFERENT id, exactly
+	// as auth.Register does (uuid.New()). This single line is the whole bug.
+	rebuiltUser := uuid.New()
+	f.dir.set(rebuiltUser, email)
+
+	report, err := f.svc.Reconstruct(ctx, rebuiltUser, f.accounts)
+	if err != nil {
+		t.Fatalf("Reconstruct() = %v", err)
+	}
+	if report.FilesRecovered != 2 {
+		t.Fatalf("recovered %d of 2 files after a database rebuild.\n"+
+			"manifests found: %d, for other users: %d\n"+
+			"A user id cannot anchor identity across the loss of the database "+
+			"that minted it.", report.FilesRecovered, report.ManifestsFound,
+			report.ManifestsForOtherUsers)
+	}
+
+	// And the bytes come back, under the NEW user id.
+	listed, lerr := f.svc.List(ctx, rebuiltUser, files.ListParams{Limit: 50})
+	if lerr != nil {
+		t.Fatalf("List() = %v", lerr)
+	}
+	var target uuid.UUID
+	for _, l := range listed {
+		if l.Name == "also-mine.bin" {
+			target = l.ID
+		}
+	}
+	folders, _ := f.svc.ListFolders(ctx, rebuiltUser)
+	var haveDocuments bool
+	for _, fl := range folders {
+		if fl.Name == "Documents" {
+			haveDocuments = true
+		}
+	}
+	if !haveDocuments {
+		t.Error("the folder was not recreated under the rebuilt account")
+	}
+
+	// The striped file, byte-for-byte.
+	for _, l := range listed {
+		if l.Name != "important.bin" {
+			continue
+		}
+		content, oerr := f.svc.Open(ctx, rebuiltUser, l.ID, nil)
+		if oerr != nil {
+			t.Fatalf("Open() = %v", oerr)
+		}
+		got, rerr := io.ReadAll(content.Body)
+		_ = content.Body.Close()
+		if rerr != nil {
+			t.Fatalf("read = %v", rerr)
+		}
+		if !bytes.Equal(got, original) {
+			t.Error("the recovered file does not match the original byte-for-byte")
+		}
+	}
+	if target == uuid.Nil {
+		t.Error("also-mine.bin did not come back")
+	}
+}
+
+// ISOLATION STILL HOLDS. Claiming by email must not become "anyone can claim
+// anything" — a DIFFERENT address recovers nothing, even from the same drives.
+//
+// This is the counterweight to the test above. Relaxing an ownership check to
+// enable recovery is exactly the kind of change that quietly removes isolation,
+// so both directions are asserted together.
+func TestADifferentAccountStillRecoversNothing(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	f.dir.set(f.user1, "owner@example.com")
+	mine := f.uploadAs(t, f.user1, "mine.bin", randomBytes(t, 3<<20))
+	f.destroyDatabase(t)
+
+	// A different person on the same shared Google accounts.
+	stranger := uuid.New()
+	f.dir.set(stranger, "stranger@example.com")
+
+	report, err := f.svc.Reconstruct(ctx, stranger, f.accounts)
+	if err != nil {
+		t.Fatalf("Reconstruct() = %v", err)
+	}
+	if report.ManifestsFound == 0 {
+		t.Fatal("no manifests were visible; this test proves nothing unless the " +
+			"stranger can SEE them and is refused anyway")
+	}
+	if report.FilesRecovered != 0 {
+		t.Errorf("a different account recovered %d files", report.FilesRecovered)
+	}
+	if report.ManifestsForOtherUsers == 0 {
+		t.Error("the run did not report skipping manifests belonging to someone else; " +
+			"a user recovering nothing cannot tell that from an empty drive")
+	}
+	if _, gerr := f.svc.Get(ctx, stranger, mine.ID); gerr == nil {
+		t.Error("a different account can READ the original owner's file")
+	}
+}
+
+// Email matching is case-insensitive, because users.email is UNIQUE NOCASE and
+// the address someone retypes during a recovery will not always match the
+// casing they registered with.
+func TestEmailClaimingIsCaseInsensitive(t *testing.T) {
+	f := newSharedDrive(t)
+	ctx := context.Background()
+
+	f.dir.set(f.user1, "Owner@Example.COM")
+	f.uploadAs(t, f.user1, "mixed-case.bin", randomBytes(t, 3<<20))
+	f.destroyDatabase(t)
+
+	rebuilt := uuid.New()
+	f.dir.set(rebuilt, "owner@example.com")
+
+	report, err := f.svc.Reconstruct(ctx, rebuilt, f.accounts)
+	if err != nil {
+		t.Fatalf("Reconstruct() = %v", err)
+	}
+	if report.FilesRecovered != 1 {
+		t.Errorf("recovered %d of 1 file; a retyped address in different casing "+
+			"must still claim its own manifests", report.FilesRecovered)
+	}
 }

@@ -83,9 +83,31 @@ type ManifestShard struct {
 // which is exactly why docs/BACKUP.md insists the exported key must not live
 // beside the data.
 type Manifest struct {
-	Version        int       `json:"version"`
-	FileID         uuid.UUID `json:"file_id"`
-	UserID         uuid.UUID `json:"user_id"`
+	Version int       `json:"version"`
+	FileID  uuid.UUID `json:"file_id"`
+	// UserID is the owner's id AT THE TIME OF WRITING. It is NOT a durable
+	// identity: user ids are random UUIDs minted at registration, so a
+	// database rebuilt from scratch mints a different one and this can never
+	// match again. Kept because it is the right check while the database
+	// survives — two Skein users sharing one Google account see each other's
+	// manifest objects, and this is what stops one adopting the other's files.
+	UserID uuid.UUID `json:"user_id"`
+
+	// UserEmail is the DURABLE identity anchor, and the reason real recovery
+	// is possible at all.
+	//
+	// Found by the owner testing exactly the scenario that matters: fresh
+	// database, re-registered the same address, reconnected the same drives —
+	// and recovered NOTHING, because the new registration minted a new user id
+	// and every manifest carried the old one. Enforcing isolation through a
+	// value that dies with the database makes isolation and recoverability
+	// mutually exclusive.
+	//
+	// Email is UNIQUE per instance (users.email is UNIQUE NOCASE) and is what
+	// the user re-enters when rebuilding, so it survives the one event this
+	// whole feature exists for.
+	UserEmail string `json:"user_email,omitempty"`
+
 	FileName       string    `json:"file_name"`
 	PlainSizeBytes int64     `json:"plain_size_bytes"`
 	MimeType       string    `json:"mime_type,omitempty"`
@@ -115,12 +137,13 @@ type Manifest struct {
 //
 // folderPath is the file's folder chain from the root, outermost first, so a
 // reconstruction can recreate the tree. Empty for a file at the root.
-func ManifestFor(f File, folderPath []string) Manifest {
+func ManifestFor(f File, folderPath []string, userEmail string) Manifest {
 	encrypted := f.IsEncrypted
 	m := Manifest{
 		Version:        ManifestVersion,
 		FileID:         f.ID,
 		UserID:         f.UserID,
+		UserEmail:      userEmail,
 		FileName:       f.Name,
 		PlainSizeBytes: f.SizeBytes,
 		MimeType:       f.DeclaredMime,
@@ -201,6 +224,27 @@ func OpenManifest(ring *skcrypto.Keyring, fileID uuid.UUID, sealed []byte) (Mani
 	return m, nil
 }
 
+// emailFor resolves the owner's durable identity for a manifest.
+//
+// Best effort: a manifest without an email is still worth writing — it stays
+// recoverable for as long as the database survives. But it is warned about,
+// because it is NOT recoverable after a rebuild, which is the case manifests
+// exist for.
+func (s *Service) emailFor(ctx context.Context, userID uuid.UUID) string {
+	if s.users == nil {
+		return ""
+	}
+	email, err := s.users.EmailForUser(ctx, userID)
+	if err != nil {
+		s.log.WarnContext(ctx, "could not resolve the owner's email for a manifest; "+
+			"it will not be recoverable after a database rebuild",
+			slog.String("user_id", userID.String()),
+			slog.String("error", err.Error()))
+		return ""
+	}
+	return email
+}
+
 // ManifestWriter writes sidecar manifests.
 //
 // A NARROW INTERFACE CALLED FROM EXACTLY ONE PLACE, and that is deliberate
@@ -230,7 +274,7 @@ func (s *Service) writeManifest(ctx context.Context, f File, folderPath []string
 		return // encryption disabled in tests; nothing to derive a key from
 	}
 
-	sealed, err := SealManifest(s.keyring, ManifestFor(f, folderPath))
+	sealed, err := SealManifest(s.keyring, ManifestFor(f, folderPath, s.emailFor(ctx, f.UserID)))
 	if err != nil {
 		s.log.WarnContext(ctx, "could not build sidecar manifest",
 			slog.String("file_id", f.ID.String()),

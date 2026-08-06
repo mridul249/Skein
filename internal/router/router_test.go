@@ -542,3 +542,225 @@ func TestRoundRobinSpreadsShardsWithinOneUpload(t *testing.T) {
 			len(plan.Shards), len(used))
 	}
 }
+
+// THE OWNER'S 400 MB FILE, REPRODUCED (2026-08-06).
+//
+// Two 15 GB drives, both nearly empty, unevenly used. A 400 MB file becomes a
+// 256 MB shard and a 144 MB one — and BOTH landed on the same drive, twice in
+// a row. Nothing was broken by it: the layout is legal, every byte is stored,
+// and the file downloads. But it is not what striping is for.
+//
+// The cause is that most-available re-sorts after each shard and the leader
+// does not change: a 256 MB debit against a 500 MB gap leaves the same drive
+// in front, so it takes the next shard too, and the next. The emptiest drive
+// absorbs an entire file while its neighbour sits idle — the drives level out
+// only across many uploads, never within one.
+//
+// A striped file should touch more than one drive when more than one can hold
+// a shard. That gives parallel transfer, it spreads the failure surface, and
+// it is what the user is told the feature does.
+func TestAStripedFileSpreadsAcrossDrivesEvenWhenOneCouldHoldItAll(t *testing.T) {
+	r, store := newReserver(t)
+	userID := uuid.New()
+
+	// The owner's numbers: two drives with plenty of room and a ~500 MB gap
+	// between them, so the emptier one stays ahead after a 256 MB debit.
+	a, b := uuid.New(), uuid.New()
+	store.AddAccount(a, 1, "a@example.com", fifteenG, 2205<<20) // ~12795 MB free
+	store.AddAccount(b, 2, "b@example.com", fifteenG, 1699<<20) // ~13301 MB free
+
+	p := NewPlanner(r, PolicyMostAvailable, shard256, noOverhead)
+
+	const size = 400 << 20
+	plan, err := p.Plan(context.Background(), userID, size)
+	if err != nil {
+		t.Fatalf("Plan() = %v", err)
+	}
+	if len(plan.Shards) != 2 {
+		t.Fatalf("planned %d shards for a 400 MB file, want 2", len(plan.Shards))
+	}
+
+	used := map[uuid.UUID]int64{}
+	for _, s := range plan.Shards {
+		used[s.AccountID] += s.PlainSize
+	}
+	if len(used) != 2 {
+		t.Errorf("a 2-shard file used %d drive(s), want 2; both shards on one drive "+
+			"fills that drive unfairly and gives up the point of striping", len(used))
+	}
+
+	// Still correct: every byte covered once, in order.
+	var offset int64
+	for i, s := range plan.Shards {
+		if s.PlainOffset != offset {
+			t.Fatalf("shard %d starts at %d, want %d", i, s.PlainOffset, offset)
+		}
+		offset += s.PlainSize
+	}
+	if offset != size {
+		t.Fatalf("the plan covers %d bytes, want %d", offset, size)
+	}
+}
+
+// THE SPREAD MUST NEVER COST AN UPLOAD. It is a preference: if no unused drive
+// can take a full shard, the shard goes on a drive already used rather than the
+// plan failing. A prettier layout is not worth a refused upload.
+func TestSpreadingNeverFailsAnUploadThatFits(t *testing.T) {
+	r, store := newReserver(t)
+	userID := uuid.New()
+
+	// One roomy drive and one nearly full. A 600 MB file needs three shards;
+	// only the big drive can take them, so all three must land there.
+	big, tiny := uuid.New(), uuid.New()
+	store.AddAccount(big, 1, "big@example.com", fifteenG, 0)
+	store.AddAccount(tiny, 2, "tiny@example.com", 1<<20, 0) // 1 MB total
+
+	p := NewPlanner(r, PolicyMostAvailable, shard256, noOverhead)
+
+	const size = 600 << 20
+	plan, err := p.Plan(context.Background(), userID, size)
+	if err != nil {
+		t.Fatalf("Plan() = %v; the spread preference must not refuse a file that fits", err)
+	}
+
+	var offset int64
+	for _, s := range plan.Shards {
+		offset += s.PlainSize
+	}
+	if offset != size {
+		t.Errorf("the plan covers %d bytes, want %d", offset, size)
+	}
+}
+
+// A drive that can only take a sliver must NOT attract one. Letting it would
+// fragment every upload into tiny shards, which costs more than the uneven
+// fill the spread exists to fix.
+//
+// What enforces this is that the spread pass asks for the WHOLE shard and
+// never shrinks it, so a drive without room loses at the reservation. The
+// `c.Free()` pre-check in placeShard is only an optimisation — deleting it
+// leaves this test green, which is correct and was verified by mutation.
+// Mutating the no-shrink property fails it immediately.
+func TestSpreadingDoesNotFragmentOntoANearlyFullDrive(t *testing.T) {
+	r, store := newReserver(t)
+	userID := uuid.New()
+
+	big, sliver := uuid.New(), uuid.New()
+	store.AddAccount(big, 1, "big@example.com", fifteenG, 0)
+	// Room for 4 MB: enough to be a candidate, far short of a 256 MB shard.
+	store.AddAccount(sliver, 2, "sliver@example.com", 4<<20, 0)
+
+	p := NewPlanner(r, PolicyMostAvailable, shard256, noOverhead)
+
+	const size = 512 << 20
+	plan, err := p.Plan(context.Background(), userID, size)
+	if err != nil {
+		t.Fatalf("Plan() = %v", err)
+	}
+	for i, s := range plan.Shards {
+		if s.AccountID == sliver {
+			t.Errorf("shard %d (%d bytes) was placed on a drive with only 4 MB free; "+
+				"the spread preference must require room for a FULL shard", i, s.PlainSize)
+		}
+	}
+	if len(plan.Shards) != 2 {
+		t.Errorf("planned %d shards, want 2; extra shards mean the file was fragmented",
+			len(plan.Shards))
+	}
+}
+
+// PolicyPriority means "fill the first drive until it is full". Spreading
+// would contradict the thing the user chose it for, so it is exempt.
+func TestPriorityPolicyStillFillsOneDriveFirst(t *testing.T) {
+	r, store := newReserver(t)
+	userID := uuid.New()
+
+	first, second := uuid.New(), uuid.New()
+	store.AddAccount(first, 1, "first@example.com", fifteenG, 0)
+	store.AddAccount(second, 2, "second@example.com", fifteenG, 0)
+
+	p := NewPlanner(r, PolicyPriority, shard256, noOverhead)
+
+	plan, err := p.Plan(context.Background(), userID, 400<<20)
+	if err != nil {
+		t.Fatalf("Plan() = %v", err)
+	}
+	for i, s := range plan.Shards {
+		if s.AccountID != first {
+			t.Errorf("shard %d went to the second drive under PolicyPriority, "+
+				"which is documented to fill the first drive until it is full", i)
+		}
+	}
+}
+
+// With more shards than drives, the spread must WRAP rather than give up after
+// one pass: three shards over two drives is 2/1, not 1/1 plus a free-for-all.
+func TestSpreadingWrapsWhenThereAreMoreShardsThanDrives(t *testing.T) {
+	r, store := newReserver(t)
+	userID := uuid.New()
+
+	a, b := uuid.New(), uuid.New()
+	store.AddAccount(a, 1, "a@example.com", fifteenG, 0)
+	store.AddAccount(b, 2, "b@example.com", fifteenG, 0)
+
+	p := NewPlanner(r, PolicyMostAvailable, shard256, noOverhead)
+
+	// Three full shards.
+	plan, err := p.Plan(context.Background(), userID, 768<<20)
+	if err != nil {
+		t.Fatalf("Plan() = %v", err)
+	}
+	if len(plan.Shards) != 3 {
+		t.Fatalf("planned %d shards, want 3", len(plan.Shards))
+	}
+	counts := map[uuid.UUID]int{}
+	for _, s := range plan.Shards {
+		counts[s.AccountID]++
+	}
+	if len(counts) != 2 {
+		t.Fatalf("3 shards used %d drive(s), want 2", len(counts))
+	}
+	for id, n := range counts {
+		if n > 2 {
+			t.Errorf("drive %s took %d of 3 shards; the spread should be 2/1", id, n)
+		}
+	}
+}
+
+// The reservations must match the plan exactly. A spread pass that reserved on
+// one drive and then placed on another would strand capacity until the janitor
+// ran, and the leak would be invisible in the plan itself.
+func TestSpreadingReservesExactlyWhatItPlaces(t *testing.T) {
+	r, store := newReserver(t)
+	userID := uuid.New()
+
+	a, b := uuid.New(), uuid.New()
+	store.AddAccount(a, 1, "a@example.com", fifteenG, 2205<<20)
+	store.AddAccount(b, 2, "b@example.com", fifteenG, 1699<<20)
+
+	p := NewPlanner(r, PolicyMostAvailable, shard256, noOverhead)
+
+	const size = 400 << 20
+	plan, err := p.Plan(context.Background(), userID, size)
+	if err != nil {
+		t.Fatalf("Plan() = %v", err)
+	}
+
+	perDrive := map[uuid.UUID]int64{}
+	for _, s := range plan.Shards {
+		perDrive[s.AccountID] += s.PlainSize
+	}
+	for _, id := range []uuid.UUID{a, b} {
+		if got, want := store.ReservedOn(id), perDrive[id]; got != want {
+			t.Errorf("drive %s holds %d reserved bytes but the plan puts %d there",
+				id, got, want)
+		}
+	}
+	var total int64
+	for _, id := range []uuid.UUID{a, b} {
+		total += store.ReservedOn(id)
+	}
+	if total != size {
+		t.Errorf("reserved %d bytes for a %d byte file", total, size)
+	}
+}

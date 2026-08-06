@@ -62,6 +62,64 @@ export interface FileItem {
   shards: Shard[];
 }
 
+/** Which master key this instance runs under, and whether backfill is enabled. */
+export interface RecoveryStatus {
+  key_id: string;
+  backup_token_set: boolean;
+  /** Whether this build can write manifests at all. */
+  manifests_writable: boolean;
+  /** True on desktop, where the operator token is not required. */
+  manifests_writable_without_token: boolean;
+}
+
+/** One drive's scan outcome. `scanned: false` is INDETERMINATE, not empty. */
+export interface AccountScan {
+  account_id: string;
+  scanned: boolean;
+  manifests_found: number;
+  reason?: string;
+}
+
+export interface ManifestCoverageCounts {
+  files: number;
+  covered: number;
+  partially_covered: number;
+  uncovered: number;
+  damaged: number;
+  indeterminate: number;
+}
+
+export interface BackfillResult {
+  file_id: string;
+  state: 'written' | 'already_covered' | 'skipped_damaged' | 'indeterminate' | 'failed' | 'uncovered';
+  copies: number;
+  accounts: number;
+  reason?: string;
+}
+
+export interface BackfillReport {
+  dry_run: boolean;
+  complete: boolean;
+  incomplete_reasons?: string[];
+  accounts: AccountScan[];
+  coverage: ManifestCoverageCounts;
+  results: BackfillResult[];
+}
+
+export interface ReconstructReport {
+  dry_run: boolean;
+  complete: boolean;
+  incomplete_reasons?: string[];
+  accounts: AccountScan[];
+  manifests_found: number;
+  manifests_unreadable: number;
+  files_recovered: number;
+  shards_recovered: number;
+  folders_recovered: number;
+  files_already_present: number;
+  shards_unresolved: number;
+}
+
 export interface Folder {
   id: string;
   parent_id: string | null;
@@ -243,6 +301,12 @@ interface RequestOptions {
   /** Skips the token refresh, for the auth endpoints themselves. */
   anonymous?: boolean;
   signal?: AbortSignal;
+  /**
+   * Extra headers. Used only for the operator token on the system routes,
+   * which is a second credential deliberately separate from the session — see
+   * docs/BACKUP.md.
+   */
+  headers?: Record<string, string>;
 }
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
@@ -258,6 +322,13 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     const token = await ensureToken();
     if (!token) throw new ApiError(401, 'unauthorized', 'Sign in to continue.');
     headers.Authorization = `Bearer ${token}`;
+  }
+
+  // Applied last, but it cannot overwrite Authorization: the operator token is
+  // an ADDITIONAL credential, never a substitute for the session.
+  for (const [k, v] of Object.entries(opts.headers ?? {})) {
+    if (k.toLowerCase() === 'authorization') continue;
+    headers[k] = v;
   }
 
   const send = () =>
@@ -375,6 +446,50 @@ export const api = {
       body: { current_password: currentPassword, new_password: newPassword },
     });
     setSession(s);
+  },
+
+  /**
+   * Reads which master key this instance is running under, and whether the
+   * operator token is configured.
+   *
+   * THERE IS DELIBERATELY NO COUNTERPART THAT SENDS A KEY. The master key must
+   * be in the environment before startup — key_id verification refuses to boot
+   * on a mismatch, and every subsystem derives from the keyring during wiring.
+   * A field that accepted one here would be taking it after everything that
+   * needs it has already run.
+   */
+  async recoveryStatus(): Promise<RecoveryStatus> {
+    return request<RecoveryStatus>('/api/system/recovery');
+  },
+
+  /** Reads manifest coverage. READ-ONLY: writes nothing to any drive. */
+  async manifestCoverage(): Promise<BackfillReport> {
+    return request<BackfillReport>('/api/system/manifests/coverage');
+  },
+
+  /**
+   * Writes manifests for files that lack them.
+   *
+   * Requires the operator token, which the caller supplies — the same gate as
+   * the database dump, because this writes to every connected drive.
+   */
+  async backfillManifests(operatorToken: string, rewrite = false): Promise<BackfillReport> {
+    const q = rewrite ? '?rewrite=true' : '';
+    return request<BackfillReport>(`/api/system/manifests/backfill${q}`, {
+      method: 'POST',
+      headers: { 'X-Skein-Backup-Token': operatorToken },
+    });
+  },
+
+  /**
+   * Rebuilds database rows from the manifests on the drives.
+   *
+   * `dryRun` previews without writing — the UI scans first and applies only
+   * after the user has seen what was found.
+   */
+  async reconstruct(dryRun = false): Promise<ReconstructReport> {
+    const q = dryRun ? '?dry_run=true' : '';
+    return request<ReconstructReport>(`/api/system/reconstruct${q}`, { method: 'POST' });
   },
 
   /**

@@ -127,6 +127,19 @@ type Querier interface {
 	// acting on behalf of a request and so has no user to scope by.
 	//
 	ListActiveAccountsForSync(ctx context.Context) ([]ConnectedAccount, error)
+	// ListAllFilesPage returns one page of EVERY live file a user owns, in every
+	// folder at every depth.
+	//
+	// THE ABSENCE OF A folder_id PREDICATE IS THE POINT. ListFiles above filters
+	// `folder_id IS NOT DISTINCT FROM $folder_id`, so passing NULL there means the
+	// ROOT folder rather than "everywhere" — which is how reconcile came to check
+	// 2 of 20 files while reporting itself complete (known issue #50). Whole-
+	// library operations use this query; folder browsing uses that one.
+	//
+	// Keyset-paginated on (created_at, id) exactly as ListFiles is, so a library
+	// larger than one page is still read in full without OFFSET re-scanning.
+	//
+	ListAllFilesPage(ctx context.Context, arg ListAllFilesPageParams) ([]File, error)
 	ListChildFolders(ctx context.Context, arg ListChildFoldersParams) ([]Folder, error)
 	ListConnectedAccounts(ctx context.Context, userID uuid.UUID) ([]ConnectedAccount, error)
 	ListFileShards(ctx context.Context, fileID uuid.UUID) ([]FileShard, error)
@@ -175,6 +188,17 @@ type Querier interface {
 	//
 	MarkSessionUsed(ctx context.Context, id uuid.UUID) (Session, error)
 	NextAccountOrdinal(ctx context.Context, userID uuid.UUID) (int32, error)
+	// RebindAppFolderID overwrites the folder id unconditionally.
+	//
+	// The single-shot SetAppFolderID above is right for first use and wrong for
+	// recovery, which exists precisely to correct a value that is already set and
+	// already wrong: a rebuilt database resolves a folder by a name derived from
+	// the user id, the new user id derives a different name, and the account ends
+	// up bound to a fresh empty folder while its shards sit in the old one. Only
+	// reconstruction may call this, and only with a folder it has just read
+	// claimed manifests out of.
+	//
+	RebindAppFolderID(ctx context.Context, arg RebindAppFolderIDParams) error
 	// RecordReconciledHealth writes a COMPLETE reconcile run's finding for one
 	// file: the derived status and the moment the evidence was gathered.
 	//
