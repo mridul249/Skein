@@ -76,6 +76,9 @@ const files: FileItem[] = [
     sha256: 'a3f21c00000000000000000000000000000000000000000000000000000c9e1c',
     created_at: ago(2),
     updated_at: ago(2),
+    // Never reconciled. Distinct from "reconciled and healthy": the badge must
+    // not claim freshness for evidence that was never gathered.
+    reconciled_at: null,
     // Shard 2 is orphaned: account_id null, the state a disconnect leaves
     // behind today (known issue #19). It must not borrow drive 1's colour.
     shards: [0, 1, 2].map((i) => ({
@@ -96,6 +99,9 @@ const files: FileItem[] = [
     status: 'ready',
     created_at: ago(5),
     updated_at: ago(5),
+    // Reconciled and found healthy. A timestamp with status 'ready' is a
+    // different fact from reconciled_at: null above.
+    reconciled_at: ago(1),
     shards: [
       {
         index: 0,
@@ -194,6 +200,7 @@ const previewFiles: FileItem[] = [
     status: 'ready',
     created_at: ago(1),
     updated_at: ago(1),
+    reconciled_at: null,
     shards: [
       { index: 0, account_id: 'drive-1', size_bytes: 400, plain_size_bytes: 344, plain_offset: 0 },
     ],
@@ -208,6 +215,7 @@ const previewFiles: FileItem[] = [
     status: 'ready',
     created_at: ago(2),
     updated_at: ago(2),
+    reconciled_at: null,
     shards: [
       { index: 0, account_id: 'drive-1', size_bytes: 1050000, plain_size_bytes: 1048576, plain_offset: 0 },
       { index: 1, account_id: 'drive-2', size_bytes: 1050000, plain_size_bytes: 1048576, plain_offset: 1048576 },
