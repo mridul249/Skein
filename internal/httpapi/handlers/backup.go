@@ -44,7 +44,10 @@ type System struct {
 	keyring  *skcrypto.Keyring
 	backfill ManifestBackfiller
 	coverage ManifestBackfiller
-	log      *slog.Logger
+	// manifestsOpen drops the operator token for the manifest routes on the
+	// desktop build. See AllowWithoutOperatorToken.
+	manifestsOpen bool
+	log           *slog.Logger
 }
 
 // SetKeyring wires the master keyring for the key-export route. Nil leaves

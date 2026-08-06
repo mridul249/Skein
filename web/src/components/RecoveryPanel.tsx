@@ -35,7 +35,7 @@ import {
 export function RecoveryPanel() {
   const [status, setStatus] = useState<RecoveryStatus | null>(null);
   const [coverage, setCoverage] = useState<BackfillReport | null>(null);
-  const [busy, setBusy] = useState<'' | 'coverage' | 'backfill' | 'scan' | 'apply'>('');
+  const [busy, setBusy] = useState<'' | 'coverage' | 'backfill' | 'rewrite' | 'scan' | 'apply'>('');
   const [error, setError] = useState('');
 
   // The operator token, held only in component state for the length of one
@@ -70,11 +70,11 @@ export function RecoveryPanel() {
 
   const verdict = coverageVerdict(coverage);
 
-  async function runBackfill() {
-    setBusy('backfill');
+  async function runBackfill(rewrite = false) {
+    setBusy(rewrite ? 'rewrite' : 'backfill');
     setError('');
     try {
-      const report = await api.backfillManifests(token);
+      const report = await api.backfillManifests(token, rewrite);
       setBackfillReport(report);
       setCoverage(report);
     } catch (err) {
@@ -189,15 +189,18 @@ export function RecoveryPanel() {
           </p>
         )}
 
-        {verdict !== 'full' && (
-          <div className="mt-3 space-y-2">
-            {!status?.backup_token_set ? (
-              <p className="text-caption text-muted">
-                Writing manifests needs <code>SKEIN_BACKUP_TOKEN</code> set on the
-                server. It is the same operator token the database backup uses.
-              </p>
-            ) : (
-              <>
+        <div className="mt-3 space-y-2">
+          {!status?.manifests_writable ? (
+            <p className="text-caption text-muted">
+              Writing manifests needs <code>SKEIN_BACKUP_TOKEN</code> set on the
+              server. It is the same operator token the database backup uses.
+            </p>
+          ) : (
+            <>
+              {/* The token field appears only when the server actually wants
+                  one. On desktop the person clicking IS the operator, so
+                  asking for a token would be a field nobody can fill in. */}
+              {!status.manifests_writable_without_token && (
                 <label className="block text-caption text-muted">
                   Operator token
                   <input
@@ -209,19 +212,48 @@ export function RecoveryPanel() {
                     placeholder="SKEIN_BACKUP_TOKEN"
                   />
                 </label>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                {verdict !== 'full' && (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={busy !== '' || (!status.manifests_writable_without_token && token === '')}
+                    onClick={() => void runBackfill(false)}
+                    data-backfill
+                  >
+                    {busy === 'backfill' ? 'Writing manifests…' : 'Write missing manifests'}
+                  </button>
+                )}
+
+                {/*
+                  REPAIR IS OFFERED EVEN AT FULL COVERAGE, and that is the
+                  point of it. A manifest written by an older version can be
+                  present and complete while missing a field added later — so
+                  coverage reads 100% and the library is still unrecoverable
+                  after a database rebuild. Ordinary backfill skips those files
+                  precisely because a manifest is already there.
+                */}
                 <button
                   type="button"
-                  className="btn-primary"
-                  disabled={busy !== '' || token === ''}
-                  onClick={() => void runBackfill()}
-                  data-backfill
+                  className={verdict === 'full' ? 'btn-primary' : 'btn-ghost'}
+                  disabled={busy !== '' || (!status.manifests_writable_without_token && token === '')}
+                  onClick={() => void runBackfill(true)}
+                  data-rewrite
                 >
-                  {busy === 'backfill' ? 'Writing manifests…' : 'Write missing manifests'}
+                  {busy === 'rewrite' ? 'Repairing…' : 'Repair all manifests'}
                 </button>
-              </>
-            )}
-          </div>
-        )}
+              </div>
+
+              <p className="text-caption text-muted">
+                Repair rewrites every manifest from the database. Run it once after
+                updating Skein, so files uploaded by an older version can still be
+                recovered if you lose the database.
+              </p>
+            </>
+          )}
+        </div>
 
         {backfillReport && (
           <div className="mt-3 rounded border border-line p-3 text-caption">

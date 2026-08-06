@@ -263,6 +263,13 @@ func (s *Server) mountSystem(api chi.Router) {
 	h.SetKeyring(s.deps.Keyring)
 	if s.deps.Files != nil {
 		h.SetBackfiller(s.deps.Files)
+		// On desktop the server is loopback-only inside the user's own
+		// session and the person at the keyboard IS the operator, so the
+		// manifest routes do not need a token. Key export and the database
+		// dump still do — see AllowWithoutOperatorToken.
+		if s.deps.DesktopConnect != nil {
+			h.AllowWithoutOperatorToken()
+		}
 	}
 
 	api.Route("/system", func(g chi.Router) {
