@@ -1,4 +1,28 @@
 {
+  // A SOLUTION FILE. `tsc -b` follows the references below and builds each
+  // referenced project with its own options; "files": [] is what makes this
+  // config build nothing itself. `npm run typecheck` is the gate.
+  //
+  // compilerOptions here are NOT used by the build. They exist for the EDITOR.
+  // VS Code opens a .tsx file, walks up to the nearest tsconfig.json, finds a
+  // project that includes no files, and falls back to implicit defaults with
+  // no "jsx" and no DOM lib -- so every JSX tag reports "JSX element implicitly
+  // has type 'any' because no interface 'JSX.IntrinsicElements' exists" while
+  // the real build exits 0. Editor errors the build does not report are how a
+  // genuine error gets dismissed as noise, so the fallback is made correct
+  // rather than left to each developer's settings.
+  //
+  // Keep "jsx" and "lib" in step with tsconfig.app.json. Nothing else needs to
+  // match: this is a fallback for hover and squiggles, not a second gate.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "noEmit": true
+  },
   "files": [],
-  "references": [{ "path": "./tsconfig.app.json" }]
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tests/tsconfig.json" }]
 }

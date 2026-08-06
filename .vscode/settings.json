@@ -1,0 +1,31 @@
+{
+  "//": [
+    "WHY THIS FILE EXISTS.",
+    "",
+    "web/tsconfig.json is a SOLUTION file: `\"files\": []` plus a reference to",
+    "tsconfig.app.json. That is the standard Vite layout and `tsc -b` handles it",
+    "correctly, following the reference and type-checking src and tests/browser.",
+    "",
+    "The editor does not. VS Code opens a .tsx file, walks up to the nearest",
+    "tsconfig.json, finds a project that includes NO files, and falls back to",
+    "implicit defaults -- which have no \"jsx\": \"react-jsx\" and no DOM lib. Every",
+    "JSX tag then reports \"JSX element implicitly has type 'any' because no",
+    "interface 'JSX.IntrinsicElements' exists\", while `npm run typecheck` exits 0.",
+    "",
+    "Pointing the TS server at the real project resolves it. Committed rather than",
+    "left to each developer, because an editor that reports errors the build does",
+    "not is how a real error gets ignored as noise.",
+    "",
+    "The same empty-root-project trap caused a shipped build failure on",
+    "2026-08-06: `tsc --noEmit -p tsconfig.json` was run as a gate, checked",
+    "nothing, and exited 0. See the note in the Makefile's lint target -- always",
+    "use the project's own `npm run typecheck`."
+  ],
+  "typescript.tsdk": "web/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.tsserver.experimental.enableProjectDiagnostics": true,
+  "eslint.workingDirectories": [{ "directory": "web", "changeProcessCWD": true }],
+  "[typescript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[typescriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "gopls": { "build.buildFlags": ["-tags=desktop"] }
+}

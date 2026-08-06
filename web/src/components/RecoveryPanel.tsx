@@ -11,6 +11,7 @@ import {
 import {
   coverageSummary,
   coverageVerdict,
+  isWarningLine,
   restoreSummary,
   tallyBackfill,
   unscannedAccounts,
@@ -100,6 +101,12 @@ export function RecoveryPanel() {
   }
 
   // STEP TWO, and only reachable from a scan the user has read.
+  //
+  // THE SCAN IS CLEARED ONLY ON SUCCESS. Clearing it before the request
+  // resolved meant a failed restore left the panel with no scan and no result:
+  // the error line appeared, the preview the user had just read vanished, and
+  // the only way back was to scan again. A failure should cost nothing — the
+  // preview stays put so the button can simply be pressed again.
   async function runApply() {
     setBusy('apply');
     setError('');
@@ -137,7 +144,7 @@ export function RecoveryPanel() {
           <code>SKEIN_MASTER_KEY</code>, before starting Skein. Skein refuses to start if
           the key does not match this database, so a wrong key fails immediately rather
           than part-way through a restore. Compare the ID above with the{' '}
-          <code>Key ID:</code> line in your exported key file — see{' '}
+          <code>Key ID:</code> line in your exported key file - see{' '}
           <code>docs/BACKUP.md</code>.
         </p>
         <p className="mt-2 text-caption text-muted">
@@ -312,6 +319,19 @@ export function RecoveryPanel() {
               <li>{scan.folders_recovered} folders recreated</li>
               <li>{scan.files_already_present} files already present</li>
             </ul>
+            {/*
+              A shard that cannot be located means a file that will list and
+              then fail to download. Warned in the PREVIEW, not just after the
+              fact, so the choice to proceed is an informed one.
+            */}
+            {scan.shards_unresolved > 0 && (
+              <p className="text-caption text-warning">
+                {scan.shards_unresolved} shard
+                {scan.shards_unresolved === 1 ? '' : 's'} could not be found on any drive that
+                was read. Files missing shards will appear here but will not download. Connect
+                every drive you used, then scan again.
+              </p>
+            )}
             {unscannedAccounts(scan).length > 0 && (
               <ul className="space-y-0.5 text-caption text-warning">
                 {unscannedAccounts(scan).map((reason, i) => (
@@ -341,12 +361,19 @@ export function RecoveryPanel() {
 
         {applied && (
           <div className="mt-3 space-y-1 rounded border border-line p-3" data-restore-result>
+            {/*
+              isWarningLine lives beside restoreSummary rather than here: a
+              component matching on wording it does not own drifts from it. An
+              inline /incomplete/ test did exactly that, rendering "some files
+              here cannot be downloaded yet" in muted grey — the calmest
+              styling on the panel for the most alarming thing it can say.
+            */}
             {restoreSummary(applied).map((line, i) => (
               <p
                 key={i}
                 className={clsx(
                   'text-caption',
-                  /incomplete/.test(line) ? 'text-warning' : 'text-muted',
+                  isWarningLine(line) ? 'text-warning' : 'text-muted',
                 )}
               >
                 {line}
