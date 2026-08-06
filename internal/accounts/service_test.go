@@ -21,6 +21,18 @@ import (
 	"github.com/mridul249/Skein/internal/storage"
 )
 
+// A LINK FIXTURE MUST SUPPLY A REFRESH TOKEN.
+//
+// Fourteen call sites here used &oauth2.Token{AccessToken: "tok"} with no
+// refresh token, which models a connection Google does not produce on a first
+// consent — and which, since known issue #34 was fixed, is by definition an
+// account that cannot be kept alive. Four tests then asserted that account
+// reads `active`, so the #34 fix turned them red.
+//
+// The fixtures were wrong, not the rule: they were asserting healthy behaviour
+// of a connection that is broken the moment it is stored. Corrected 2026-08-06
+// to carry RefreshToken. If a new test here wants an account with no refresh
+// token, that is what norefresh_test.go is for.
 func newTestService(t *testing.T, withOAuth bool) (*Service, conformanceStore, *skcrypto.Keyring) {
 	t.Helper()
 
@@ -303,7 +315,7 @@ func TestOrdinalsAreAssignedInConnectionOrder(t *testing.T) {
 	var got []int32
 	for i, sub := range []string{"a", "b", "c"} {
 		acct, err := svc.linkGoogleAccount(ctx, userID,
-			&oauth2.Token{AccessToken: "tok"},
+			&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"},
 			googleProfile{Sub: sub, Email: sub + "@example.com"})
 		if err != nil {
 			t.Fatalf("link %d = %v", i, err)
@@ -327,7 +339,7 @@ func TestAccountsAreScopedToTheirOwner(t *testing.T) {
 	ctx := context.Background()
 
 	acct, err := svc.linkGoogleAccount(ctx, owner,
-		&oauth2.Token{AccessToken: "tok"},
+		&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"},
 		googleProfile{Sub: "sub", Email: "a@example.com"})
 	if err != nil {
 		t.Fatalf("link = %v", err)
@@ -358,7 +370,7 @@ func TestDisconnect(t *testing.T) {
 	ctx := context.Background()
 
 	acct, err := svc.linkGoogleAccount(ctx, userID,
-		&oauth2.Token{AccessToken: "tok"},
+		&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"},
 		googleProfile{Sub: "sub", Email: "a@example.com"})
 	if err != nil {
 		t.Fatalf("link = %v", err)
@@ -422,7 +434,7 @@ func TestReconnectReusesTheSameAccountRow(t *testing.T) {
 	ctx := context.Background()
 	profile := googleProfile{Sub: "sub", Email: "a@example.com"}
 
-	acct, err := svc.linkGoogleAccount(ctx, userID, &oauth2.Token{AccessToken: "tok"}, profile)
+	acct, err := svc.linkGoogleAccount(ctx, userID, &oauth2.Token{AccessToken: "tok", RefreshToken: "rt"}, profile)
 	if err != nil {
 		t.Fatalf("link = %v", err)
 	}
@@ -430,7 +442,7 @@ func TestReconnectReusesTheSameAccountRow(t *testing.T) {
 		t.Fatalf("Disconnect() = %v", derr)
 	}
 
-	again, rerr := svc.linkGoogleAccount(ctx, userID, &oauth2.Token{AccessToken: "tok2"}, profile)
+	again, rerr := svc.linkGoogleAccount(ctx, userID, &oauth2.Token{AccessToken: "tok2", RefreshToken: "rt2"}, profile)
 	if rerr != nil {
 		t.Fatalf("reconnect = %v", rerr)
 	}
@@ -466,12 +478,12 @@ func TestDisconnectedDrivesDisappearFromListings(t *testing.T) {
 	ctx := context.Background()
 
 	keep, err := svc.linkGoogleAccount(ctx, userID,
-		&oauth2.Token{AccessToken: "tok"}, googleProfile{Sub: "keep", Email: "keep@example.com"})
+		&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"}, googleProfile{Sub: "keep", Email: "keep@example.com"})
 	if err != nil {
 		t.Fatalf("link keep = %v", err)
 	}
 	drop, err := svc.linkGoogleAccount(ctx, userID,
-		&oauth2.Token{AccessToken: "tok"}, googleProfile{Sub: "drop", Email: "drop@example.com"})
+		&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"}, googleProfile{Sub: "drop", Email: "drop@example.com"})
 	if err != nil {
 		t.Fatalf("link drop = %v", err)
 	}
@@ -513,7 +525,7 @@ func TestDisconnectInvalidatesCachedBackends(t *testing.T) {
 	ctx := context.Background()
 
 	acct, err := svc.linkGoogleAccount(ctx, userID,
-		&oauth2.Token{AccessToken: "tok"}, googleProfile{Sub: "sub", Email: "a@example.com"})
+		&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"}, googleProfile{Sub: "sub", Email: "a@example.com"})
 	if err != nil {
 		t.Fatalf("link = %v", err)
 	}
@@ -538,7 +550,7 @@ func TestPoolAggregatesCapacity(t *testing.T) {
 	var ids []uuid.UUID
 	for _, sub := range []string{"a", "b", "c"} {
 		acct, err := svc.linkGoogleAccount(ctx, userID,
-			&oauth2.Token{AccessToken: "tok"},
+			&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"},
 			googleProfile{Sub: sub, Email: sub + "@example.com"})
 		if err != nil {
 			t.Fatalf("link = %v", err)
@@ -589,7 +601,7 @@ func TestDisabledAccountsAreExcludedFromThePool(t *testing.T) {
 	ctx := context.Background()
 
 	acct, err := svc.linkGoogleAccount(ctx, userID,
-		&oauth2.Token{AccessToken: "tok"},
+		&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"},
 		googleProfile{Sub: "sub", Email: "a@example.com"})
 	if err != nil {
 		t.Fatalf("link = %v", err)
@@ -646,7 +658,7 @@ func TestSyncMarksARevokedGrantForReauth(t *testing.T) {
 	ctx := context.Background()
 
 	acct, err := svc.linkGoogleAccount(ctx, userID,
-		&oauth2.Token{AccessToken: "tok"},
+		&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"},
 		googleProfile{Sub: "sub", Email: "a@example.com"})
 	if err != nil {
 		t.Fatalf("link = %v", err)
@@ -678,7 +690,7 @@ func TestSyncKeepsAccountActiveOnATransientError(t *testing.T) {
 	ctx := context.Background()
 
 	acct, err := svc.linkGoogleAccount(ctx, userID,
-		&oauth2.Token{AccessToken: "tok"},
+		&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"},
 		googleProfile{Sub: "sub", Email: "a@example.com"})
 	if err != nil {
 		t.Fatalf("link = %v", err)
@@ -708,7 +720,7 @@ func TestSyncDoesNotMarkReauthOnARateLimit(t *testing.T) {
 	ctx := context.Background()
 
 	acct, err := svc.linkGoogleAccount(ctx, userID,
-		&oauth2.Token{AccessToken: "tok"},
+		&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"},
 		googleProfile{Sub: "sub", Email: "a@example.com"})
 	if err != nil {
 		t.Fatalf("link = %v", err)

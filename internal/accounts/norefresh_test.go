@@ -2,6 +2,8 @@ package accounts
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -178,5 +180,98 @@ func TestReconnectingWithoutARefreshTokenKeepsTheStoredOne(t *testing.T) {
 		t.Errorf("status = %q, want %q: this account still holds a usable refresh "+
 			"token, so flagging it would be a false alarm and would train the user "+
 			"to ignore the badge", again.Status, StatusActive)
+	}
+}
+
+// AN ALREADY-AFFECTED ACCOUNT MUST STAY FLAGGED THROUGH A SUCCESSFUL SYNC.
+//
+// The creation-time check does not reach accounts stored before it existed, so
+// the flag has to survive the thing that runs next: the quota sync, every five
+// minutes.
+//
+// And a successful sync is exactly what an unrefreshable account produces while
+// its access token is still valid — the quota read works fine. syncAccount
+// clears needs_reauth on any success, which is right for a revoked grant that
+// has been re-authorised and WRONG here: it would wipe the warning within
+// minutes and leave the green badge back on a drive that is still doomed.
+func TestASuccessfulSyncDoesNotClearTheNoRefreshTokenFlag(t *testing.T) {
+	svc, store, _ := newTestService(t, true)
+	userID := uuid.New()
+	ctx := context.Background()
+
+	acct, err := svc.linkGoogleAccount(ctx, userID,
+		&oauth2.Token{AccessToken: "ya29.a1", Expiry: time.Now().Add(time.Hour)},
+		googleProfile{Sub: "sub-1", Email: "drive@example.com"})
+	if err != nil {
+		t.Fatalf("linkGoogleAccount() = %v", err)
+	}
+	if acct.Status != StatusNeedsReauth {
+		t.Fatalf("precondition: status = %q, want %q", acct.Status, StatusNeedsReauth)
+	}
+
+	stored, err := store.GetAccount(ctx, userID, acct.ID)
+	if err != nil {
+		t.Fatalf("GetAccount() = %v", err)
+	}
+
+	// The decision a successful sync makes about this account's status.
+	if got := statusAfterSuccessfulSync(stored); got != StatusNeedsReauth {
+		t.Errorf("a successful sync would set status %q, want %q.\n"+
+			"The quota read succeeds while the access token lives, so this fires "+
+			"within minutes and puts a green badge back on a drive that cannot be "+
+			"refreshed.", got, StatusNeedsReauth)
+	}
+}
+
+// The converse: a drive that WAS revoked and has since been re-authorised must
+// still go back to active on a successful sync. That is the behaviour this
+// guard must not break.
+func TestASuccessfulSyncStillClearsAnOrdinaryReauthFlag(t *testing.T) {
+	stored := StoredAccount{
+		Account:         Account{Status: StatusNeedsReauth},
+		RefreshTokenEnc: []byte("a sealed refresh token"),
+	}
+	if got := statusAfterSuccessfulSync(stored); got != StatusActive {
+		t.Errorf("status = %q, want %q; an account holding a refresh token that "+
+			"syncs successfully has recovered", got, StatusActive)
+	}
+}
+
+// THE CALL SITE, NOT JUST THE PREDICATE.
+//
+// The two tests above pin statusAfterSuccessfulSync's decision, and a mutation
+// proved that is not enough: replacing the call in syncAccount with a bare
+// StatusActive left both of them green, because neither reaches the call site.
+// A correct function nobody calls is the same bug it was written to fix.
+//
+// syncAccount needs a real provider backend and OAuth config to run, which is
+// a large harness for one branch. Reading the source is the cheaper honest
+// check: it asserts the decision is TAKEN FROM the predicate rather than
+// hardcoded, which is precisely what the mutation changed.
+func TestSyncAccountAsksTheRefreshabilityPredicate(t *testing.T) {
+	body, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatalf("read service.go: %v", err)
+	}
+	src := string(body)
+
+	idx := strings.Index(src, "func (s *Service) syncAccount(")
+	if idx < 0 {
+		t.Fatal("syncAccount not found; this test is not reading what it thinks")
+	}
+	end := strings.Index(src[idx:], "\n}\n")
+	if end < 0 {
+		t.Fatal("could not find the end of syncAccount")
+	}
+	fn := src[idx : idx+end]
+
+	if !strings.Contains(fn, "statusAfterSuccessfulSync(") {
+		t.Error("syncAccount does not call statusAfterSuccessfulSync; a successful quota " +
+			"read will clear needs_reauth unconditionally, wiping the no-refresh-token " +
+			"warning within one five-minute tick")
+	}
+	if strings.Contains(fn, "SetAccountStatus(ctx, acct.ID, StatusActive") {
+		t.Error("syncAccount sets StatusActive directly; the status after a successful " +
+			"sync must come from statusAfterSuccessfulSync")
 	}
 }

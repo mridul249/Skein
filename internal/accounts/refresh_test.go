@@ -239,7 +239,7 @@ func TestRefreshFailureTransitionsOnlyOnARevokedGrant(t *testing.T) {
 			ctx := context.Background()
 
 			acct, err := svc.linkGoogleAccount(ctx, userID,
-				&oauth2.Token{AccessToken: "tok"},
+				&oauth2.Token{AccessToken: "tok", RefreshToken: "rt"},
 				googleProfile{Sub: "sub", Email: "a@example.com"})
 			if err != nil {
 				t.Fatalf("link = %v", err)

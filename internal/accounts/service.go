@@ -378,7 +378,7 @@ func (s *Service) linkGoogleAccount(ctx context.Context, userID uuid.UUID, token
 		if uerr != nil {
 			return Account{}, fmt.Errorf("update account tokens: %w", uerr)
 		}
-		return updated.Account, nil
+		return s.settleRefreshability(ctx, updated)
 
 	case errors.Is(err, skerr.ErrNotFound):
 		ordinal, oerr := s.store.NextOrdinal(ctx, userID)
@@ -404,11 +404,73 @@ func (s *Service) linkGoogleAccount(ctx context.Context, userID uuid.UUID, token
 			}
 			return Account{}, fmt.Errorf("create account: %w", cerr)
 		}
-		return created.Account, nil
+		return s.settleRefreshability(ctx, created)
 
 	default:
 		return Account{}, fmt.Errorf("look up account: %w", err)
 	}
+}
+
+// noRefreshTokenReason is what the UI shows beside an account Google would not
+// issue a refresh token for. One constant because two call sites write it —
+// creation and sync — and a status whose explanation depends on which path set
+// it is a status that reads as flapping.
+const noRefreshTokenReason = "Google did not return a refresh token for this drive, so Skein " +
+	"cannot keep it connected once the current session expires. Reconnect it."
+
+// settleRefreshability sets the account's status from whether it can actually
+// be refreshed, and is the fix for known issue #34.
+//
+// AN ACCOUNT WITH NO REFRESH TOKEN IS ALREADY BROKEN, it just does not know it
+// yet. Google returns one only on the first consent for a client, or when
+// prompt=consent forces re-issue; without it the account works until the
+// access token expires — typically within the hour — and then fails every
+// Drive operation forever, while still showing as active.
+//
+// A drive that quietly stops working, with a green badge beside it, is
+// indistinguishable from Skein having lost the data. So it is detected here,
+// at the moment it becomes true, rather than at the first 401 the user hits.
+//
+// IT READS THE STORED ROW, NOT THE TOKEN THAT WAS JUST EXCHANGED, and that
+// distinction is the whole correctness of it. UpdateAccountTokens COALESCEs
+// the refresh envelope, so a re-consent that omits one KEEPS the existing
+// token and the account remains perfectly refreshable. Deciding from the
+// exchange would flag a healthy account every time Google declined to reissue,
+// which is most reconnects — and a badge that cries wolf is one the user
+// learns to ignore.
+//
+// No fourth state: needs_reauth is exactly right here. Reconnecting genuinely
+// fixes it, which is what that state means and what its button does.
+func (s *Service) settleRefreshability(ctx context.Context, stored StoredAccount) (Account, error) {
+	acct := stored.Account
+
+	// Never overwrite disabled. A disconnected account is not awaiting reauth,
+	// and resurrecting it into an actionable state would offer the user a
+	// Reconnect button for a drive they deliberately removed.
+	if acct.Status == StatusDisabled {
+		return acct, nil
+	}
+
+	want, reason := StatusActive, ""
+	if len(stored.RefreshTokenEnc) == 0 {
+		want = StatusNeedsReauth
+		reason = noRefreshTokenReason
+	}
+
+	if acct.Status == want && stored.LastError == reason {
+		return acct, nil
+	}
+	if err := s.store.SetAccountStatus(ctx, acct.ID, want, reason); err != nil {
+		return Account{}, fmt.Errorf("set account status: %w", err)
+	}
+	if want == StatusNeedsReauth {
+		s.log.WarnContext(ctx, "connected a drive with no refresh token; it needs reconnecting",
+			slog.String("account_id", acct.ID.String()),
+			slog.String("email", acct.Email))
+	}
+
+	acct.Status = want
+	return acct, nil
 }
 
 // encryptTokens seals both tokens under a key derived from the master key and
@@ -614,12 +676,39 @@ func (s *Service) syncAccount(ctx context.Context, acct StoredAccount) error {
 	if err := s.store.UpsertCapacity(ctx, acct.ID, quota.TotalBytes, quota.UsedBytes); err != nil {
 		return fmt.Errorf("store capacity: %w", err)
 	}
-	if acct.Status != StatusActive {
-		if err := s.store.SetAccountStatus(ctx, acct.ID, StatusActive, ""); err != nil {
+	if want := statusAfterSuccessfulSync(acct); acct.Status != want {
+		reason := ""
+		if want == StatusNeedsReauth {
+			reason = noRefreshTokenReason
+		}
+		if err := s.store.SetAccountStatus(ctx, acct.ID, want, reason); err != nil {
 			return fmt.Errorf("clear account status: %w", err)
 		}
 	}
 	return nil
+}
+
+// statusAfterSuccessfulSync decides what a successful quota read means for an
+// account's status.
+//
+// A SUCCESSFUL SYNC IS NOT PROOF THE ACCOUNT IS HEALTHY. Clearing straight to
+// active is right for the case this was written for — a revoked grant that the
+// user has since re-authorised — and wrong for known issue #34, because an
+// account with no refresh token reads its quota perfectly well for as long as
+// the access token lives. Unconditional clearing therefore wipes the warning
+// within one five-minute tick and puts a green badge back on a drive that is
+// still going to die.
+//
+// It also carries the creation-time check to accounts that predate it: those
+// rows were stored active, and this is the next thing that touches them.
+//
+// Pure and package-level so the decision is testable without a provider: the
+// bug it prevents is a status transition, not a network call.
+func statusAfterSuccessfulSync(acct StoredAccount) string {
+	if len(acct.RefreshTokenEnc) == 0 {
+		return StatusNeedsReauth
+	}
+	return StatusActive
 }
 
 // recordSyncFailure marks the account so the UI can say what is wrong. A
