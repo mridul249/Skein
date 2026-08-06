@@ -29,6 +29,7 @@ function report(over: Partial<BackfillReport> = {}): BackfillReport {
 
 function restore(over: Partial<ReconstructReport> = {}): ReconstructReport {
   return {
+    dry_run: false,
     complete: true,
     accounts: [],
     manifests_found: 0,
