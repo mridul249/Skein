@@ -2,13 +2,15 @@ import { useEffect, useId, useRef, useState } from 'react';
 import clsx from 'clsx';
 
 import { ApiError, api } from '../lib/api';
+import { RecoveryPanel } from './RecoveryPanel';
 
-type Tab = 'general' | 'accounts' | 'security';
+type Tab = 'general' | 'accounts' | 'security' | 'recovery';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'accounts', label: 'Accounts' },
   { id: 'security', label: 'Security' },
+  { id: 'recovery', label: 'Recovery' },
 ];
 
 interface SettingsProps {
@@ -104,6 +106,7 @@ export function Settings({ open, onClose, email, driveCount, onManageDrives }: S
             <AccountsPanel driveCount={driveCount} onManageDrives={onManageDrives} />
           )}
           {tab === 'security' && <SecurityPanel />}
+          {tab === 'recovery' && <RecoveryPanel />}
         </div>
       </div>
     </div>

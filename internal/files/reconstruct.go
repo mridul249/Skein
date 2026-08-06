@@ -59,6 +59,10 @@ type ReconstructReport struct {
 	// decrypted. Each one is a file that exists and was NOT recovered.
 	ManifestsUnreadable int `json:"manifests_unreadable"`
 
+	// DryRun is true when this report describes what WOULD happen. Nothing was
+	// written.
+	DryRun bool `json:"dry_run"`
+
 	FilesRecovered   int `json:"files_recovered"`
 	ShardsRecovered  int `json:"shards_recovered"`
 	FoldersRecovered int `json:"folders_recovered"`
@@ -94,7 +98,24 @@ type ReconstructReport struct {
 // Google account and therefore see each other's manifest objects; multi-user
 // isolation was established in Session 4 and must not regress here.
 func (s *Service) Reconstruct(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID) (ReconstructReport, error) {
+	return s.reconstruct(ctx, userID, accountIDs, false)
+}
+
+// ReconstructDryRun reports what a reconstruction WOULD recover, writing
+// nothing.
+//
+// The UI's first step. A single button that mutates the database is the wrong
+// shape for an operation someone runs when things have already gone wrong:
+// they should see what was found before anything is written. Sharing one code
+// path with the real run is what makes the preview trustworthy — a separate
+// estimator could disagree with the thing it is previewing.
+func (s *Service) ReconstructDryRun(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID) (ReconstructReport, error) {
+	return s.reconstruct(ctx, userID, accountIDs, true)
+}
+
+func (s *Service) reconstruct(ctx context.Context, userID uuid.UUID, accountIDs []uuid.UUID, dryRun bool) (ReconstructReport, error) {
 	report := ReconstructReport{
+		DryRun:    dryRun,
 		StartedAt: time.Now(),
 		Complete:  true,
 		Accounts:  make([]AccountScan, 0, len(accountIDs)),
@@ -174,7 +195,7 @@ func (s *Service) Reconstruct(ctx context.Context, userID uuid.UUID, accountIDs 
 			continue
 		}
 
-		if err := s.applyManifest(ctx, userID, m, &report); err != nil {
+		if err := s.applyManifest(ctx, userID, m, &report, dryRun); err != nil {
 			report.Complete = false
 			reasons["a file could not be written to the database"] = struct{}{}
 			s.log.WarnContext(ctx, "could not apply a manifest",
@@ -203,7 +224,7 @@ func (s *Service) Reconstruct(ctx context.Context, userID uuid.UUID, accountIDs 
 // ReconstructAll runs reconstruction across every drive the user has
 // connected. It is the entry point the HTTP handler uses; Reconstruct takes
 // explicit account ids so tests can name them.
-func (s *Service) ReconstructAll(ctx context.Context, userID uuid.UUID) (ReconstructReport, error) {
+func (s *Service) ReconstructAll(ctx context.Context, userID uuid.UUID, dryRun bool) (ReconstructReport, error) {
 	if s.accounts == nil {
 		return ReconstructReport{}, fmt.Errorf("files: no account lister wired")
 	}
@@ -211,7 +232,7 @@ func (s *Service) ReconstructAll(ctx context.Context, userID uuid.UUID) (Reconst
 	if err != nil {
 		return ReconstructReport{}, fmt.Errorf("list connected drives: %w", err)
 	}
-	return s.Reconstruct(ctx, userID, ids)
+	return s.reconstruct(ctx, userID, ids, dryRun)
 }
 
 // scanAccount lists one account and fetches every manifest it holds.
@@ -301,7 +322,11 @@ func (s *Service) fetchManifest(ctx context.Context, backend storage.Backend, ob
 const maxManifestBytes = 8 << 20
 
 // applyManifest writes one recovered file and its shards.
-func (s *Service) applyManifest(ctx context.Context, userID uuid.UUID, m Manifest, report *ReconstructReport) error {
+func (s *Service) applyManifest(ctx context.Context, userID uuid.UUID, m Manifest, report *ReconstructReport, dryRun bool) error {
+	if dryRun {
+		return s.previewManifest(ctx, userID, m, report)
+	}
+
 	folderID, err := s.ensureFolderPath(ctx, userID, m.FolderPath, report)
 	if err != nil {
 		return err
@@ -364,6 +389,41 @@ func (s *Service) applyManifest(ctx context.Context, userID uuid.UUID, m Manifes
 		}
 		if added {
 			report.ShardsRecovered++
+		}
+	}
+	return nil
+}
+
+// previewManifest counts what applying this manifest WOULD do, writing
+// nothing. It answers the same questions applyManifest does, from reads only.
+func (s *Service) previewManifest(ctx context.Context, userID uuid.UUID, m Manifest, report *ReconstructReport) error {
+	if _, err := s.store.GetFile(ctx, userID, m.FileID); err == nil {
+		report.FilesAlreadyPresent++
+		return nil
+	}
+	report.FilesRecovered++
+	report.ShardsRecovered += len(m.Shards)
+
+	// A folder is counted as recreated only if no live one of that name exists
+	// under that parent — the same condition EnsureFolder applies.
+	existing, err := s.store.ListFolders(ctx, userID)
+	if err != nil {
+		// Best effort: the FILE counts are what the preview is for, and a
+		// folder count that cannot be computed is worth less than failing the
+		// whole preview over. Logged rather than swallowed so an under-count
+		// is explicable rather than mysterious.
+		s.log.WarnContext(ctx, "could not count recoverable folders for the preview",
+			slog.String("error", err.Error()))
+		return nil
+	}
+	live := map[string]bool{}
+	for _, f := range existing {
+		live[f.Name] = true
+	}
+	for _, name := range m.FolderPath {
+		if !live[name] {
+			report.FoldersRecovered++
+			live[name] = true
 		}
 	}
 	return nil

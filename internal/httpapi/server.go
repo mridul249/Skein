@@ -270,15 +270,35 @@ func (s *Server) mountSystem(api chi.Router) {
 		// alone is sufficient: registration is open, so a session proves very
 		// little, and the token is a static secret.
 		g.Use(middleware.Auth(s.deps.Auth, httpx.WriteError))
-		// Its own budget, not apiRatePerMin. See backupRatePerMin.
-		g.Use(middleware.RateLimit(middleware.NewLimiter(backupRatePerMin)))
-		g.Get("/backup", h.Backup)
-		// Same budget and the same operator token as the dump. The key is a
-		// smaller payload but a larger secret.
-		g.Get("/key-export", h.ExportKey)
-		// Manifest backfill writes to every connected drive, so it takes the
-		// same operator token and the same budget as the dump.
-		g.Post("/manifests/backfill", h.BackfillManifests)
+
+		// TWO BUDGETS, because these routes cost wildly different things.
+		//
+		// Read-only status: session-gated, NO operator token, and NOT on the
+		// 1/min dump budget. It reveals two non-secret facts (which key id is
+		// active, how many files have manifests). Gating it behind the token
+		// would mean the Recovery UI cannot render for an operator who has not
+		// set one — exactly the person most needing to be told that recovery
+		// depends on a key file they may not have. Putting it on the dump
+		// budget would make opening Settings twice in a minute fail.
+		g.Group(func(ro chi.Router) {
+			ro.Use(middleware.RateLimit(middleware.NewLimiter(reconcileRatePerMin)))
+			ro.Get("/recovery", h.RecoveryStatus)
+			// Lists every connected drive through the shared pool, so it sits
+			// on reconcile's budget rather than the general API one.
+			ro.Get("/manifests/coverage", h.ManifestCoverage)
+		})
+
+		// Expensive or secret-bearing: the operator token, on its own 1/min
+		// budget. See backupRatePerMin.
+		g.Group(func(op chi.Router) {
+			op.Use(middleware.RateLimit(middleware.NewLimiter(backupRatePerMin)))
+			op.Get("/backup", h.Backup)
+			// The key is a smaller payload but a larger secret.
+			op.Get("/key-export", h.ExportKey)
+			// Backfill writes to every connected drive, once per file per
+			// account.
+			op.Post("/manifests/backfill", h.BackfillManifests)
+		})
 	})
 }
 
