@@ -19,6 +19,27 @@ import { findChrome, sleep } from './chrome.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(here, '../..');
 
+// FAIL ON THE CAUSE, NOT ON A SYMPTOM 30 SECONDS LATER.
+//
+// chrome.mjs speaks CDP over the WebSocket client built into Node, and carries
+// no `ws` dependency by design. That global arrived in Node 22. On Node 20 it
+// is undefined, and every test dies with
+//
+//   ReferenceError: WebSocket is not defined
+//
+// once per test - 31 identical stacks pointing at chrome.mjs, none of which
+// says "your Node is too old". CI was pinned to 20 and hit exactly this the
+// moment the Vite address bug below stopped masking it. `engines` in
+// package.json is advisory (npm only warns), so the check is enforced here.
+if (typeof WebSocket === 'undefined') {
+  console.error(
+    `browser harness FAILED: this Node (${process.version}) has no global WebSocket.\n` +
+      '  The CDP driver needs Node 22 or newer. Upgrade Node, or run `npm test`\n' +
+      '  for the logic suite, which has no such requirement.',
+  );
+  process.exit(1);
+}
+
 const chrome = findChrome();
 if (!chrome) {
   // A SKIP MUST NOT READ AS A PASS WHERE NOBODY IS WATCHING.
@@ -48,6 +69,12 @@ if (!chrome) {
   process.exit(0);
 }
 
+// THE ONE ADDRESS the server binds, the port is reserved on, and every probe
+// asks for. A single constant rather than three literals, because the bug this
+// file exists to have fixed was exactly those three drifting apart — see the
+// note at the spawn below.
+const HOST = '127.0.0.1';
+
 // A PORT NOBODY ELSE HOLDS, asked of the kernel rather than guessed.
 //
 // This used to be `5200 + random(300)` with --strictPort, which is a race
@@ -61,7 +88,7 @@ function freePort() {
     const srv = createServer();
     srv.unref();
     srv.on('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
+    srv.listen(0, HOST, () => {
       const { port } = srv.address();
       // Closed before Vite binds it. A brief window remains in which another
       // process could take it, but it is far narrower than a random guess,
@@ -72,8 +99,31 @@ function freePort() {
   });
 }
 
+// BIND THE ADDRESS WE PROBE, rather than letting the two be decided separately.
+//
+// THE BUG THIS FIXES, because it cost a green CI run and reads as a flake:
+// with no --host, Vite binds whatever `localhost` RESOLVES to. On GitHub's
+// ubuntu-latest (and inside node:20/node:22 containers) /etc/hosts maps
+// localhost to BOTH ::1 and 127.0.0.1, and Node's default `verbatim` DNS order
+// returns ::1 first — so Vite listens on ::1 ONLY. /proc/net/tcp is empty and
+// /proc/net/tcp6 holds the single listener. The harness then polled the
+// literal 127.0.0.1, got ECONNREFUSED for the full 60s, and printed
+//
+//   browser harness FAILED: vite did not start - it did not answer on
+//   port 44137 within 60s.
+//   VITE v6.4.3 ready in 182 ms
+//
+// which is self-contradictory on its face: Vite HAD started, on an address
+// nobody was asking. Reproduced 2026-08-07 by reading the kernel listener
+// tables under both Node 20 and 22; the Node version is NOT the variable, the
+// resolution of `localhost` is. It passed on the author's machine only because
+// that /etc/hosts maps localhost to 127.0.0.1 alone.
+//
+// Passing --host pins the bind explicitly, so HOST is the one source of truth
+// for both the server and every probe below. 127.0.0.1 is the choice because
+// Chrome must reach it too, and CDP's own endpoint is IPv4.
 const port = await freePort();
-const vite = spawn('npx', ['vite', '--port', String(port), '--strictPort'], {
+const vite = spawn('npx', ['vite', '--port', String(port), '--strictPort', '--host', HOST], {
   cwd: webRoot,
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -106,7 +156,7 @@ async function waitForVite(timeoutMs = 60_000) {
       // back to the viteExited check or to its own deadline. Measured: still
       // hanging after 30s with no timeout set. The whole readiness check
       // becomes an indefinite block, which is worse than the bug it replaced.
-      const res = await fetch(`http://127.0.0.1:${port}/tests/browser/fixture.html`, {
+      const res = await fetch(`http://${HOST}:${port}/tests/browser/fixture.html`, {
         signal: AbortSignal.timeout(2_000),
       });
       if (res.ok) return { ok: true };
@@ -115,7 +165,18 @@ async function waitForVite(timeoutMs = 60_000) {
     }
     await sleep(250);
   }
-  return { ok: false, reason: `it did not answer on port ${port} within ${timeoutMs / 1000}s` };
+  // NAME THE ADDRESS, not just the port. The old text said "vite did not
+  // start", which was flatly untrue in the failure that prompted this: Vite
+  // had started and said so in the log printed directly underneath, on a
+  // different address. An error that contradicts the evidence beside it sends
+  // the reader looking for a startup fault that does not exist.
+  return {
+    ok: false,
+    reason:
+      `nothing answered http://${HOST}:${port} within ${timeoutMs / 1000}s. ` +
+      `If vite reported "ready" below, it bound a DIFFERENT address than the ` +
+      `one probed - check that --host ${HOST} was passed`,
+  };
 }
 
 function describeExit({ code, signal, error }) {
@@ -129,7 +190,7 @@ try {
   const ready = await waitForVite();
   if (!ready.ok) {
     console.error(
-      `browser harness FAILED: vite did not start - ${ready.reason}.\n` +
+      `browser harness FAILED: ${ready.reason}.\n` +
         (viteLog.trim() || '(vite produced no output)'),
     );
     process.exit(1);
@@ -141,7 +202,7 @@ try {
     {
       cwd: webRoot,
       stdio: 'inherit',
-      env: { ...process.env, SKEIN_FIXTURE: `http://127.0.0.1:${port}/tests/browser/fixture.html`, CHROME_BIN: chrome },
+      env: { ...process.env, SKEIN_FIXTURE: `http://${HOST}:${port}/tests/browser/fixture.html`, CHROME_BIN: chrome },
     },
   );
   code = await new Promise((r) => child.on('exit', r));
