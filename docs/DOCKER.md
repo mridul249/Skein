@@ -40,6 +40,17 @@ single lost disk would take both the key and the database.
 The file is gitignored and written 0600, but that is not a substitute for
 moving it.
 
+**On Windows, treat 0600 as decoration.** The mode is a POSIX concept; NTFS
+uses ACLs, and Go's `os` package maps a Unix mode onto them only approximately
+- it controls the read-only attribute, not who can read the file. A file
+written 0600 on Windows is typically readable by any account that can reach the
+path, including other local users and anything running as Administrator. Since
+this file can hold the master key in plaintext, that difference matters: on
+Windows, move it into a password manager and delete it promptly rather than
+relying on the mode to keep it private. This applies to the container's
+`/data` mount when that mount is a Windows host directory, and to any setup
+file the desktop app writes.
+
 **Restarting does not regenerate it.** The entrypoint reads the key back from
 the setup file before generating, so `docker compose down && docker compose up`
 keeps your data readable. If `/data` is not writable, the container refuses to

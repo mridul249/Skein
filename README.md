@@ -115,7 +115,7 @@ $ skein status
 
 ### Interface & UX
 
-* **Native Cross-Platform Desktop App:** Utilizing the Wails framework, Skein hooks directly into native OS features (system tray, file dialogs, and clipboard) for a seamless desktop experience across macOS, Windows, and Linux.
+* **Native Desktop App:** A real windowed application via Wails, not a browser tab - the same Go server running inside a native window, pointed at its own loopback port. Linux is the tested platform; a Windows binary ships as an untested preview (see [Desktop app](#desktop-app)). It uses the OS's native webview (WebKitGTK on Linux, WebView2 on Windows) rather than bundling a browser engine, so the download stays around 20 MB.
 
 * **Embedded React Web UI:** Prefer the browser? Skein serves a sleek, modern web interface directly from the binary itself, complete with a beautiful frontend and real-time state management.
 
@@ -206,6 +206,36 @@ It needs its own **Desktop app** OAuth client, which is a different client from
 the server's Web one and not interchangeable - see
 [docs/SETUP.md](docs/SETUP.md) §3.
 
+#### Windows
+
+`skein-desktop-<version>-windows-amd64.exe` is published from v1.0.0-rc1.
+Download it and run it; there is no installer.
+
+> **Cross-compiled and untested.** This binary is built on Linux and has not
+> been run on Windows. The code paths were reviewed - the config directory
+> resolves through `os.UserConfigDir()` to `%AppData%\skein\`, downloads go to
+> `%USERPROFILE%\Downloads`, and the WebView2 path in the vendored Wails fork
+> is the same one Linux uses - but reviewed is not tested. Treat it as a
+> preview and please report what breaks. The Linux and macOS binaries have been
+> run; this one has not.
+
+Two things Windows will say that are not faults:
+
+**"WebView2 Runtime not installed"** or a window that never appears. Windows 11
+bundles WebView2; **Windows 10 may not have it**. Install the Evergreen
+Runtime from
+[Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/), then
+run Skein again. Skein renders its interface in WebView2, so there is no
+fallback - without it there is no window to show.
+
+**"Windows protected your PC"** from SmartScreen. The binary is not
+code-signed: a certificate costs a few hundred dollars a year, which a
+self-hosted project with no company behind it does not have. Unsigned is not
+the same as unsafe, but you should not take that on trust - **verify the
+checksum first** (see [Verifying a download](#verifying-a-download)), then
+click **More info** → **Run anyway**. If the SHA256 does not match, do not run
+it.
+
 ### Running from source
 
 Building without Docker, running the test suites, and the `make` targets are
@@ -273,6 +303,7 @@ Deliberately out of scope, so nobody files them as bugs.
 | **Removing a drive that still holds files** | Disconnect refuses and names the files instead. A file striped across two drives is destroyed by removing one, so cascading the delete would let "unlink an account" destroy data on a drive you did not touch. A deliberate remove-with-files needs its own confirmation naming the exact files, and is v2. |
 | **Renaming or moving folders** | Manifests record the folder path as a snapshot of names, so a folder renamed after some files were uploaded reconstructs as two folders during recovery - contents split across both. Nothing is lost, but it appears at the moment you are least able to tolerate ambiguity. Correctness needs manifest staleness tracking, which is v2. |
 | **Scheduled reconcile** | On-demand only. `reconciled_at` records when each file was last checked. |
+| **A tested Windows desktop app** | The binary is published and the code paths were reviewed, but it is cross-compiled and has not been run on Windows. Until it has, treat it as a preview: bugs there are expected and wanted, not a supported platform. macOS has no desktop binary at all - build it from source with `make desktop`. |
 
 Known smaller gaps are tracked in the issue register. The top polish item for
 v1.1 is the account colour ramp, which collides with the semantic colours under

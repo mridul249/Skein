@@ -109,6 +109,30 @@ production stack keeps Postgres unpublished and on its own volume.
 set -a && source .env && set +a && ./bin/skein
 ```
 
+**That line is Linux and macOS only.** `set -a` and `source` are POSIX shell
+builtins; PowerShell has neither, and pasting it there fails with
+`The term 'set -a' is not recognized`. The equivalent, which parses `KEY=value`
+lines and skips comments and blanks:
+
+```powershell
+Get-Content .env | Where-Object { $_ -match '^\s*[^#\s]' } | ForEach-Object {
+    $name, $value = $_ -split '=', 2
+    [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim())
+}
+.\skein.exe
+```
+
+This sets the variables for the current PowerShell session only, which matches
+what `set -a` does for a shell. In `cmd.exe`, use
+`for /f "delims=" %i in (.env) do set %i` - though note it does not skip
+comment lines, so strip them first.
+
+The **desktop app reads no `.env` at all**, on any platform - it takes
+`SKEIN_GOOGLE_DESKTOP_CLIENT_ID` and `_SECRET` from the environment, or uses
+credentials compiled in at build time. On Windows, set them through
+System Properties → Environment Variables if you want them to persist across
+reboots, rather than per-session as above.
+
 ### `SKEIN_JWT_SECRET must be at least 32 characters`
 
 `cp .env.example .env` leaves both secrets empty. Generate them:
@@ -117,6 +141,54 @@ set -a && source .env && set +a && ./bin/skein
 openssl rand -base64 32   # SKEIN_MASTER_KEY
 openssl rand -base64 48   # SKEIN_JWT_SECRET
 ```
+
+---
+
+## Windows desktop app
+
+The Windows binary is cross-compiled from Linux and, as of v1.0.0-rc1, has not
+been run on Windows. If you hit something not listed here, it is worth
+reporting rather than assuming it is your setup.
+
+### Nothing happens, or "WebView2 Runtime not installed"
+
+Skein draws its entire interface in WebView2, so without the runtime there is
+no window to show and the process may exit with no visible error. Windows 11
+bundles it; **Windows 10 often does not**.
+
+Install the Evergreen Runtime from
+<https://developer.microsoft.com/microsoft-edge/webview2/> and run Skein again.
+
+### "Windows protected your PC" (SmartScreen)
+
+```
+Microsoft Defender SmartScreen prevented an unrecognized app from starting.
+```
+
+The binary is not code-signed. Verify the checksum first, then **More info** →
+**Run anyway**:
+
+```powershell
+Get-FileHash .\skein-desktop-v1.0.0-rc1-windows-amd64.exe -Algorithm SHA256
+```
+
+Compare against `SHA256SUMS` from the release. If it does not match, do not run
+it. A signing certificate is a recurring cost this project does not currently
+carry; the checksum and the Sigstore signature over `SHA256SUMS` are what
+establish provenance instead.
+
+### A console window opens behind the app
+
+It should not: the release binary is linked with `-H=windowsgui`, and the build
+fails if the PE subsystem field is not `2` (GUI). If you see one, you are
+probably running a self-built binary without that flag. Report it if it came
+from a release.
+
+### Where the database lives
+
+`%AppData%\skein\skein.db` - that is
+`C:\Users\<you>\AppData\Roaming\skein\skein.db`. Downloads land in
+`%USERPROFILE%\Downloads`.
 
 ---
 
