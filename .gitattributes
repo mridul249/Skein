@@ -1,0 +1,51 @@
+# Line endings.
+#
+# WHY THIS FILE EXISTS. Git for Windows defaults to core.autocrlf=true, which
+# checks text files out with CRLF. That is harmless for source Go reads or a
+# YAML parser, and fatal for anything with a shebang: `#!/bin/sh\r` makes the
+# kernel look for an interpreter literally named `/bin/sh\r`, which does not
+# exist. Docker then reports
+#
+#   exec /usr/local/bin/docker-entrypoint.sh: no such file or directory
+#
+# naming the script, while the thing actually missing is the interpreter. The
+# file is present and executable; the error points at the wrong object. That
+# misdirection is what makes it cost an hour rather than a minute.
+#
+# eol=lf is enforced rather than left to `text=auto`, because auto-detection
+# normalises in the repository but still honours the platform default on
+# checkout. These files run on Linux regardless of where they were cloned.
+#
+# The Dockerfile strips CR from the entrypoint as a second layer, for a user
+# whose local git config overrides this file. Belt and braces: this is the
+# correct fix, that one is the one that survives a misconfigured clone.
+
+* text=auto eol=lf
+
+# Explicit, so intent survives someone loosening the wildcard above.
+*.sh        text eol=lf
+*.mjs       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.sql       text eol=lf
+Dockerfile  text eol=lf
+Dockerfile* text eol=lf
+Makefile    text eol=lf
+*.env       text eol=lf
+.env.example text eol=lf
+
+# Binary: never touched, never normalised. A woff2 or a PNG that has been
+# through line-ending conversion is corrupt, and silently so.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+*.otf    binary
+*.pdf    binary
+*.zip    binary
+*.gz     binary
+*.db     binary

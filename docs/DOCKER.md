@@ -154,5 +154,5 @@ server that starts cleanly and serves no UI, silently.
 | `unauthorized_client` when connecting a drive | The Web OAuth client was used for the desktop build, or vice versa. [SETUP.md](SETUP.md) §3. |
 | Container restarts repeatedly | `docker compose logs skein`. The entrypoint prints the reason before exiting. |
 
-More: [SETUP.md](SETUP.md) for the non-Docker paths and the full list of
-settings.
+More: [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for exact error strings, and
+[SETUP.md](SETUP.md) for the non-Docker paths and the full list of settings.

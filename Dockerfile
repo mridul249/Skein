@@ -51,7 +51,12 @@ RUN addgroup -g 10001 -S skein \
 
 COPY --from=gobuild /out/skein /usr/local/bin/skein
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod 0755 /usr/local/bin/skein /usr/local/bin/docker-entrypoint.sh
+# Strip CR before chmod. .gitattributes is the real fix; this survives a clone
+# where the user's core.autocrlf overrides it. A CRLF shebang makes the kernel
+# hunt for `/bin/sh\r` and Docker reports "no such file or directory" naming
+# the SCRIPT, not the missing interpreter.
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
+    && chmod 0755 /usr/local/bin/skein /usr/local/bin/docker-entrypoint.sh
 
 RUN mkdir -p /data && chown skein:skein /data
 VOLUME /data

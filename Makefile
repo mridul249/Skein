@@ -152,12 +152,16 @@ web-dev:
 	cd web && npm run dev
 
 ## dev-db: start the development Postgres (dev only, never for deployment)
+#
+# -f compose.dev.yaml is NOT optional. Bare `docker compose` resolves to
+# compose.yaml, the production stack: that would start postgres on the
+# production volume with no host port, and `make run` could not reach it.
 dev-db:
-	docker compose up -d postgres
+	docker compose -f compose.dev.yaml up -d postgres
 
 ## dev-db-down: stop and remove the development Postgres
 dev-db-down:
-	docker compose down -v
+	docker compose -f compose.dev.yaml down -v
 
 ## tools: install the pinned developer tooling
 tools:

@@ -286,6 +286,7 @@ colour-vision deficiency - measured, documented, and the fix is known.
 | --- | --- |
 | [docs/SETUP.md](docs/SETUP.md) | **Start here.** Prerequisites, OAuth for both client types, every setting, first run |
 | [docs/DOCKER.md](docs/DOCKER.md) | Running with Docker, the generated master key, building the desktop binary |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Exact error strings and what causes them |
 | [docs/INSTALL.md](docs/INSTALL.md) | Step-by-step setup and OAuth client setup |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Environment variables and runtime configuration |
 | [docs/BACKUP.md](docs/BACKUP.md) | Disaster recovery, master key management, and manifest recovery |

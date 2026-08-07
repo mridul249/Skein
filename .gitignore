@@ -10,6 +10,10 @@
 *.test
 /coverage.out
 /backups
+
+# Release artifacts from `make release`. Built, checksummed, and attached to
+# a tag by hand or by CI - never committed.
+/dist
 /web/.test-build
 
 # Docker: generated secrets and the setup report. The master key may be the

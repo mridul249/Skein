@@ -1,0 +1,41 @@
+# Development only: a Postgres for running Skein FROM SOURCE.
+#
+# NOT auto-discovered by Docker, and deliberately so. This was once named
+# docker-compose.yml, which Docker Compose picks up alongside compose.yaml -
+# every command printed
+#
+#   Found multiple config files with supported names: compose.yaml,
+#   docker-compose.yml
+#   Using compose.yaml
+#
+# and then silently ignored this file. `make dev-db` was therefore starting the
+# PRODUCTION stack's postgres, on the production volume, with no host port -
+# so `make run` could not connect to it at all. Renaming it removes the
+# ambiguity; the Makefile now names this file explicitly with -f.
+#
+# To deploy Skein, use compose.yaml. That one runs the server too.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: skein-dev-db
+    environment:
+      POSTGRES_USER: skein
+      POSTGRES_PASSWORD: skein
+      POSTGRES_DB: skein
+    # 5433 on the host, matching SKEIN_DATABASE_URL in .env.example. Bound to
+    # 127.0.0.1 so a development database is never exposed off the machine.
+    # The container still listens on 5432 internally.
+    ports:
+      - "127.0.0.1:5433:5432"
+    # Its own volume, kept separate from the production stack's skein-pgdata:
+    # a `make dev-db-down` wiping a volume must never take real data with it.
+    volumes:
+      - skein-dev-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skein -d skein"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  skein-dev-pgdata:
