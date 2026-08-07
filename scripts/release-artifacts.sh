@@ -16,13 +16,27 @@ set -euo pipefail
 OUT=${OUT:-dist}
 VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}
 
-# The platforms a v1 publishes. Each entry is GOOS/GOARCH.
-#
-# Linux and macOS only, and that is deliberate rather than an oversight:
-# Windows needs its own path handling for the config directory and has never
-# been run, so shipping an untested binary would be a claim the project cannot
-# support. See README "Not in v1".
+# The server platforms a v1 publishes. Each entry is GOOS/GOARCH.
 PLATFORMS=${PLATFORMS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"}
+
+# The Windows DESKTOP binary is built separately, below, because it differs from
+# the server builds in package, in linker flags, and in what it is claiming.
+#
+# The earlier note here said Windows "needs its own path handling for the config
+# directory". That was investigated and found to be wrong: nothing hardcodes
+# ~/.config. internal/db/migrate.go already calls os.UserConfigDir(), which
+# returns %AppData% on Windows, and the download directory falls back through
+# os.UserHomeDir(). The real question was whether the vendored Wails fork's
+# RunWithStartURL patch covers the Windows backend, and it does — the Windows
+# frontend reads the "starturl" context key and returns before the asset server
+# is ever constructed, leaving f.assets nil so WebView2 handles every request as
+# real HTTP. Same property as Linux, reached by an early return instead of an
+# if/else. See third_party/wails-v2.13.0/PATCH.md.
+#
+# WHAT IS STILL TRUE: this binary is cross-compiled from Linux and has not been
+# run on Windows. It is published as untested for that reason, and the release
+# notes must say so rather than implying parity with the Linux builds.
+BUILD_WINDOWS_DESKTOP=${BUILD_WINDOWS_DESKTOP:-1}
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -52,6 +66,54 @@ for platform in $PLATFORMS; do
 
   echo "  $name  $(du -h "$OUT/$name" | cut -f1)"
 done
+
+# ---- Windows desktop --------------------------------------------------------
+#
+# Not part of the PLATFORMS loop: that loop builds ./cmd/skein, the headless
+# server, and this is ./cmd/skein-desktop, the windowed app. It also needs
+# -H=windowsgui, which is meaningless for the others.
+#
+# NO CGO AND NO WAILS CLI, unlike the Linux desktop build. Linux needs cgo to
+# link WebKitGTK, which is why `make desktop` shells out to the wails binary and
+# cannot cross-compile. Windows drives WebView2 through COM, which Go reaches
+# with pure syscall bindings, so a plain `go build` with CGO_ENABLED=0 produces
+# a complete binary from a Linux host with no MinGW and no Windows machine.
+if [ "$BUILD_WINDOWS_DESKTOP" = "1" ]; then
+  name="skein-desktop-${VERSION}-windows-amd64.exe"
+
+  # -H=windowsgui sets the PE Subsystem field to 2 (WINDOWS_GUI) instead of 3
+  # (WINDOWS_CUI). Without it the binary is a console app, and Windows opens a
+  # black terminal window behind the app window that stays for the whole
+  # session. Verified by reading the PE header, not by trusting the flag — see
+  # the check immediately below.
+  CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+    -trimpath \
+    -buildvcs=false \
+    -tags desktop \
+    -ldflags "-s -w -H=windowsgui -X main.version=${VERSION}" \
+    -o "$OUT/$name" \
+    ./cmd/skein-desktop
+
+  # THE FLAG IS VERIFIED, NOT ASSUMED. A typo in the -ldflags string, or a Go
+  # release that stops honouring -H, would silently give back the console
+  # window: the build still succeeds and the binary still runs, so nothing
+  # fails until a user sees a stray terminal. Read the actual byte.
+  #
+  # PE layout: e_lfanew is a uint32 at 0x3C and points at "PE\0\0"; the COFF
+  # header is 20 bytes; Subsystem is a uint16 at offset 68 of the optional
+  # header, which is the same offset for PE32 and PE32+ (the two formats
+  # diverge only after it).
+  subsystem=$(od -An -tu2 -j "$(( $(od -An -tu4 -j 60 -N 4 "$OUT/$name" | tr -d ' ') + 24 + 68 ))" \
+    -N 2 "$OUT/$name" | tr -d ' ')
+  if [ "$subsystem" != "2" ]; then
+    echo "ERROR: $name has PE Subsystem=$subsystem, expected 2 (WINDOWS_GUI)." >&2
+    echo "       -H=windowsgui did not take; the binary would open a console" >&2
+    echo "       window alongside the app. Subsystem 3 is WINDOWS_CUI." >&2
+    exit 1
+  fi
+
+  echo "  $name  $(du -h "$OUT/$name" | cut -f1)  [PE Subsystem=2 GUI, verified]"
+fi
 
 # THE CHECKSUM FILE, GENERATED FROM WHAT IS ACTUALLY THERE rather than from the
 # list above. Deriving it from PLATFORMS would let a silently failed build drop
