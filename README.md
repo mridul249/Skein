@@ -194,22 +194,45 @@ generated. [docs/SETUP.md](docs/SETUP.md) §3 walks through creating them, and
 
 ### Desktop app
 
-A native windowed binary, not a container. Build it with Docker so you do not
-need Go, Node, GTK and WebKit installed:
+A native windowed binary, not a container. It needs its own **Desktop app**
+OAuth client, which is a different client from the server's Web one and not
+interchangeable - see [docs/SETUP.md](docs/SETUP.md) §3. That requirement is
+the same on every platform below.
+
+#### Linux
+
+Build it with Docker so you do not need Go, Node, GTK and WebKit installed:
 
 ```bash
 docker build --target desktop --output type=local,dest=./bin .
 ./bin/skein-desktop
 ```
 
-It needs its own **Desktop app** OAuth client, which is a different client from
-the server's Web one and not interchangeable - see
-[docs/SETUP.md](docs/SETUP.md) §3.
-
 #### Windows
 
+Two ways to get the binary - pick whichever you trust more.
+
+**Download**, and verify before running:
+
 `skein-desktop-<version>-windows-amd64.exe` is published from v1.0.0-rc1.
-Download it and run it; there is no installer.
+There is no installer; download it, verify its checksum (see
+[Verifying a download](#verifying-a-download)), and run it.
+
+**Or build it yourself**, from this repository, with Docker - no MinGW, no
+Windows host, and no GTK/WebKit packages needed, because this target needs no
+cgo at all:
+
+```bash
+docker build --target desktop-windows --output type=local,dest=./bin .
+```
+
+```powershell
+.\bin\skein-desktop.exe
+```
+
+Both paths produce the same binary from the same source and flags - building
+it yourself is not a lesser option, just a different way to reach an identical
+file.
 
 > **Cross-compiled and untested.** This binary is built on Linux and has not
 > been run on Windows. The code paths were reviewed - the config directory
@@ -234,7 +257,16 @@ self-hosted project with no company behind it does not have. Unsigned is not
 the same as unsafe, but you should not take that on trust - **verify the
 checksum first** (see [Verifying a download](#verifying-a-download)), then
 click **More info** → **Run anyway**. If the SHA256 does not match, do not run
-it.
+it. This applies equally to a binary you built yourself with the Docker target
+above - verifying you built what you meant to build is the same exercise as
+verifying a download, just against a hash you compute instead of one you copy.
+
+#### macOS
+
+No Docker path: macOS builds need cgo for the WebView integration, which means
+a cross-toolchain and the macOS SDK, neither of which Docker on a non-macOS
+host can supply. Build from source with `make desktop` on a Mac - see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Running from source
 
