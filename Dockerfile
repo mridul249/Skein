@@ -20,7 +20,21 @@ COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
 COPY web/ ./
-COPY internal/web/dist/.gitkeep /src/internal/web/dist/.gitkeep
+# `mkdir`, not `COPY internal/web/dist/.gitkeep ...`. That COPY named a single
+# file surfaced only via a `.dockerignore` negation
+# (`internal/web/dist/* ` / `!internal/web/dist/.gitkeep`), and under a
+# multi-platform buildx build (linux/amd64,linux/arm64 built in one
+# invocation) it failed intermittently with "not found" on a file that
+# genuinely exists in the repo - a context-snapshot race between the parallel
+# platform builds, not a real absence. Reproduced in the Release workflow
+# 2026-08-07: same commit, same digest-pinned base image, failed on this exact
+# COPY while a sibling platform's identical step was mid-flight and got
+# CANCELED. Vite creates outDir itself (emptyOutDir: true), so the directory
+# never needed to pre-exist for `npm run build` to work; this line was only
+# ever fragile insurance, not a requirement. mkdir has no build-context
+# dependency at all, so there is nothing left for a parallel platform build to
+# race over.
+RUN mkdir -p /src/internal/web/dist
 RUN npm run build \
     && npm cache clean --force \
     && rm -rf /root/.npm /src/web/node_modules
