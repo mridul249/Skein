@@ -51,10 +51,7 @@ RUN addgroup -g 10001 -S skein \
 
 COPY --from=gobuild /out/skein /usr/local/bin/skein
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-# Strip CR before chmod. .gitattributes is the real fix; this survives a clone
-# where the user's core.autocrlf overrides it. A CRLF shebang makes the kernel
-# hunt for `/bin/sh\r` and Docker reports "no such file or directory" naming
-# the SCRIPT, not the missing interpreter.
+
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
     && chmod 0755 /usr/local/bin/skein /usr/local/bin/docker-entrypoint.sh
 
@@ -90,11 +87,7 @@ COPY . .
 COPY --from=frontend /src/internal/web/dist /src/internal/web/dist
 
 ARG VERSION=docker
-# Optional: compile OAuth credentials into the binary. A build ARG is visible
-# in image history, so this is for someone building their own private binary,
-# not for a published one. Leave both empty and the app reads
-# SKEIN_GOOGLE_DESKTOP_CLIENT_ID/_SECRET from the environment at run time,
-# which is the normal path.
+
 ARG DESKTOP_CLIENT_ID=""
 ARG DESKTOP_CLIENT_SECRET=""
 
@@ -109,3 +102,33 @@ RUN cd cmd/skein-desktop \
 
 FROM scratch AS desktop
 COPY --from=desktopbuild /out/skein-desktop /skein-desktop
+
+# desktop-windows: build only, cross-compiled from Linux, no CGO
+
+FROM golang:1.26-alpine AS desktopbuild-windows
+
+RUN apk add --no-cache git
+
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY third_party/ ./third_party/
+RUN go mod download
+COPY . .
+COPY --from=frontend /src/internal/web/dist /src/internal/web/dist
+
+ARG VERSION=docker
+ARG DESKTOP_CLIENT_ID=""
+ARG DESKTOP_CLIENT_SECRET=""
+
+RUN CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+    go build \
+      -tags desktop \
+      -trimpath \
+      -buildvcs=false \
+      -ldflags "-s -w -H=windowsgui -X main.version=${VERSION} -X main.desktopClientID=${DESKTOP_CLIENT_ID} -X main.desktopClientSecret=${DESKTOP_CLIENT_SECRET}" \
+      -o /out/skein-desktop.exe \
+      ./cmd/skein-desktop \
+    && go clean -cache -modcache -testcache
+
+FROM scratch AS desktop-windows
+COPY --from=desktopbuild-windows /out/skein-desktop.exe /skein-desktop.exe
