@@ -106,7 +106,18 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # 22, NOT 20, and the browser harness is why.
+          #
+          # tests/browser/chrome.mjs drives Chrome over CDP using the WebSocket
+          # client BUILT INTO Node - it deliberately has no ws dependency. That
+          # global landed in Node 22: on 20 it is `undefined`, and all 31
+          # browser tests fail with `ReferenceError: WebSocket is not defined`.
+          #
+          # This was invisible until 2026-08-07 because the harness never got
+          # that far - it timed out waiting for Vite on an address Vite had not
+          # bound, and failed before any test ran. Fixing the address exposed
+          # the version mismatch underneath it. Two bugs, stacked.
+          node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
