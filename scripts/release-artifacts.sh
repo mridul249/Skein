@@ -2,6 +2,15 @@
 #
 # Build the release binaries and the checksum file that covers them.
 #
+# WHY THIS IS A SCRIPT AND NOT WORKFLOW YAML. The release must be runnable
+# locally — to reproduce what CI published, or to cut a release when CI is
+# unavailable — and logic that lives only in a workflow can be neither run nor
+# tested. The workflow calls this; it does not reimplement it.
+#
+# THE INVARIANT THIS EXISTS TO ENFORCE: every published artifact appears in
+# SHA256SUMS, and the script fails if any does not. A checksum file that
+# sometimes omits a binary is worse than none, because it teaches people that
+# skipping the check is normal.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -21,8 +30,34 @@ VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo de
 # The server platforms a v1 publishes. Each entry is GOOS/GOARCH.
 PLATFORMS=${PLATFORMS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"}
 
+# The Windows DESKTOP binary is built separately, below, because it differs from
+# the server builds in package, in linker flags, and in what it is claiming.
+#
+# The earlier note here said Windows "needs its own path handling for the config
+# directory". That was investigated and found to be wrong: nothing hardcodes
+# ~/.config. internal/db/migrate.go already calls os.UserConfigDir(), which
+# returns %AppData% on Windows, and the download directory falls back through
+# os.UserHomeDir(). The real question was whether the vendored Wails fork's
+# RunWithStartURL patch covers the Windows backend, and it does — the Windows
+# frontend reads the "starturl" context key and returns before the asset server
+# is ever constructed, leaving f.assets nil so WebView2 handles every request as
+# real HTTP. Same property as Linux, reached by an early return instead of an
+# if/else. See third_party/wails-v2.13.0/PATCH.md.
 BUILD_WINDOWS_DESKTOP=${BUILD_WINDOWS_DESKTOP:-1}
 
+# THE FRONTEND MUST ALREADY BE BUILT before any go build below runs.
+# internal/web/embed.go does `//go:embed all:dist`, which captures
+# internal/web/dist byte-for-byte at compile time; a fresh checkout carries
+# nothing there but the tracked .gitkeep (.gitignore excludes the rest).
+# embed.go's own Handler() treats an unbuilt dist as a legitimate state ON
+# PURPOSE — "a binary built without running the frontend build still starts and
+# serves the API" — which is right for a plain `go build` during development and
+# wrong for a release artifact: it produces a binary that builds cleanly,
+# launches, and answers every UI request with {"error":"not_found"} until
+# someone actually clicks around in it. CI (release.yml) and the Docker desktop
+# stage both build the frontend before this script runs; this check exists so a
+# UI-less binary cannot ship BECAUSE the script was run standalone, or with that
+# upstream step skipped, without anyone noticing until a user did.
 if [ ! -f internal/web/dist/index.html ]; then
   echo "ERROR: internal/web/dist/index.html is missing." >&2
   echo "       internal/web/dist is unbuilt (only .gitkeep is tracked), so" >&2
@@ -42,6 +77,28 @@ for platform in $PLATFORMS; do
   goos=${platform%%/*}
   goarch=${platform##*/}
   name="skein-${VERSION}-${goos}-${goarch}"
+
+  # -trimpath and -buildvcs=false are what make two builds of one commit
+  # byte-identical: trimpath removes the build directory from the binary, and
+  # buildvcs=false stops Go stamping vcs.modified, which differs between a clean
+  # checkout and a dirty working tree. Verified 2026-08-06: two clean clones at
+  # different paths produced identical SHA256s.
+  #
+  # THAT GUARANTEE ALSO REQUIRES AN LF CHECKOUT, which no Go flag controls. The
+  # embedded frontend is compiled from web/src, and a tree checked out with CRLF
+  # feeds different bytes to vite: CRs inside multi-line template literals
+  # survive minification as \r escapes, changing the JS bundle hash and so every
+  # binary embedding it. .gitattributes pins eol=lf, but it landed in 65315b3
+  # and git does not renormalise a tree checked out before it — and the
+  # attribute normalises on read, so `git status` stays clean while the bytes on
+  # disk are CRLF. Diagnosed 2026-08-11, when a local rebuild of v1.0.0-rc1
+  # differed from the published binaries on identical source and an identical
+  # toolchain. If a rebuild does not match, check line endings before suspecting
+  # the compiler.
+  #
+  # CGO_ENABLED=0 for a static binary with no glibc version floor. The desktop
+  # build needs cgo and is not cross-compiled here; it is built on its own
+  # platform, by `make desktop`.
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
     -trimpath \
     -buildvcs=false \
@@ -53,6 +110,34 @@ for platform in $PLATFORMS; do
 done
 
 # ---- Windows desktop --------------------------------------------------------
+#
+# Not part of the PLATFORMS loop: that loop builds ./cmd/skein, the headless
+# server, and this is ./cmd/skein-desktop, the windowed app. It also needs
+# -H=windowsgui, which is meaningless for the others.
+#
+# NO CGO AND NO WAILS CLI, unlike the Linux desktop build. Linux needs cgo to
+# link WebKitGTK, which is why `make desktop` shells out to the wails binary and
+# cannot cross-compile. Windows drives WebView2 through COM, which Go reaches
+# with pure syscall bindings, so a plain `go build` with CGO_ENABLED=0 produces
+# a complete binary from a Linux host with no MinGW and no Windows machine.
+#
+# -tags desktop,production: `production` IS NOT OPTIONAL, and omitting it fails
+# at run time rather than at build time. Wails splits CreateApp() by build tag —
+# third_party/wails-v2.13.0/internal/app/app_default_windows.go carries
+# `!dev && !production && !bindings` and its whole body is a MessageBox reading
+# "Wails applications will not build without the correct build tags", followed
+# by `return nil, nil`. The real implementation is app_production.go, gated on
+# `production` alone. `wails build` never trips this because it appends the tag
+# itself (pkg/commands/build/base.go:225, defaulted at cmd/wails/flags/build.go:80);
+# a bare `go build` does not, and links the stub instead. That shipped in
+# v1.0.0-rc1: the published Windows exe showed the dialog and exited for every
+# user, on every launch, until this was found on 2026-08-11.
+#
+# app_default_unix.go carries the identical guard for linux/darwin, so this is
+# not a Windows problem — it is what happens when the Wails CLI is bypassed, and
+# Linux is exempt only because `make desktop` goes through it. THE STANDING
+# CONSEQUENCE: any requirement the CLI injects automatically has to be tracked
+# by hand here. Check base.go's buildCommands() before changing these flags.
 if [ "$BUILD_WINDOWS_DESKTOP" = "1" ]; then
   name="skein-desktop-${VERSION}-windows-amd64.exe"
 
@@ -68,6 +153,16 @@ if [ "$BUILD_WINDOWS_DESKTOP" = "1" ]; then
     -ldflags "-s -w -H=windowsgui -X main.version=${VERSION}" \
     -o "$OUT/$name" \
     ./cmd/skein-desktop
+
+  # THE FLAG IS VERIFIED, NOT ASSUMED. A typo in the -ldflags string, or a Go
+  # release that stops honouring -H, would silently give back the console
+  # window: the build still succeeds and the binary still runs, so nothing
+  # fails until a user sees a stray terminal. Read the actual byte.
+  #
+  # PE layout: e_lfanew is a uint32 at 0x3C and points at "PE\0\0"; the COFF
+  # header is 20 bytes; Subsystem is a uint16 at offset 68 of the optional
+  # header, which is the same offset for PE32 and PE32+ (the two formats
+  # diverge only after it).
   subsystem=$(od -An -tu2 -j "$(( $(od -An -tu4 -j 60 -N 4 "$OUT/$name" | tr -d ' ') + 24 + 68 ))" \
     -N 2 "$OUT/$name" | tr -d ' ')
   if [ "$subsystem" != "2" ]; then
