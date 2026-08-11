@@ -12,18 +12,20 @@ file covers the shape, that one covers the reasoning that produced it.
 |---|---|
 | Language | Go 1.25 |
 | Router | `chi/v5` |
-| Database | PostgreSQL (`pgx/v5`) |
+| Database | PostgreSQL (`pgx/v5`) for the server; SQLite for the desktop build |
 | Queries | `sqlc` - generated, no ORM, no hidden N+1 |
 | Migrations | `goose`, embedded in the binary, run automatically on boot |
 | Frontend | React 18 + Vite + TypeScript + Tailwind, embedded via `//go:embed` |
 | Desktop shell | Wails v2, a small local fork - see below |
 
-**SQLite is deferred, not rejected.** It would remove the last external
-dependency for a self-hoster, but the quota reservation scheme relies on
-row-level locking semantics (`SELECT … FOR UPDATE` / atomic conditional
-`UPDATE`) that need re-verification under SQLite's single-writer model. It
-is gated on an owner-written rewrite of `internal/router/reserve.go` and
-`plan.go`.
+**SQLite ships, and it is what the desktop build uses.** It removes the last
+external dependency for a self-hoster: `skein-desktop` needs no Postgres and
+leaves `SKEIN_DATABASE_URL` optional (`config.LoadDesktop`). The concern that
+delayed it was real - the quota reservation scheme depends on an atomic
+conditional `UPDATE`, and SQLite's single-writer model needed re-verifying
+rather than assuming. That verification is now the `storeconformance` suites,
+which run the same tests against both backends, plus a SQLite pool bounded to
+one connection so writes queue instead of racing.
 
 ## Two binaries, one server
 
@@ -37,9 +39,12 @@ and the HTTP handler once; both binaries call it, differing only in how
 they open a listener and what triggers shutdown. `cmd/skein` reacts to
 `SIGTERM`/`SIGINT`; `cmd/skein-desktop` reacts to the window closing.
 
-**Both talk to PostgreSQL.** The desktop build does not embed SQLite or any
-other local database - see the SQLite note above for why, and
-[INSTALL.md](INSTALL.md) for what that means for setup.
+**They differ in storage.** `cmd/skein` talks to PostgreSQL and requires
+`SKEIN_DATABASE_URL`; `cmd/skein-desktop` calls `app.WithSQLiteDatabase` and
+keeps a local SQLite file, so a desktop user installs no database at all. Both
+reach it through the same generated query layer - `internal/db/gen` for
+Postgres, `internal/db/gensqlite` for SQLite - behind one set of interfaces,
+which is what lets the conformance suites hold the two to identical behaviour.
 
 ### Desktop: a real HTTP origin, not a custom scheme
 
@@ -163,9 +168,9 @@ Reserved atomically in one statement, never read-then-write:
 ```sql
 UPDATE storage_accounts
    SET reserved_bytes = reserved_bytes + $1
- WHERE id = $2
+ WHERE connected_account_id = $2
    AND (total_bytes - used_bytes - reserved_bytes) >= $1
-RETURNING id;
+RETURNING connected_account_id, total_bytes, used_bytes, reserved_bytes;
 ```
 
 Zero rows returned means another concurrent reservation already claimed the
@@ -220,10 +225,13 @@ object's integrity without downloading and decrypting it first.
 
 ### Recovery
 
-**Status: manifests written, reconstruction not built.** Every upload writes
-an encrypted `.skein_manifest_<file_id>.enc` beside its shards, carrying the
-file's name, size, folder path and the full per-shard layout (index, offset,
-both sizes, digest, provider object id).
+**Status: both halves built.** Every upload writes an encrypted
+`.skein_manifest_<file_id>.enc` beside its shards, carrying the file's name,
+size, folder path and the full per-shard layout (index, offset, both sizes,
+digest, provider object id) - and `POST /api/system/reconstruct` rebuilds
+`folders`/`files`/`file_shards` from those manifests alone. Verified by
+destroying a database and recovering the library byte-for-byte from Drive with
+no backup file involved; see [SETUP.md](SETUP.md) §7.
 
 **One copy per account holding a shard, not one copy total.** A single-copy
 scheme means losing that one account loses the map to every other account, so
@@ -236,20 +244,23 @@ letting it break the primary path would mean a user cannot store a file
 because the thing protecting them from losing files did not work. Failures
 are logged and the file stays committed and readable.
 
-The command that rebuilds `folders`/`files`/`file_shards` from those manifests
-is the remaining half and is **not implemented**, so the database is still the
-operative record today. What has changed is that the information needed to
-rebuild it now lives durably on the drives. **Manifests address losing the
-DATABASE, never losing the KEY** - they are encrypted under a key derived from
-the same master key. See [BACKUP.md](BACKUP.md).
+Reconstruction is **additive only**: it inserts files and shards it can prove
+from a manifest and never deletes, so running it against a partially intact
+database repairs rather than truncates. It scans every drive the user has
+connected, including ones connected after the loss, so shards that moved
+between accounts are still found. **Manifests address losing the DATABASE,
+never losing the KEY** - they are encrypted under a key derived from the same
+master key, so the key file remains the one thing with no redundancy anywhere.
+See [BACKUP.md](BACKUP.md).
 
 ### Current tables
 
-`users`, `sessions`, `security_events` · `connected_accounts`,
-`storage_accounts`, `oauth_states` (carries `pkce_verifier`, nullable, for
-the desktop flow) · `folders`, `files`, `file_shards` · `quota_reservations`,
-`uploads` (schema exists, not yet read by any code path - resumable upload
-is not built).
+`users`, `sessions`, `security_events` · `connected_accounts` (the drive and
+its OAuth tokens), `storage_accounts` (that drive's byte counters, keyed by
+`connected_account_id`), `oauth_states` (carries `pkce_verifier`, nullable,
+for the desktop flow) · `folders`, `files`, `file_shards` ·
+`quota_reservations`, `uploads` (schema exists, not yet read by any code path
+- resumable upload is not built).
 
 **Not built:** `share_links` (no public share-link feature exists yet,
 despite it appearing in early design sketches).
@@ -259,7 +270,7 @@ despite it appearing in early design sketches).
 ```
 POST   /api/auth/register            POST   /api/auth/login
 POST   /api/auth/refresh             POST   /api/auth/logout
-GET    /api/auth/me
+GET    /api/auth/me                  POST   /api/auth/change-password
 
 GET    /api/accounts                 POST   /api/accounts/google/connect
 GET    /api/accounts/google/callback (server build only - see below)
@@ -270,13 +281,29 @@ POST   /api/uploads                  # single-shot streaming, multipart
 GET    /api/files                    GET    /api/files/{id}
 PATCH  /api/files/{id}                DELETE /api/files/{id}?permanent=true
 POST   /api/files/{id}/restore       GET    /api/trash
+POST   /api/files/bulk-delete        POST   /api/trash/empty
+DELETE /api/files/{id}/damaged
 POST   /api/files/{id}/content-url   # mints a short-lived capability URL
 GET,HEAD /api/files/{id}/content     # Range-capable; bearer OR capability URL
 
 GET,POST     /api/folders
 PATCH,DELETE /api/folders/{id}
 
+GET    /api/system/recovery          GET    /api/system/manifests/coverage
+GET    /api/system/backup            GET    /api/system/key-export
+POST   /api/system/manifests/backfill
+POST   /api/system/reconcile         POST   /api/system/reconstruct
+
 GET    /healthz                      GET    /readyz
+```
+
+Desktop build only, absent from `skein serve` entirely:
+
+```
+GET    /api/desktop/capabilities
+POST   /api/desktop/downloads        GET    /api/desktop/downloads
+DELETE /api/desktop/downloads/{id}
+GET    /api/desktop/downloads/{id}/events   # SSE progress stream
 ```
 
 `POST /api/accounts/google/connect` behaves differently by build.
