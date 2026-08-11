@@ -25,10 +25,17 @@ database rows.
 > other, and storing both halves together converts two independent risks into
 > one.
 
-Rebuilding the database from those manifests is the next piece of work and
-is not built yet, so **restoring from `make backup` remains the procedure
-today**. What has changed is that the information needed to rebuild is now
-durably on the drives rather than existing only in the database.
+Rebuilding the database from those manifests **is built**:
+`POST /api/system/reconstruct` scans every connected drive, reads the
+manifests it finds, and reinserts `folders`/`files`/`file_shards`. It has been
+exercised against a deliberately destroyed database and recovered the library
+byte-for-byte from Drive alone, with no backup file involved.
+
+`make backup` is still worth doing, and this page still recommends it: a
+restore is faster than a reconstruct, it recovers rows that manifests do not
+carry (users, sessions, security events), and depending on a recovery path you
+have never rehearsed is how people discover it does not work. But losing the
+database is no longer unrecoverable without it.
 
 ## What to back up
 
@@ -126,7 +133,7 @@ Be clear-eyed about the boundaries:
 
 | Lost | Recoverable? |
 |---|---|
-| The database, key file survives | **Not automatically yet, but the information survives.** Sidecar manifests on the drives now carry the full shard-to-file mapping; the command that rebuilds the database from them is not built yet, so restore from `make backup` today. Note a restored database carries its recorded key ID with it, so the startup check keeps working across a restore. |
+| The database, key file survives | **Yes, two ways.** Restore from `make backup` if you have one - fastest, and it recovers users and sessions too. Otherwise `POST /api/system/reconstruct` rebuilds files, folders and shard layout from the sidecar manifests on the drives, with no backup at all. Reconstruction is additive, so it repairs a partial database rather than replacing it. A restored database carries its recorded key ID, so the startup check keeps working across a restore. |
 | The key, database survives | **No. Permanently.** Every shard is unreadable, **and so is every sidecar manifest** - they are encrypted under a key derived from the same master key, so they add no recovery path here. There is no vendor, no support path and no backdoor - this is the design working as intended. |
 | Both | No. |
 | One drive of several | Yes, if the file was striped across others *and* you have the key and database - but any file with a shard on the lost drive is incomplete. See `POST /api/system/reconcile`. |
