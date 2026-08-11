@@ -274,6 +274,37 @@ a cross-toolchain and the macOS SDK, neither of which Docker on a non-macOS
 host can supply. Build from source with `make desktop` on a Mac - see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
+### Running a downloaded binary
+
+**The binaries do not read `.env`.** Only `make run` and `docker compose` do.
+A release binary started on its own exits immediately with
+`required environment variable "SKEIN_MASTER_KEY" is not set`, which is the
+configuration loader working, not a broken download. Load the file into the
+environment first.
+
+Linux and macOS:
+
+```bash
+set -a && source .env && set +a && ./skein
+```
+
+Windows PowerShell, which has neither `set -a` nor `source`:
+
+```powershell
+Get-Content .env | Where-Object { $_ -match '^\s*[^#\s]' } | ForEach-Object {
+    $name, $value = $_ -split '=', 2
+    [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim())
+}
+.\skein.exe
+```
+
+Both set the variables for the current session only. The desktop app is
+different again: it reads no `.env` on any platform, taking
+`SKEIN_GOOGLE_DESKTOP_CLIENT_ID` and `_SECRET` from the environment or from
+credentials compiled in at build time.
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) covers the `cmd.exe` form
+and how to make them persist across reboots.
+
 ### Running from source
 
 Building without Docker, running the test suites, and the `make` targets are
