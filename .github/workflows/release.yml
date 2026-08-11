@@ -208,24 +208,23 @@ jobs:
           fail_on_unmatched_files: true
           # Prepended above the auto-generated commit list.
           #
-          # THE WINDOWS CAVEAT IS HERE RATHER THAN ONLY IN THE README because
-          # this is what someone reads immediately before downloading. A binary
-          # published beside tested ones, in a list that does not distinguish
-          # them, implies a parity it does not have. Remove this block once the
-          # Windows binary has actually been run on Windows - and not before.
+          # PLATFORM SUPPORT IS STATED HERE RATHER THAN ONLY IN THE README
+          # because this is what someone reads immediately before downloading.
+          # Keep it accurate about which platforms were actually RUN, not which
+          # ones merely compiled - the whole point of the block is that binaries
+          # published side by side do not automatically have parity.
           body: |
             > ### Platform support
             >
             > **Linux** binaries and the Docker image are tested.
             >
-            > **`skein-desktop-*-windows-amd64.exe` is cross-compiled from
-            > Linux and has NOT been run on Windows.** The code paths were
-            > reviewed and the build is verified GUI-subsystem and
-            > reproducible, but reviewed is not tested. Treat it as a preview;
-            > please report what breaks. Windows 10 additionally needs the
-            > [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/),
-            > and SmartScreen will warn because the binary is unsigned - verify
-            > the SHA256 against `SHA256SUMS` before clicking through.
+            > **Windows 11** is tested: `skein-desktop-*-windows-amd64.exe` is
+            > cross-compiled from Linux, verified GUI-subsystem, and has been
+            > run. **Windows 10 is not tested** and needs the
+            > [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+            > installed separately. SmartScreen and Defender will both warn,
+            > because the binary is unsigned - verify the SHA256 against
+            > `SHA256SUMS` before clicking through.
             >
             > **macOS** has no desktop binary; build it with `make desktop`.
 

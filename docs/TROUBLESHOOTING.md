@@ -146,9 +146,17 @@ openssl rand -base64 48   # SKEIN_JWT_SECRET
 
 ## Windows desktop app
 
-The Windows binary is cross-compiled from Linux and, as of v1.0.0-rc1, has not
-been run on Windows. If you hit something not listed here, it is worth
+The Windows binary is cross-compiled from Linux and tested on Windows 11.
+Windows 10 is not tested. If you hit something not listed here, it is worth
 reporting rather than assuming it is your setup.
+
+### The v1.0.0-rc1 binary opens a Wails error dialog and exits
+
+"Wails applications will not build without the correct build tags." That build
+was made without the `production` build tag, so it linked Wails' own guard stub
+instead of the application. It failed this way for every user on every launch -
+there is no workaround and nothing wrong with your setup. Download v1.0.0-rc2
+or later.
 
 ### Nothing happens, or "WebView2 Runtime not installed"
 

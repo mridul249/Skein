@@ -115,7 +115,7 @@ $ skein status
 
 ### Interface & UX
 
-* **Native Desktop App:** A real windowed application via Wails, not a browser tab - the same Go server running inside a native window, pointed at its own loopback port. Linux is the tested platform; a Windows binary ships as an untested preview (see [Desktop app](#desktop-app)). It uses the OS's native webview (WebKitGTK on Linux, WebView2 on Windows) rather than bundling a browser engine, so the download stays around 20 MB.
+* **Native Desktop App:** A real windowed application via Wails, not a browser tab - the same Go server running inside a native window, pointed at its own loopback port. Linux and Windows 11 are both tested (see [Desktop app](#desktop-app)). It uses the OS's native webview (WebKitGTK on Linux, WebView2 on Windows) rather than bundling a browser engine, so the download stays around 20 MB.
 
 * **Embedded React Web UI:** Prefer the browser? Skein serves a sleek, modern web interface directly from the binary itself, complete with a beautiful frontend and real-time state management.
 
@@ -234,13 +234,19 @@ Both paths produce the same binary from the same source and flags - building
 it yourself is not a lesser option, just a different way to reach an identical
 file.
 
-> **Cross-compiled and untested.** This binary is built on Linux and has not
-> been run on Windows. The code paths were reviewed - the config directory
-> resolves through `os.UserConfigDir()` to `%AppData%\skein\`, downloads go to
-> `%USERPROFILE%\Downloads`, and the WebView2 path in the vendored Wails fork
-> is the same one Linux uses - but reviewed is not tested. Treat it as a
-> preview and please report what breaks. The Linux and macOS binaries have been
-> run; this one has not.
+> **Cross-compiled on Linux, tested on Windows 11.** The binary launches, the
+> config directory resolves through `os.UserConfigDir()` to `%AppData%\skein\`,
+> downloads go to `%USERPROFILE%\Downloads`, and the WebView2 path in the
+> vendored Wails fork is the same one Linux uses. Windows 10 is not tested and
+> needs the WebView2 runtime installed separately. Both SmartScreen and
+> Defender will flag an unsigned binary from the internet - **verify the SHA256
+> against `SHA256SUMS` before clicking through**, which is the check that
+> actually tells you something.
+>
+> Versions before v1.0.0-rc2 did not run at all: rc1 shipped a Windows exe
+> built without the `production` build tag, so it opened a Wails error dialog
+> and exited on every launch, for every user. If you have that file, replace
+> it.
 
 Two things Windows will say that are not faults:
 
@@ -319,7 +325,23 @@ The trade is that verification needs `cosign` and network access, so
 different paths, produce byte-identical binaries - verified 2026-08-06. This is
 what `-trimpath` and `-buildvcs=false` in `scripts/release-artifacts.sh` are
 for: without the latter, Go stamps `vcs.modified`, which differs between a
-clean checkout and a dirty working tree. You can rebuild a tag yourself with
+clean checkout and a dirty working tree.
+
+**This requires an LF checkout**, which is not something a Go flag can enforce.
+The frontend is compiled from `web/src` and embedded in the binary, so a tree
+checked out with CRLF feeds different bytes to Vite: carriage returns inside
+multi-line template literals survive minification as `\r` escapes, changing the
+JS bundle and therefore every binary containing it. `.gitattributes` pins
+`eol=lf`, but Git does not renormalise a working tree that was checked out
+before that file landed, and the attribute normalises on read - so `git status`
+reports clean while the bytes on disk are CRLF. If your rebuild does not match
+the published checksum, check line endings before suspecting the compiler:
+
+```bash
+file web/src/main.tsx        # should NOT say "CRLF line terminators"
+```
+
+You can rebuild a tag yourself with
 `make release` and compare against the published `SHA256SUMS`.
 
 ---
@@ -335,7 +357,7 @@ Deliberately out of scope, so nobody files them as bugs.
 | **Removing a drive that still holds files** | Disconnect refuses and names the files instead. A file striped across two drives is destroyed by removing one, so cascading the delete would let "unlink an account" destroy data on a drive you did not touch. A deliberate remove-with-files needs its own confirmation naming the exact files, and is v2. |
 | **Renaming or moving folders** | Manifests record the folder path as a snapshot of names, so a folder renamed after some files were uploaded reconstructs as two folders during recovery - contents split across both. Nothing is lost, but it appears at the moment you are least able to tolerate ambiguity. Correctness needs manifest staleness tracking, which is v2. |
 | **Scheduled reconcile** | On-demand only. `reconciled_at` records when each file was last checked. |
-| **A tested Windows desktop app** | The binary is published and the code paths were reviewed, but it is cross-compiled and has not been run on Windows. Until it has, treat it as a preview: bugs there are expected and wanted, not a supported platform. macOS has no desktop binary at all - build it from source with `make desktop`. |
+| **A macOS desktop binary** | None is published: the desktop build needs cgo and cannot be cross-compiled, so it is built on the platform it targets - `make desktop`. Windows and Linux desktop binaries are published and tested; Windows 10 specifically is not, only Windows 11. |
 
 Known smaller gaps are tracked in the issue register. The top polish item for
 v1.1 is the account colour ramp, which collides with the semantic colours under
