@@ -2,15 +2,6 @@
 #
 # Build the release binaries and the checksum file that covers them.
 #
-# WHY THIS IS A SCRIPT AND NOT WORKFLOW YAML. The release must be runnable
-# locally — to reproduce what CI published, or to cut a release when CI is
-# unavailable — and logic that lives only in a workflow can be neither run nor
-# tested. The workflow calls this; it does not reimplement it.
-#
-# THE INVARIANT THIS EXISTS TO ENFORCE: every published artifact appears in
-# SHA256SUMS, and the script fails if any does not. A checksum file that
-# sometimes omits a binary is worse than none, because it teaches people that
-# skipping the check is normal.
 set -euo pipefail
 
 OUT=${OUT:-dist}
@@ -19,44 +10,27 @@ VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo de
 # The server platforms a v1 publishes. Each entry is GOOS/GOARCH.
 PLATFORMS=${PLATFORMS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"}
 
-# The Windows DESKTOP binary is built separately, below, because it differs from
-# the server builds in package, in linker flags, and in what it is claiming.
-#
-# The earlier note here said Windows "needs its own path handling for the config
-# directory". That was investigated and found to be wrong: nothing hardcodes
-# ~/.config. internal/db/migrate.go already calls os.UserConfigDir(), which
-# returns %AppData% on Windows, and the download directory falls back through
-# os.UserHomeDir(). The real question was whether the vendored Wails fork's
-# RunWithStartURL patch covers the Windows backend, and it does — the Windows
-# frontend reads the "starturl" context key and returns before the asset server
-# is ever constructed, leaving f.assets nil so WebView2 handles every request as
-# real HTTP. Same property as Linux, reached by an early return instead of an
-# if/else. See third_party/wails-v2.13.0/PATCH.md.
-#
-# WHAT IS STILL TRUE: this binary is cross-compiled from Linux and has not been
-# run on Windows. It is published as untested for that reason, and the release
-# notes must say so rather than implying parity with the Linux builds.
 BUILD_WINDOWS_DESKTOP=${BUILD_WINDOWS_DESKTOP:-1}
+
+if [ ! -f internal/web/dist/index.html ]; then
+  echo "ERROR: internal/web/dist/index.html is missing." >&2
+  echo "       internal/web/dist is unbuilt (only .gitkeep is tracked), so" >&2
+  echo "       go:embed would ship a binary with no UI - it would build and" >&2
+  echo "       run, and 404 on every page." >&2
+  echo "       Run 'cd web && npm ci && npm run build' (or 'make web') first." >&2
+  exit 1
+fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
 echo "building $VERSION"
+echo "  internal/web/dist/index.html present - frontend is built"
 
 for platform in $PLATFORMS; do
   goos=${platform%%/*}
   goarch=${platform##*/}
   name="skein-${VERSION}-${goos}-${goarch}"
-
-  # -trimpath and -buildvcs=false are what make two builds of one commit
-  # byte-identical: trimpath removes the build directory from the binary, and
-  # buildvcs=false stops Go stamping vcs.modified, which differs between a
-  # clean checkout and a dirty working tree. Verified 2026-08-06: two clean
-  # clones at different paths produced identical SHA256s.
-  #
-  # CGO_ENABLED=0 for a static binary with no glibc version floor. The desktop
-  # build needs cgo and is not cross-compiled here; it is built on its own
-  # platform, by `make desktop`.
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
     -trimpath \
     -buildvcs=false \
@@ -68,16 +42,6 @@ for platform in $PLATFORMS; do
 done
 
 # ---- Windows desktop --------------------------------------------------------
-#
-# Not part of the PLATFORMS loop: that loop builds ./cmd/skein, the headless
-# server, and this is ./cmd/skein-desktop, the windowed app. It also needs
-# -H=windowsgui, which is meaningless for the others.
-#
-# NO CGO AND NO WAILS CLI, unlike the Linux desktop build. Linux needs cgo to
-# link WebKitGTK, which is why `make desktop` shells out to the wails binary and
-# cannot cross-compile. Windows drives WebView2 through COM, which Go reaches
-# with pure syscall bindings, so a plain `go build` with CGO_ENABLED=0 produces
-# a complete binary from a Linux host with no MinGW and no Windows machine.
 if [ "$BUILD_WINDOWS_DESKTOP" = "1" ]; then
   name="skein-desktop-${VERSION}-windows-amd64.exe"
 
@@ -89,20 +53,10 @@ if [ "$BUILD_WINDOWS_DESKTOP" = "1" ]; then
   CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
     -trimpath \
     -buildvcs=false \
-    -tags desktop \
+    -tags desktop,production \
     -ldflags "-s -w -H=windowsgui -X main.version=${VERSION}" \
     -o "$OUT/$name" \
     ./cmd/skein-desktop
-
-  # THE FLAG IS VERIFIED, NOT ASSUMED. A typo in the -ldflags string, or a Go
-  # release that stops honouring -H, would silently give back the console
-  # window: the build still succeeds and the binary still runs, so nothing
-  # fails until a user sees a stray terminal. Read the actual byte.
-  #
-  # PE layout: e_lfanew is a uint32 at 0x3C and points at "PE\0\0"; the COFF
-  # header is 20 bytes; Subsystem is a uint16 at offset 68 of the optional
-  # header, which is the same offset for PE32 and PE32+ (the two formats
-  # diverge only after it).
   subsystem=$(od -An -tu2 -j "$(( $(od -An -tu4 -j 60 -N 4 "$OUT/$name" | tr -d ' ') + 24 + 68 ))" \
     -N 2 "$OUT/$name" | tr -d ' ')
   if [ "$subsystem" != "2" ]; then
