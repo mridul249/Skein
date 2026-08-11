@@ -5,12 +5,14 @@
 ## Prerequisites
 
 - Go 1.25+
-- Node 18+ and npm
+- Node 22+ and npm (`web/package.json` sets `engines.node >= 22`; CI pins 22.
+  Node 18 fails during `npm ci` with a syntax error from esbuild's installer,
+  which does not name the version as the cause)
 - PostgreSQL (via `make dev-db`, or your own instance)
 - `golangci-lint`, `goose`, `sqlc` - `make tools` installs the pinned
   versions
 - For desktop work: `libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev`,
-  `wails` - see [INSTALL.md](docs/INSTALL.md#desktop) for the exact commands
+  `wails` - see [INSTALL.md](INSTALL.md#desktop) for the exact commands
 
 ## First-time setup
 
@@ -128,9 +130,9 @@ adding a new target that touches the database.
 - **Every bug fix ships with a regression test in the same change.**
 - **No test depends on the network or on execution order.**
 - **Conventional Commits**, subject line only, imperative mood, under 72
-  characters: `feat|fix|refactor|test|docs|chore(scope): subject`. The
-  commit body (if any) explains *why*, not *what* - the diff already shows
-  what.
+  characters: `feat|fix|refactor|test|docs|chore(scope): subject`. No body -
+  reasoning belongs in a comment next to the code it explains, where the next
+  reader will actually find it, not in history nobody greps.
 - **Never commit a failing build.** `make lint test` before every commit.
 - Exported identifiers get doc comments starting with the identifier's own
   name. Context is always the first parameter, named `ctx`, never stored on

@@ -177,7 +177,7 @@ The binary is not code-signed. Verify the checksum first, then **More info** →
 **Run anyway**:
 
 ```powershell
-Get-FileHash .\skein-desktop-v1.0.0-rc1-windows-amd64.exe -Algorithm SHA256
+Get-FileHash .\skein-desktop-v1.0.0-rc2-windows-amd64.exe -Algorithm SHA256
 ```
 
 Compare against `SHA256SUMS` from the release. If it does not match, do not run
