@@ -106,6 +106,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # ghcr.io, LIKE EVERY OCI REGISTRY, REQUIRES A LOWERCASE REPOSITORY NAME.
+      # github.repository preserves the repo's actual casing - "mridul249/Skein"
+      # here - which buildx then rejects outright: "repository name must be
+      # lowercase". This was invisible until the run that first got past
+      # Verify, because every earlier attempt failed or was starved before
+      # reaching this step. lower() is a built-in expression function, not a
+      # shell command, so this must be computed once as a step output rather
+      # than inlined per use - GitHub Actions has no in-template way to
+      # lowercase inside a multi-line `tags:` block.
+      - name: Compute the lowercase image repository
+        id: repo
+        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       # The image carries the same -trimpath / -buildvcs=false flags as the
       # binaries, so what ships in the container is the same build.
       - name: Build and push the image
@@ -119,8 +132,8 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
           tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ steps.repo.outputs.name }}:${{ github.ref_name }}
+            ghcr.io/${{ steps.repo.outputs.name }}:latest
 
 
       # SIGN is deliberately NOT set here. The image digest is appended to
@@ -139,7 +152,7 @@ jobs:
         run: |
           printf '%s  ghcr.io/%s:%s\n' \
             "${{ steps.image.outputs.digest }}" \
-            "${{ github.repository }}" \
+            "${{ steps.repo.outputs.name }}" \
             "${{ github.ref_name }}" > dist/IMAGE_DIGEST.txt
           cat dist/IMAGE_DIGEST.txt
           cd dist && sha256sum IMAGE_DIGEST.txt >> SHA256SUMS

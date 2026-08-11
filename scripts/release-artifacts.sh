@@ -4,6 +4,17 @@
 #
 set -euo pipefail
 
+cd "$(dirname "$0")/.."
+
+# GATE ZERO: every Docker base image must be digest-pinned before anything
+# else runs. This script only builds Go binaries and touches no Dockerfile,
+# but the release AS A WHOLE also publishes a Docker image (release.yml,
+# `docker/build-push-action`), and an unpinned base image there breaks the
+# same byte-identical-rebuild guarantee this script exists to enforce for the
+# binaries. One release, one reproducibility promise - checked in one place
+# rather than trusted separately per artifact type.
+./scripts/check-pinned-images.sh
+
 OUT=${OUT:-dist}
 VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}
 
