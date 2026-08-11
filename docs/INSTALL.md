@@ -89,7 +89,9 @@ Upload your first file.
 
 ## Desktop
 
-Install dependencies.
+Install dependencies. Go 1.25+ and **Node 22+** are both required - `make
+desktop` depends on the `web` target, which runs `npm ci && npm run build` to
+produce the frontend that gets embedded.
 
 ```bash
 sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
@@ -101,6 +103,17 @@ Build.
 
 ```bash
 make desktop
+```
+
+Set your Desktop OAuth credentials. **Connect Drive fails without these** -
+the desktop build reads no `.env`, and a released binary has no client
+compiled in. [OAUTH.md](OAUTH.md#using-your-own-desktop-oauth-client) covers
+creating the client in Google Cloud Console; it must be a **Desktop
+application** client, not the Web one the server uses.
+
+```bash
+export SKEIN_GOOGLE_DESKTOP_CLIENT_ID=...apps.googleusercontent.com
+export SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET=...
 ```
 
 Run.

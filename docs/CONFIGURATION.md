@@ -32,6 +32,7 @@ build additionally reads `SKEIN_GOOGLE_DESKTOP_CLIENT_ID` and
 |---|---|---|
 | `SKEIN_MASTER_KEY` | *(required)* | Base64, must decode to exactly 32 bytes: `openssl rand -base64 32`. Every stored file's key derives from this via HKDF-SHA256. Losing it makes every file permanently unreadable - see [BACKUP.md](BACKUP.md). |
 | `SKEIN_JWT_SECRET` | *(required)* | Signs access tokens. At least 32 characters. Independent of the master key so either can rotate without the other. |
+| `SKEIN_BACKUP_TOKEN` | *(empty)* | Operator token, sent as `X-Skein-Backup-Token` and required **on top of** a session by `GET /api/system/backup`, `GET /api/system/key-export` and `POST /api/system/manifests/backfill`. The dump returns every user's file index, every connected drive and every `password_hash`, and registration is open - so anyone can mint an account and a session check alone gates nothing. Left empty the routes stay closed, answering 404 rather than 403 so an unconfigured feature looks like one that was never built. |
 
 ## Sessions
 
@@ -106,10 +107,13 @@ deliberately (§6) and is not subject to this check because it never sets
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SKEIN_GOOGLE_DESKTOP_CLIENT_ID` | *(empty; falls back to the compiled-in default)* | Overrides the Google Desktop app OAuth client id compiled into `skein-desktop` at build time, for anyone who wants their own API quota instead of Skein's shared one. Re-read on every connect attempt, so setting it takes effect without restarting the app. **Must be set together with `_SECRET`** - setting only this one is rejected rather than silently pairing your client id with the built-in secret of a different client. |
-| `SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET` | *(empty; falls back to the compiled-in default)* | The secret Google issues for the Desktop app client above. Google requires it at the token exchange even though the client is public, so it must be set whenever `_ID` is. It is **not confidential** - it ships inside the distributed binary and PKCE is what actually secures this flow; see [SECURITY.md](SECURITY.md#pkce-desktop-oauth). |
+| `SKEIN_GOOGLE_DESKTOP_CLIENT_ID` | *(empty)* | The Google Desktop app OAuth client id. A binary built with `DESKTOP_CLIENT_ID` compiles one in and this overrides it; **released binaries compile in nothing, so this is required** or connecting a drive fails. Re-read on every connect attempt, so setting it takes effect without restarting the app. **Must be set together with `_SECRET`** - setting only this one is rejected rather than silently pairing your client id with a different client's secret. |
+| `SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET` | *(empty)* | The secret Google issues for the Desktop app client above. Google requires it at the token exchange even though the client is public, so it must be set whenever `_ID` is. It is **not confidential** - PKCE is what actually secures this flow; see [SECURITY.md](SECURITY.md#pkce-desktop-oauth). |
+| `SKEIN_DOWNLOAD_DIR` | *(empty)* | Desktop only. Overrides where downloads are saved; empty uses the OS Downloads directory (`%USERPROFILE%\Downloads` on Windows, XDG elsewhere). |
 
-Not read from `.env.example` by default; export it in your shell or launch
-`skein-desktop` with it set if you want your own client.
+Neither desktop OAuth variable is read from `.env` - the desktop build reads
+no `.env` at all. Export them in your shell, or set them through System
+Properties → Environment Variables on Windows to persist across reboots.
+[OAUTH.md](OAUTH.md) covers creating the client.
 
 </samp>

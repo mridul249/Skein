@@ -23,7 +23,20 @@ Skein has two different OAuth flows depending on how it is run.
 | Build | OAuth client | Setup |
 |--------|--------------|-------|
 | `skein` (server) | Your own **Web application** client | Required |
-| `skein-desktop` | Built-in **Desktop application** client | Works out of the box |
+| `skein-desktop` | Your own **Desktop application** client | Required for released binaries |
+
+**Released binaries ship with no credentials compiled in.** The build accepts
+them as `-ldflags` values, but the published release does not set them - it is
+built from a public workflow, and a client secret baked in there would be a
+secret published in build logs. Verified against
+`skein-desktop-v1.0.0-rc2-windows-amd64.exe`: it contains no client id at all.
+
+So on a downloaded desktop binary you must supply
+`SKEIN_GOOGLE_DESKTOP_CLIENT_ID` and `SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET`
+yourself, or connecting a drive fails with
+`No Google client secret is configured`. That error is this requirement, not a
+bug. See [Using your own Desktop OAuth client](#using-your-own-desktop-oauth-client)
+below - for a released binary it is the only path, not an alternative one.
 
 ---
 
@@ -134,9 +147,23 @@ Once complete, the drive becomes available immediately.
 The desktop application uses Google's **Desktop application** OAuth flow
 (RFC 8252).
 
-Unlike the server build, **no Google Cloud Console setup is required**.
+**Set your credentials first.** A released binary has none compiled in, so
+connect will fail without these:
 
-Choose:
+```bash
+export SKEIN_GOOGLE_DESKTOP_CLIENT_ID=...apps.googleusercontent.com
+export SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET=...
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:SKEIN_GOOGLE_DESKTOP_CLIENT_ID = "...apps.googleusercontent.com"
+$env:SKEIN_GOOGLE_DESKTOP_CLIENT_SECRET = "..."
+```
+
+Both are read on every connect attempt, so you can set them without
+restarting the app. Creating the client is described below. Then choose:
 
 ```
 Settings
@@ -157,10 +184,11 @@ The desktop application automatically completes the connection.
 
 # Using your own Desktop OAuth client
 
-The desktop application includes a working OAuth client by default.
+**Required for any released binary**, which ships with no credentials. It is
+optional only if you built the binary yourself and passed
+`DESKTOP_CLIENT_ID`/`DESKTOP_CLIENT_SECRET` as build arguments.
 
-If you prefer to use your own Google API quota, create a **Desktop application**
-OAuth client in Google Cloud Console.
+Create a **Desktop application** OAuth client in Google Cloud Console.
 
 Application type:
 
